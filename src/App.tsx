@@ -6,6 +6,8 @@ import { SetupScreen } from '@/components/SetupScreen'
 import { ObligationsScreen } from '@/features/obligations/ObligationsScreen'
 import { ObligationForm } from '@/features/obligations/ObligationForm'
 import { ObligationDetail } from '@/features/obligations/ObligationDetail'
+import { ProfileProvider, useProfile } from '@/features/profile/ProfileProvider'
+import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -38,7 +40,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Shell />
+        <ProfileProvider>
+          <Shell />
+        </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
   )
@@ -46,8 +50,9 @@ export default function App() {
 
 function Shell() {
   const { session, loading } = useAuth()
+  const { profile, loading: profileLoading } = useProfile()
 
-  if (loading) {
+  if (loading || (session && profileLoading)) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-bg">
         <span className="size-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
@@ -56,6 +61,10 @@ function Shell() {
   }
 
   if (!session) return <AuthScreen />
+
+  // المقدمة تسبق كل شيء ولا تُعرض إلا لمن لم يكملها.
+  // فشل جلب الملف لا يحبس المستخدم: نكمل إلى التطبيق بدل شاشة عالقة.
+  if (profile && !profile.onboarding_completed) return <OnboardingScreen />
 
   return (
     <div className="min-h-dvh bg-bg pb-8">

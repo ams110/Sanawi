@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { PartnersField } from '@/features/partners/PartnersField'
 import { PartnerSettlements } from '@/features/partners/PartnerSettlements'
 import { BridgeNotice } from '@/components/ui/BridgeNotice'
@@ -27,6 +28,7 @@ const SETTLEMENTS: PartnerSettlement[] = [
 ]
 
 export function ComponentPreview() {
+  const { t } = useTranslation()
   const [mine, setMine] = useState(50)
   const [partners, setPartners] = useState<PartnerShareDraft[]>([
     { partnerId: null, name: 'أخوي محمد', sharePercent: 50 },
@@ -35,6 +37,22 @@ export function ComponentPreview() {
   return (
     <div className="mx-auto max-w-lg space-y-6 px-5 py-6">
       <h1 className="text-lg font-bold text-brand">معاينة المكوّنات</h1>
+
+      <Section title="شاشات المقدمة">
+        <div className="space-y-4">
+          {[
+            { icon: '😰', title: t('onboarding.step1Title'), body: t('onboarding.step1Body') },
+            { icon: '🧮', title: t('onboarding.step2Title'), body: t('onboarding.step2Body') },
+            { icon: '📌', title: t('onboarding.step3Title'), body: t('onboarding.step3Body') },
+          ].map((s) => (
+            <div key={s.title} className="rounded-3xl border border-border bg-surface p-6 text-center">
+              <p className="text-5xl" aria-hidden="true">{s.icon}</p>
+              <h3 className="mt-3 text-xl font-bold text-text">{s.title}</h3>
+              <p className="mt-2 text-[15px] leading-relaxed text-text-muted">{s.body}</p>
+            </div>
+          ))}
+        </div>
+      </Section>
 
       <Section title="حقل الشركاء">
         <PartnersField
