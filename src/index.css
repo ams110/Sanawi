@@ -1,111 +1,131 @@
+@import 'tailwindcss';
+
+/* الخط محزوم مع التطبيق لا مُحمَّل من الإنترنت — يجب أن يعمل داخل APK بلا شبكة. */
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+
+  /* هوية سنوي: أخضر زيتوني + كهرماني دافئ. لا بنفسجي ولا أزرق افتراضي. */
+  --color-olive-50: #f2f6ec;
+  --color-olive-100: #e0ead3;
+  --color-olive-200: #c3d6ad;
+  --color-olive-300: #9bc47a;
+  --color-olive-400: #77a455;
+  --color-olive-500: #58853a;
+  --color-olive-600: #3f5d2e;
+  --color-olive-700: #334a26;
+  --color-olive-800: #24351b;
+  --color-olive-900: #172210;
+
+  --color-amber-warm-300: #f0be6a;
+  --color-amber-warm-400: #e8a33d;
+  --color-amber-warm-500: #d18512;
+  --color-amber-warm-600: #b8690f;
+  --color-amber-warm-700: #8f500a;
+
+  --color-brick-300: #e4705f;
+  --color-brick-500: #b23b2e;
+  --color-brick-600: #922e23;
+
+  --color-sand-50: #faf8f3;
+  --color-sand-100: #f2eee4;
+  --color-sand-200: #e5dfd0;
+  --color-sand-300: #d2c9b4;
+
+  --color-ink-500: #6b7263;
+  --color-ink-700: #3a4033;
+  --color-ink-900: #1c2117;
+
+  --color-night-900: #12150f;
+  --color-night-800: #1b1f17;
+  --color-night-700: #262b20;
+  --color-night-600: #363c2e;
+}
+
+/*
+ * طبقة دلالية فوق الألوان الخام: الواجهة تستعمل bg-surface لا bg-white،
+ * فيبقى الوضعان الفاتح والغامق منسجمين من أول يوم بدل ترقيع الغامق لاحقاً.
+ */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --color-bg: var(--color-sand-50);
+  --color-surface: #ffffff;
+  --color-surface-muted: var(--color-sand-100);
+  --color-border: var(--color-sand-200);
+  --color-text: var(--color-ink-900);
+  --color-text-muted: var(--color-ink-500);
+  --color-brand: var(--color-olive-600);
+  --color-brand-soft: var(--color-olive-100);
+  --color-accent: var(--color-amber-warm-600);
+  --color-accent-soft: #fbefd8;
+  --color-danger: var(--color-brick-500);
+  --color-danger-soft: #fbe7e3;
+}
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+.dark {
+  --color-bg: var(--color-night-900);
+  --color-surface: var(--color-night-800);
+  --color-surface-muted: var(--color-night-700);
+  --color-border: var(--color-night-600);
+  --color-text: #ecefe6;
+  --color-text-muted: #9aa392;
+  --color-brand: var(--color-olive-300);
+  --color-brand-soft: #24351b;
+  --color-accent: var(--color-amber-warm-400);
+  --color-accent-soft: #3a2c11;
+  --color-danger: var(--color-brick-300);
+  --color-danger-soft: #3a1c17;
+}
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-brand: var(--color-brand);
+  --color-brand-soft: var(--color-brand-soft);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+}
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    -webkit-text-size-adjust: 100%;
   }
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    /* أرقام إنجليزية بعرض ثابت: لا ترقص الأرقام حين تتغيّر قيمتها. */
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: 'tnum' 1, 'lnum' 1;
+    overscroll-behavior-y: none;
   }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+  /* الأرقام تبقى لاتينية واتجاهها LTR حتى داخل نص عربي. */
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+    direction: ltr;
+    unicode-bidi: isolate;
   }
-}
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+  ::selection {
+    background-color: var(--color-brand-soft);
   }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
   }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
 }
