@@ -21,13 +21,14 @@ import {
   updateObligation,
 } from './api'
 import type { ObligationTemplate } from '@/lib/db/types'
+import { useTranslation } from 'react-i18next'
 
 const RECURRENCES = [
-  { value: 12, label: 'كل سنة' },
-  { value: 6, label: 'كل 6 شهور' },
-  { value: 3, label: 'كل 3 شهور' },
-  { value: 0, label: 'مرة وحدة' },
-]
+  { value: 12, key: 'form.recurrenceYearly' },
+  { value: 6, key: 'form.recurrenceHalf' },
+  { value: 3, key: 'form.recurrenceQuarter' },
+  { value: 0, key: 'form.recurrenceOnce' },
+] as const
 
 function defaultDueDate(monthsAhead: number): string {
   const d = new Date()
@@ -40,6 +41,7 @@ export function ObligationForm() {
   const isEdit = Boolean(id && id !== 'new')
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { t } = useTranslation()
 
   const [templates, setTemplates] = useState<ObligationTemplate[]>([])
   const [showPicker, setShowPicker] = useState(!isEdit)
@@ -79,11 +81,11 @@ export function ObligationForm() {
         setSharePercent(Number(o.my_share_percent))
         setFundBalance(Number(found.balance?.my_fund_balance ?? 0))
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'ما قدرنا نجيب الالتزام'))
+      .catch((err) => setError(err instanceof Error ? err.message : t('form.loadFailed')))
 
     // حصص الشركاء تُجلب على حدة: فشلها لا يمنع تعديل بقية الحقول.
     listShares(id).then(setPartners).catch(() => setPartners([]))
-  }, [isEdit, id])
+  }, [isEdit, id, t])
 
   // المعاينة الحية: تُحسب من نفس المحرّك الذي تستعمله الشاشات، لا نسخة ثانية منه.
   const calc = useMemo(
@@ -99,14 +101,15 @@ export function ObligationForm() {
     [totalAmount, sharePercent, fundBalance, nextDueDate, recurrenceMonths],
   )
 
-  const pickTemplate = (t: ObligationTemplate) => {
-    setName(t.name_ar)
-    setCategory(t.category)
-    setRecurrenceMonths(t.default_recurrence_months)
-    setNextDueDate(defaultDueDate(t.default_recurrence_months || 12))
+  // الاسم tpl لا t: حجب دالة الترجمة داخل الدالة يعمل اليوم ويكسر عند أول سطر يترجم.
+  const pickTemplate = (tpl: ObligationTemplate) => {
+    setName(tpl.name_ar)
+    setCategory(tpl.category)
+    setRecurrenceMonths(tpl.default_recurrence_months)
+    setNextDueDate(defaultDueDate(tpl.default_recurrence_months || 12))
     // المتوسط المقترح نقطةَ بداية معقولة — يعدّلها المستخدم فوراً وهو يرى الأثر.
-    if (t.suggested_min != null && t.suggested_max != null) {
-      setTotalAmount(Math.round((Number(t.suggested_min) + Number(t.suggested_max)) / 2))
+    if (tpl.suggested_min != null && tpl.suggested_max != null) {
+      setTotalAmount(Math.round((Number(tpl.suggested_min) + Number(tpl.suggested_max)) / 2))
     }
     setShowPicker(false)
   }
@@ -151,7 +154,7 @@ export function ObligationForm() {
       }
       navigate('/obligations', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نحفظ')
+      setError(err instanceof Error ? err.message : t('form.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -173,7 +176,7 @@ export function ObligationForm() {
     <form onSubmit={submit} className="space-y-5 px-5 py-6">
       {/* المعاينة أولاً: يرى الأثر قبل أن ينزل إلى الحقول */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
-        <p className="text-sm text-text-muted">قسطك الشهري</p>
+        <p className="text-sm text-text-muted">{t('form.previewLabel')}</p>
         <p className="num mt-2 text-5xl font-bold leading-none text-brand">
           {formatMoney(calc.monthlyInstallment)}
         </p>
@@ -193,18 +196,18 @@ export function ObligationForm() {
 
       <section className="space-y-4 rounded-3xl border border-border bg-surface p-5">
         <label className="block space-y-1.5">
-          <span className="text-sm font-semibold text-text">الاسم</span>
+          <span className="text-sm font-semibold text-text">{t('form.name')}</span>
           <input
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="تأمين السيارة"
+            placeholder={t('form.namePlaceholder')}
             className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-[15px] text-text outline-none focus:border-brand"
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-semibold text-text">المبلغ الكامل</span>
+          <span className="text-sm font-semibold text-text">{t('form.amount')}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -217,7 +220,7 @@ export function ObligationForm() {
         </label>
 
         <label className="block space-y-1.5">
-          <span className="text-sm font-semibold text-text">الموعد الجاي</span>
+          <span className="text-sm font-semibold text-text">{t('form.dueDate')}</span>
           <input
             type="date"
             required
@@ -228,7 +231,7 @@ export function ObligationForm() {
         </label>
 
         <div className="space-y-1.5">
-          <span className="text-sm font-semibold text-text">بيتكرر</span>
+          <span className="text-sm font-semibold text-text">{t('form.recurrence')}</span>
           <div className="grid grid-cols-2 gap-2">
             {RECURRENCES.map((r) => (
               <button
@@ -241,7 +244,7 @@ export function ObligationForm() {
                     : 'border-border bg-bg text-text-muted'
                 }`}
               >
-                {r.label}
+                {t(r.key)}
               </button>
             ))}
           </div>
@@ -258,8 +261,10 @@ export function ObligationForm() {
 
         {sharePercent < 100 && (
           <p className="rounded-xl bg-surface-muted px-3 py-2.5 text-[13px] text-text-muted">
-            حصتك <span className="num">{formatMoney(calc.myTotal)}</span> من أصل{' '}
-            <span className="num">{formatMoney(totalAmount)}</span> — القسط محسوب على حصتك بس.
+            {t('form.shareNote', {
+              myTotal: formatMoney(calc.myTotal),
+              total: formatMoney(totalAmount),
+            })}
           </p>
         )}
       </section>
@@ -272,10 +277,10 @@ export function ObligationForm() {
 
       <div className="flex gap-3">
         <Button type="submit" loading={saving} className="flex-1">
-          {isEdit ? 'احفظ' : 'ضيفه'}
+          {isEdit ? t('common.save') : t('form.submitCreate')}
         </Button>
         <Button type="button" variant="secondary" onClick={() => navigate(-1)}>
-          إلغاء
+          {t('common.cancel')}
         </Button>
       </div>
     </form>

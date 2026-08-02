@@ -1,19 +1,25 @@
 import { useState, type FormEvent } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/Button'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 
-/** رسائل Supabase إنجليزية وتقنية — نترجم ما يقع فعلاً منها. */
-function humanError(message: string): string {
+/**
+ * رسائل Supabase إنجليزية وتقنية — نترجم ما يقع فعلاً منها.
+ * ما لا نعرفه يمرّ كما هو: رسالة إنجليزية غامضة أفضل من رسالة عربية خاطئة.
+ */
+function humanError(message: string, t: TFunction): string {
   const m = message.toLowerCase()
-  if (m.includes('invalid login')) return 'الإيميل أو كلمة السر غلط'
-  if (m.includes('already registered')) return 'هالإيميل مسجّل من قبل — سجّل دخول بدل ما تفتح حساب'
-  if (m.includes('password') && m.includes('6')) return 'كلمة السر لازم 6 حروف على الأقل'
-  if (m.includes('email') && m.includes('invalid')) return 'الإيميل مش مكتوب صح'
-  if (m.includes('rate limit')) return 'جرّبت كتير بسرعة — استنى دقيقة وجرّب كمان مرة'
+  if (m.includes('invalid login')) return t('auth.errors.invalidLogin')
+  if (m.includes('already registered')) return t('auth.errors.alreadyRegistered')
+  if (m.includes('password') && m.includes('6')) return t('auth.errors.shortPassword')
+  if (m.includes('email') && m.includes('invalid')) return t('auth.errors.invalidEmail')
+  if (m.includes('rate limit')) return t('auth.errors.rateLimit')
   return message
 }
 
 export function AuthScreen() {
+  const { t } = useTranslation()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -33,14 +39,14 @@ export function AuthScreen() {
         if (error) throw error
         // مع تفعيل تأكيد الإيميل لا تُنشأ جلسة فوراً — نوضّح ذلك بدل صمت مربك.
         if (!data.session) {
-          setNotice('بعتنالك إيميل تأكيد. افتحه وبعدها سجّل دخول.')
+          setNotice(t('auth.confirmSent'))
         }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       }
     } catch (err) {
-      setError(humanError(err instanceof Error ? err.message : String(err)))
+      setError(humanError(err instanceof Error ? err.message : String(err), t))
     } finally {
       setLoading(false)
     }
@@ -50,9 +56,9 @@ export function AuthScreen() {
     <div className="flex min-h-dvh items-center justify-center bg-bg px-5 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-brand">سنوي</h1>
+          <h1 className="text-4xl font-bold text-brand">{t('app.name')}</h1>
           <p className="mt-2 text-[15px] leading-relaxed text-text-muted">
-            الالتزامات السنوية الكبيرة، مقسّمة على شهور — فما بتفاجئك.
+            {t('app.tagline')}
           </p>
         </div>
 
@@ -65,7 +71,7 @@ export function AuthScreen() {
                 mode === 'signin' ? 'bg-surface text-brand shadow-sm' : 'text-text-muted'
               }`}
             >
-              تسجيل دخول
+              {t('auth.signIn')}
             </button>
             <button
               type="button"
@@ -74,12 +80,12 @@ export function AuthScreen() {
                 mode === 'signup' ? 'bg-surface text-brand shadow-sm' : 'text-text-muted'
               }`}
             >
-              حساب جديد
+              {t('auth.signUp')}
             </button>
           </div>
 
           <label className="block space-y-1.5">
-            <span className="text-sm font-semibold text-text">الإيميل</span>
+            <span className="text-sm font-semibold text-text">{t('auth.email')}</span>
             <input
               type="email"
               required
@@ -92,7 +98,7 @@ export function AuthScreen() {
           </label>
 
           <label className="block space-y-1.5">
-            <span className="text-sm font-semibold text-text">كلمة السر</span>
+            <span className="text-sm font-semibold text-text">{t('auth.password')}</span>
             <input
               type="password"
               required
@@ -117,7 +123,7 @@ export function AuthScreen() {
           )}
 
           <Button type="submit" loading={loading} className="w-full">
-            {mode === 'signup' ? 'افتح حساب' : 'ادخل'}
+            {mode === 'signup' ? t('auth.submitSignUp') : t('auth.submitSignIn')}
           </Button>
         </form>
       </div>

@@ -9,11 +9,13 @@ import { PartnerSettlements } from '@/features/partners/PartnerSettlements'
 import { listSettlements } from '@/features/partners/api'
 import type { PartnerSettlement } from '@/lib/db/types'
 import { addDeposit, archiveObligation, getObligation, track, type ObligationWithCalc } from './api'
+import { useTranslation } from 'react-i18next'
 
 export function ObligationDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
+  const { t } = useTranslation()
   const [item, setItem] = useState<ObligationWithCalc | null>(null)
   const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
   const [payerId, setPayerId] = useState<string | null>(null)
@@ -32,7 +34,7 @@ export function ObligationDetail() {
       setItem(found)
       setSettlements(shares)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نجيب الالتزام')
+      setError(err instanceof Error ? err.message : t('form.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -53,7 +55,7 @@ export function ObligationDetail() {
       })
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نسجّل الإيداع')
+      setError(err instanceof Error ? err.message : t('obligations.depositFailed'))
     } finally {
       setBusy(false)
     }
@@ -66,7 +68,7 @@ export function ObligationDetail() {
       await archiveObligation(item.obligation.id)
       navigate('/obligations', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نأرشفه')
+      setError(err instanceof Error ? err.message : t('detail.archiveFailed'))
       setBusy(false)
     }
   }
@@ -78,9 +80,9 @@ export function ObligationDetail() {
   if (!item) {
     return (
       <div className="px-5 py-10 text-center">
-        <p className="text-text-muted">ما لقينا هالالتزام.</p>
+        <p className="text-text-muted">{t('obligations.notFound')}</p>
         <Link to="/obligations" className="mt-3 inline-block font-bold text-brand">
-          ارجع للالتزامات
+          {t('obligations.backToList')}
         </Link>
       </div>
     )
@@ -105,17 +107,19 @@ export function ObligationDetail() {
         </div>
 
         <dl className="mt-5 grid grid-cols-2 gap-3">
-          <Stat label="قسطك الشهري" value={formatMoney(calc.monthlyInstallment)} accent />
-          <Stat label="جمعت لهلأ" value={formatMoney(myBalance)} />
-          <Stat label="حصتك من المبلغ" value={formatMoney(calc.myTotal)} />
-          <Stat label="باقي عليك" value={formatMoney(calc.remainingAmount)} />
+          <Stat label={t('detail.installment')} value={formatMoney(calc.monthlyInstallment)} accent />
+          <Stat label={t('detail.collected')} value={formatMoney(myBalance)} />
+          <Stat label={t('detail.myTotal')} value={formatMoney(calc.myTotal)} />
+          <Stat label={t('detail.remaining')} value={formatMoney(calc.remainingAmount)} />
         </dl>
 
         {Number(obligation.my_share_percent) < 100 && (
           <p className="mt-3 rounded-xl bg-surface-muted px-3 py-2.5 text-[13px] text-text-muted">
-            مشترك: حصتك <span className="num">{obligation.my_share_percent}%</span> من{' '}
-            <span className="num">{formatMoney(Number(obligation.total_amount))}</span>. مجموع
-            الصندوق من الكل <span className="num">{formatMoney(fundBalance)}</span>.
+            {t('detail.sharedNote', {
+              percent: obligation.my_share_percent,
+              total: formatMoney(Number(obligation.total_amount)),
+              fund: formatMoney(fundBalance),
+            })}
           </p>
         )}
       </section>
@@ -145,9 +149,9 @@ export function ObligationDetail() {
       <div className="space-y-3">
         {settlements.length > 0 && calc.monthlyInstallment > 0 && (
           <div className="space-y-1.5">
-            <span className="text-sm font-semibold text-text">مين بيودع؟</span>
+            <span className="text-sm font-semibold text-text">{t('detail.whoDeposits')}</span>
             <div className="flex flex-wrap gap-2">
-              <PayerChip label="أنا" active={payerId === null} onClick={() => setPayerId(null)} />
+              <PayerChip label={t('common.me')} active={payerId === null} onClick={() => setPayerId(null)} />
               {settlements.map((s) => (
                 <PayerChip
                   key={s.partner_id}
@@ -162,17 +166,17 @@ export function ObligationDetail() {
 
         {calc.monthlyInstallment > 0 && (
           <Button onClick={deposit} loading={busy} className="w-full">
-            أودعت {formatMoney(calc.monthlyInstallment)} ✓
+            {t('detail.depositAmount', { amount: formatMoney(calc.monthlyInstallment) })}
           </Button>
         )}
         <div className="flex gap-3">
           <Link to={`/obligations/${obligation.id}/edit`} className="flex-1">
             <Button variant="secondary" className="w-full">
-              عدّل
+              {t('common.edit')}
             </Button>
           </Link>
           <Button variant="danger" onClick={archive} disabled={busy}>
-            أرشفه
+            {t('common.archive')}
           </Button>
         </div>
       </div>

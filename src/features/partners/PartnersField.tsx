@@ -1,5 +1,6 @@
 import { formatMoney } from '@/lib/format'
 import type { PartnerShareDraft } from './api'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   mySharePercent: number
@@ -25,6 +26,7 @@ export function PartnersField({
   error,
 }: Props) {
   const shared = partners.length > 0
+  const { t } = useTranslation()
 
   const enable = () => {
     onMyShareChange(50)
@@ -59,7 +61,7 @@ export function PartnersField({
         onClick={enable}
         className="w-full rounded-xl border border-dashed border-border py-3 text-sm font-semibold text-text-muted"
       >
-        + هاد الالتزام مشترك مع حدا
+        {t('partners.enable')}
       </button>
     )
   }
@@ -67,14 +69,14 @@ export function PartnersField({
   return (
     <div className="space-y-3 rounded-2xl bg-surface-muted p-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-bold text-text">مشترك</span>
+        <span className="text-sm font-bold text-text">{t('partners.sharedLabel')}</span>
         <button type="button" onClick={disable} className="text-xs font-semibold text-text-muted">
-          كله عليّ
+          {t('partners.allMine')}
         </button>
       </div>
 
       <ShareRow
-        label="أنا"
+        label={t('common.me')}
         value={mySharePercent}
         onValueChange={onMyShareChange}
         amount={(totalAmount * mySharePercent) / 100}
@@ -87,7 +89,7 @@ export function PartnersField({
             <input
               value={partner.name}
               onChange={(e) => update(index, { name: e.target.value, partnerId: null })}
-              placeholder="اسم الشريك"
+              placeholder={t('partners.namePlaceholder')}
               className="w-full rounded-lg border border-border bg-bg px-2 py-1.5 text-sm text-text outline-none focus:border-brand"
             />
           }
@@ -100,7 +102,7 @@ export function PartnersField({
 
       <div className="flex items-center justify-between gap-2">
         <button type="button" onClick={add} className="text-xs font-semibold text-brand">
-          + شريك تاني
+          {t('partners.addAnother')}
         </button>
         {/* .num على الرقم وحده: وضعها على السطر كله يقلب موضع % في نص عربي. */}
         <span
@@ -108,7 +110,7 @@ export function PartnersField({
             Math.abs(total - 100) < 0.01 ? 'text-brand' : 'text-danger'
           }`}
         >
-          المجموع <span className="num">{Math.round(total)}%</span>
+          {t('partners.totalIs', { percent: Math.round(total) })}
         </span>
       </div>
 
@@ -130,6 +132,8 @@ function ShareRow({
   amount: number
   onRemove?: () => void
 }) {
+  const { t } = useTranslation()
+
   return (
     <div className="space-y-1.5 rounded-xl bg-surface p-2.5">
       <div className="flex items-center gap-2">
@@ -140,7 +144,7 @@ function ShareRow({
           <button
             type="button"
             onClick={onRemove}
-            aria-label="شيل الشريك"
+            aria-label={t('partners.remove')}
             className="shrink-0 rounded-lg px-1.5 text-sm text-danger"
           >
             ✕

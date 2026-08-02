@@ -1,5 +1,6 @@
 import { formatMoney } from '@/lib/format'
 import type { PartnerSettlement } from '@/lib/db/types'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   settlements: PartnerSettlement[]
@@ -9,8 +10,9 @@ interface Props {
 
 /** من دفع كم ومن باقي عليه — الجواب الذي يُطلب فعلاً في الالتزام المشترك. */
 export function PartnerSettlements({ settlements, mine }: Props) {
+  const { t } = useTranslation()
   const rows = [
-    { key: 'me', name: 'أنا', owed: mine.owed, deposited: mine.deposited },
+    { key: 'me', name: t('common.me'), owed: mine.owed, deposited: mine.deposited },
     ...settlements.map((s) => ({
       key: s.partner_id,
       name: s.partner_name,
@@ -21,7 +23,7 @@ export function PartnerSettlements({ settlements, mine }: Props) {
 
   return (
     <section className="rounded-3xl border border-border bg-surface p-4">
-      <h2 className="text-sm font-bold text-text">مين دفع شو</h2>
+      <h2 className="text-sm font-bold text-text">{t('partners.settlementsTitle')}</h2>
 
       <ul className="mt-3 space-y-2">
         {rows.map((row) => {
@@ -34,13 +36,9 @@ export function PartnerSettlements({ settlements, mine }: Props) {
               <div className="flex items-baseline justify-between gap-2">
                 <span className="truncate text-sm font-bold text-text">{row.name}</span>
                 <span className={`text-sm font-bold ${done ? 'text-brand' : 'text-accent'}`}>
-                  {done ? (
-                    'خلّص ✓'
-                  ) : (
-                    <>
-                      باقي <span className="num">{formatMoney(outstanding)}</span>
-                    </>
-                  )}
+                  {done
+                    ? t('partners.settled')
+                    : t('partners.outstanding', { amount: formatMoney(outstanding) })}
                 </span>
               </div>
 
@@ -54,8 +52,7 @@ export function PartnerSettlements({ settlements, mine }: Props) {
               </div>
 
               <p className="mt-1.5 text-xs text-text-muted">
-                <span className="num">{formatMoney(row.deposited)}</span>
-                {' من '}
+                <span className="num">{formatMoney(row.deposited)}</span> {t('common.of')}{' '}
                 <span className="num">{formatMoney(row.owed)}</span>
               </p>
             </li>

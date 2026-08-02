@@ -8,6 +8,7 @@ import { ObligationForm } from '@/features/obligations/ObligationForm'
 import { ObligationDetail } from '@/features/obligations/ObligationDetail'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 
 // الاستيراد الكسول يبقي المعاينة خارج الحزمة الرئيسية.
 const ComponentPreview = lazy(() =>
@@ -73,13 +74,14 @@ function Shell() {
   )
 }
 
-const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: 'النظام' },
-  { value: 'light', label: 'فاتح' },
-  { value: 'dark', label: 'غامق' },
-]
+const THEME_OPTIONS = [
+  { value: 'system', key: 'theme.system' },
+  { value: 'light', key: 'theme.light' },
+  { value: 'dark', key: 'theme.dark' },
+] as const satisfies readonly { value: ThemePreference; key: string }[]
 
 function Header() {
+  const { t } = useTranslation()
   const { signOut } = useAuth()
   const { preference, setPreference } = useTheme()
   const { pathname } = useLocation()
@@ -89,10 +91,10 @@ function Header() {
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
         {isHome ? (
-          <h1 className="text-lg font-bold text-brand">سنوي</h1>
+          <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
         ) : (
           <Link to="/obligations" className="text-sm font-bold text-brand">
-            ← الالتزامات
+            ← {t('obligations.backToList')}
           </Link>
         )}
 
@@ -107,7 +109,7 @@ function Header() {
                   preference === opt.value ? 'bg-brand-soft text-brand' : 'text-text-muted'
                 }`}
               >
-                {opt.label}
+                {t(opt.key)}
               </button>
             ))}
           </div>
@@ -116,7 +118,7 @@ function Header() {
             onClick={() => void signOut()}
             className="text-xs font-semibold text-text-muted"
           >
-            خروج
+            {t('theme.signOut')}
           </button>
         </div>
       </div>

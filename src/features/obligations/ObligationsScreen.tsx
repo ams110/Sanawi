@@ -5,8 +5,10 @@ import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { ObligationCard } from './ObligationCard'
 import { addDeposit, listObligations, track, type ObligationWithCalc } from './api'
+import { useTranslation } from 'react-i18next'
 
 export function ObligationsScreen() {
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [items, setItems] = useState<ObligationWithCalc[]>([])
   const [loading, setLoading] = useState(true)
@@ -18,11 +20,11 @@ export function ObligationsScreen() {
       setError(null)
       setItems(await listObligations())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نجيب الالتزامات')
+      setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     void load()
@@ -36,7 +38,7 @@ export function ObligationsScreen() {
       void track(user.id, 'deposit_added', { obligation_id: item.obligation.id })
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ما قدرنا نسجّل الإيداع')
+      setError(err instanceof Error ? err.message : t('obligations.depositFailed'))
     } finally {
       setDepositingId(null)
     }
@@ -58,12 +60,12 @@ export function ObligationsScreen() {
     <div className="space-y-5 px-5 py-6">
       {/* الرقم الرئيسي: مجموع ما يجب أن يخرج من الحساب هذا الشهر */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
-        <p className="text-sm text-text-muted">لازم يطلع من حسابك هالشهر</p>
+        <p className="text-sm text-text-muted">{t('obligations.monthlyTotalLabel')}</p>
         <p className="num mt-2 text-5xl font-bold leading-none text-brand">
           {formatMoney(totalMonthly)}
         </p>
         <p className="mt-2 text-xs text-text-muted">
-          مجموع أقساط <span className="num">{items.length}</span> التزام
+          {t('obligations.monthlyTotalHint', { count: items.length })}
         </p>
       </section>
 
@@ -89,19 +91,21 @@ export function ObligationsScreen() {
       )}
 
       <Link to="/obligations/new" className="block">
-        <Button className="w-full">+ ضيف التزام</Button>
+        <Button className="w-full">{t('obligations.add')}</Button>
       </Link>
     </div>
   )
 }
 
 function EmptyState() {
+  const { t } = useTranslation()
+
   return (
     <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
       <p className="text-4xl" aria-hidden="true">📅</p>
-      <h2 className="mt-3 text-lg font-bold text-text">لسا ما ضفت ولا التزام</h2>
+      <h2 className="mt-3 text-lg font-bold text-text">{t('obligations.emptyTitle')}</h2>
       <p className="mt-2 text-[15px] leading-relaxed text-text-muted">
-        ابدأ بأكبر واحد — تأمين السيارة عادةً. بتشوف قسطك الشهري بثانية.
+        {t('obligations.emptyBody')}
       </p>
     </div>
   )
