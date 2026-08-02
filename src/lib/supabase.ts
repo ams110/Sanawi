@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from './db/types'
 
-const url = import.meta.env.VITE_SUPABASE_URL
+// رابط نسبيّ يعني التمرير عبر خادم التطوير (انظر vite.config.ts)؛
+// نحوّله إلى مطلق لأن supabase-js يشترط ذلك.
+const rawUrl = import.meta.env.VITE_SUPABASE_URL
+const url = rawUrl?.startsWith('/') ? `${window.location.origin}${rawUrl}` : rawUrl
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 /**
