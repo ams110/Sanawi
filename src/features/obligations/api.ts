@@ -6,6 +6,7 @@ import type {
   FundDeposit,
 } from '@/lib/db/types'
 import { calculateObligation, type ObligationCalcResult } from '@/lib/obligations/calc'
+import { renewAfterPayment, type RenewalResult } from '@/lib/obligations/renewal'
 
 /** التزام مع رصيده المحسوب ونتيجة المحرّك — ما تعرضه الشاشات فعلياً. */
 export interface ObligationWithCalc {
@@ -170,4 +171,65 @@ export async function track(
   } catch {
     /* التتبّع ليس ميزة للمستخدم — لا يستحق أن يكسر شيئاً. */
   }
+}
+
+/**
+ * تسجيل الدفع وتجديد الدورة.
+ *
+ * يُسجَّل الدفع أولاً ثم يُحدَّث الالتزام: لو انقطع الاتصال بينهما بقي سجلّ
+ * الدفعة موجوداً ويمكن تصحيح الالتزام يدوياً، والعكس يفقد الدفعة نهائياً.
+ */
+export async function markPaid(
+  item: ObligationWithCalc,
+  userId: string,
+): Promise<RenewalResult> {
+  const o = item.obligation
+  const result = renewAfterPayment({
+    totalAmount: Number(o.total_amount),
+    mySharePercent: Number(o.my_share_percent),
+    myFundBalance: Number(item.balance?.my_fund_balance ?? 0),
+    nextDueDate: o.next_due_date,
+    recurrenceMonths: o.recurrence_months,
+  })
+
+  const paidDate = result.cycleStartDate.toISOString().slice(0, 10)
+  const nextDue = result.nextDueDate?.toISOString().slice(0, 10) ?? o.next_due_date
+
+  const { error: paymentError } = await supabase.from('obligation_payments').insert({
+    obligation_id: o.id,
+    user_id: userId,
+    amount_paid: result.amountPaid,
+    paid_date: paidDate,
+    next_due_date_after: nextDue,
+  })
+  if (paymentError) throw paymentError
+
+  // الصندوق يُفرَّغ بإيداع سالب لا بحذف الإيداعات: الحذف يمحو تاريخ من دفع ماذا.
+  if (result.amountPaid > 0) {
+    const { error: drawError } = await supabase.from('fund_deposits').insert({
+      obligation_id: o.id,
+      user_id: userId,
+      partner_id: null,
+      amount: -result.amountPaid,
+      deposit_date: paidDate,
+      note: 'سحب عند الدفع',
+    })
+    if (drawError) throw drawError
+  }
+
+  const { error: updateError } = await supabase
+    .from('obligations')
+    .update(
+      result.isFinished
+        ? { is_active: false }
+        : {
+            next_due_date: nextDue,
+            cycle_start_date: paidDate,
+            baseline_installment: result.newInstallment,
+          },
+    )
+    .eq('id', o.id)
+  if (updateError) throw updateError
+
+  return result
 }

@@ -8,7 +8,16 @@ import { Button } from '@/components/ui/Button'
 import { PartnerSettlements } from '@/features/partners/PartnerSettlements'
 import { listSettlements } from '@/features/partners/api'
 import type { PartnerSettlement } from '@/lib/db/types'
-import { addDeposit, archiveObligation, getObligation, track, type ObligationWithCalc } from './api'
+import { PaymentDialog } from './PaymentDialog'
+import type { RenewalResult } from '@/lib/obligations/renewal'
+import {
+  addDeposit,
+  archiveObligation,
+  getObligation,
+  markPaid,
+  track,
+  type ObligationWithCalc,
+} from './api'
 import { useTranslation } from 'react-i18next'
 
 export function ObligationDetail() {
@@ -22,6 +31,9 @@ export function ObligationDetail() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [payOpen, setPayOpen] = useState(false)
+  const [payResult, setPayResult] = useState<RenewalResult | null>(null)
+  const [payError, setPayError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
@@ -59,6 +71,33 @@ export function ObligationDetail() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const confirmPayment = async () => {
+    if (!user || !item) return
+    setBusy(true)
+    setPayError(null)
+    try {
+      const result = await markPaid(item, user.id)
+      void track(user.id, 'obligation_paid', {
+        obligation_id: item.obligation.id,
+        had_shortfall: result.shortfall > 0,
+      })
+      setPayResult(result)
+      await load()
+    } catch (err) {
+      setPayError(err instanceof Error ? err.message : t('payment.failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const closePayment = () => {
+    setPayOpen(false)
+    setPayResult(null)
+    setPayError(null)
+    // الالتزام لمرة واحدة يُؤرشف بعد دفعه فلا تبقى له صفحة.
+    if (payResult?.isFinished) navigate('/obligations', { replace: true })
   }
 
   const archive = async () => {
@@ -169,6 +208,10 @@ export function ObligationDetail() {
             {t('detail.depositAmount', { amount: formatMoney(calc.monthlyInstallment) })}
           </Button>
         )}
+
+        <Button variant="secondary" onClick={() => setPayOpen(true)} className="w-full">
+          {t('payment.markPaid')}
+        </Button>
         <div className="flex gap-3">
           <Link to={`/obligations/${obligation.id}/edit`} className="flex-1">
             <Button variant="secondary" className="w-full">
@@ -180,6 +223,17 @@ export function ObligationDetail() {
           </Button>
         </div>
       </div>
+
+      {payOpen && (
+        <PaymentDialog
+          item={item}
+          onConfirm={confirmPayment}
+          onClose={closePayment}
+          result={payResult}
+          busy={busy}
+          error={payError}
+        />
+      )}
     </div>
   )
 }

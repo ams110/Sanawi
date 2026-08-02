@@ -8,6 +8,9 @@ import { ObligationForm } from '@/features/obligations/ObligationForm'
 import { ObligationDetail } from '@/features/obligations/ObligationDetail'
 import { ProfileProvider, useProfile } from '@/features/profile/ProfileProvider'
 import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen'
+import { MonthScreen } from '@/features/month/MonthScreen'
+import { CalendarScreen } from '@/features/calendar/CalendarScreen'
+import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -67,19 +70,65 @@ function Shell() {
   if (profile && !profile.onboarding_completed) return <OnboardingScreen />
 
   return (
-    <div className="min-h-dvh bg-bg pb-8">
+    <div className="min-h-dvh bg-bg pb-24">
       <Header />
       <main className="mx-auto max-w-lg">
         <Routes>
-          <Route path="/" element={<Navigate to="/obligations" replace />} />
+          <Route path="/" element={<Navigate to="/month" replace />} />
+          <Route path="/month" element={<MonthScreen />} />
+          <Route path="/calendar" element={<CalendarScreen />} />
+          <Route path="/money" element={<MoneyScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
           <Route path="/obligations/:id" element={<ObligationDetail />} />
           <Route path="/obligations/:id/edit" element={<ObligationForm />} />
-          <Route path="*" element={<Navigate to="/obligations" replace />} />
+          <Route path="*" element={<Navigate to="/month" replace />} />
         </Routes>
       </main>
+      <BottomNav />
     </div>
+  )
+}
+
+const TABS = [
+  { to: '/month', key: 'nav.month', icon: '📊' },
+  { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
+  { to: '/calendar', key: 'nav.calendar', icon: '📅' },
+  { to: '/money', key: 'nav.money', icon: '💰' },
+] as const
+
+/**
+ * تنقّل سفلي: الإبهام يصل إلى أسفل الشاشة لا إلى أعلاها،
+ * والتطبيق يُستعمل من التلفون بيد واحدة في 95% من الوقت.
+ */
+function BottomNav() {
+  const { t } = useTranslation()
+  const { pathname } = useLocation()
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg/95 backdrop-blur">
+      <ul className="mx-auto flex max-w-lg items-stretch pb-[env(safe-area-inset-bottom)]">
+        {TABS.map((tab) => {
+          const active = pathname === tab.to || pathname.startsWith(`${tab.to}/`)
+          return (
+            <li key={tab.to} className="flex-1">
+              <Link
+                to={tab.to}
+                aria-current={active ? 'page' : undefined}
+                className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
+                  active ? 'text-brand' : 'text-text-muted'
+                }`}
+              >
+                <span className="text-lg leading-none" aria-hidden="true">
+                  {tab.icon}
+                </span>
+                {t(tab.key)}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </nav>
   )
 }
 
@@ -94,12 +143,12 @@ function Header() {
   const { signOut } = useAuth()
   const { preference, setPreference } = useTheme()
   const { pathname } = useLocation()
-  const isHome = pathname === '/obligations'
+  const isTab = TABS.some((tab) => tab.to === pathname)
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
-        {isHome ? (
+        {isTab ? (
           <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
         ) : (
           <Link to="/obligations" className="text-sm font-bold text-brand">
