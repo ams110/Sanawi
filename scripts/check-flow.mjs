@@ -6,7 +6,7 @@
  * التشغيل: node scripts/check-flow.mjs
  */
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const env = Object.fromEntries(
@@ -27,25 +27,52 @@ const step = (label, ok, detail = '') => {
   console.log(`${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
 }
 
-const stamp = process.env.TEST_STAMP ?? String(process.hrtime.bigint())
-const email = `sanawi.check.${stamp}@gmail.com`
-const password = `Test-${stamp.slice(-8)}!`
+/*
+ * حساب الفحص يُعاد استعماله بين التشغيلات.
+ * إنشاء حساب جديد في كل مرة يستهلك حصة الإيميلات في Supabase (بضعة إيميلات
+ * في الساعة على الخطة المجانية) فيفشل الفحص بـ "email rate limit exceeded"
+ * لسبب لا علاقة له بالكود المفحوص.
+ */
+const CRED_PATH = fileURLToPath(new URL('../.test-account.json', import.meta.url))
 
-// 1) تسجيل حساب
-const { data: signUp, error: signUpError } = await supabase.auth.signUp({ email, password })
-if (signUpError) {
-  step('تسجيل حساب', false, signUpError.message)
-  process.exit(1)
-}
-if (!signUp.session) {
-  console.log('⚠️  تأكيد الإيميل مفعّل — لا تُنشأ جلسة عند التسجيل.')
-  console.log('    عطّله من: Authentication → Sign In / Providers → Confirm email')
-  console.log('    أو سجّل حسابك يدوياً من التطبيق وأكّد الإيميل.')
-  process.exit(2)
-}
-step('تسجيل حساب', true, email)
+let creds = existsSync(CRED_PATH) ? JSON.parse(readFileSync(CRED_PATH, 'utf8')) : null
+let session = null
 
-const userId = signUp.user.id
+if (creds) {
+  const { data, error } = await supabase.auth.signInWithPassword(creds)
+  if (!error && data.session) {
+    session = data.session
+    step('دخول بحساب الفحص المحفوظ', true, creds.email)
+  } else {
+    console.log(`ℹ️  الحساب المحفوظ لم يعمل (${error?.message ?? 'بلا جلسة'}) — ننشئ واحداً جديداً.`)
+    creds = null
+  }
+}
+
+if (!session) {
+  const stamp = String(process.hrtime.bigint())
+  creds = { email: `sanawi.check.${stamp}@gmail.com`, password: `Test-${stamp.slice(-8)}!` }
+
+  const { data, error } = await supabase.auth.signUp(creds)
+  if (error) {
+    step('تسجيل حساب', false, error.message)
+    if (/rate limit/i.test(error.message)) {
+      console.log('\nحصة الإيميلات في Supabase استُهلكت. تُستعاد خلال ساعة تقريباً،')
+      console.log('أو عطّل تأكيد الإيميل: Authentication → Sign In / Providers → Confirm email')
+    }
+    process.exit(1)
+  }
+  if (!data.session) {
+    console.log('⚠️  تأكيد الإيميل مفعّل — لا تُنشأ جلسة عند التسجيل.')
+    console.log('    عطّله من: Authentication → Sign In / Providers → Confirm email')
+    process.exit(2)
+  }
+  session = data.session
+  writeFileSync(CRED_PATH, JSON.stringify(creds, null, 2))
+  step('تسجيل حساب جديد', true, creds.email)
+}
+
+const userId = session.user.id
 
 // 2) الملف الشخصي يُنشأ تلقائياً بالمُشغِّل
 const { data: profile, error: profileError } = await supabase
@@ -127,6 +154,6 @@ if (obligation) {
 
 console.log(
   `\n${failures === 0 ? 'كل الفحوص نجحت.' : `${failures} فحص فشل.`}` +
-    `\nملاحظة: الحساب التجريبي ${email} يبقى في Authentication — احذفه من اللوحة إن أردت.`,
+    `\nحساب الفحص: ${creds.email} (محفوظ في .test-account.json ويُعاد استعماله).`,
 )
 process.exit(failures ? 1 : 0)
