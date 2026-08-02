@@ -1,0 +1,131 @@
+@import 'tailwindcss';
+
+/* الخط محزوم مع التطبيق لا مُحمَّل من الإنترنت — يجب أن يعمل داخل APK بلا شبكة. */
+@import '@fontsource/ibm-plex-sans-arabic/400.css';
+@import '@fontsource/ibm-plex-sans-arabic/500.css';
+@import '@fontsource/ibm-plex-sans-arabic/600.css';
+@import '@fontsource/ibm-plex-sans-arabic/700.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+
+  /* هوية سنوي: أخضر زيتوني + كهرماني دافئ. لا بنفسجي ولا أزرق افتراضي. */
+  --color-olive-50: #f2f6ec;
+  --color-olive-100: #e0ead3;
+  --color-olive-200: #c3d6ad;
+  --color-olive-300: #9bc47a;
+  --color-olive-400: #77a455;
+  --color-olive-500: #58853a;
+  --color-olive-600: #3f5d2e;
+  --color-olive-700: #334a26;
+  --color-olive-800: #24351b;
+  --color-olive-900: #172210;
+
+  --color-amber-warm-300: #f0be6a;
+  --color-amber-warm-400: #e8a33d;
+  --color-amber-warm-500: #d18512;
+  --color-amber-warm-600: #b8690f;
+  --color-amber-warm-700: #8f500a;
+
+  --color-brick-300: #e4705f;
+  --color-brick-500: #b23b2e;
+  --color-brick-600: #922e23;
+
+  --color-sand-50: #faf8f3;
+  --color-sand-100: #f2eee4;
+  --color-sand-200: #e5dfd0;
+  --color-sand-300: #d2c9b4;
+
+  --color-ink-500: #6b7263;
+  --color-ink-700: #3a4033;
+  --color-ink-900: #1c2117;
+
+  --color-night-900: #12150f;
+  --color-night-800: #1b1f17;
+  --color-night-700: #262b20;
+  --color-night-600: #363c2e;
+}
+
+/*
+ * طبقة دلالية فوق الألوان الخام: الواجهة تستعمل bg-surface لا bg-white،
+ * فيبقى الوضعان الفاتح والغامق منسجمين من أول يوم بدل ترقيع الغامق لاحقاً.
+ */
+:root {
+  --color-bg: var(--color-sand-50);
+  --color-surface: #ffffff;
+  --color-surface-muted: var(--color-sand-100);
+  --color-border: var(--color-sand-200);
+  --color-text: var(--color-ink-900);
+  --color-text-muted: var(--color-ink-500);
+  --color-brand: var(--color-olive-600);
+  --color-brand-soft: var(--color-olive-100);
+  --color-accent: var(--color-amber-warm-600);
+  --color-accent-soft: #fbefd8;
+  --color-danger: var(--color-brick-500);
+  --color-danger-soft: #fbe7e3;
+}
+
+.dark {
+  --color-bg: var(--color-night-900);
+  --color-surface: var(--color-night-800);
+  --color-surface-muted: var(--color-night-700);
+  --color-border: var(--color-night-600);
+  --color-text: #ecefe6;
+  --color-text-muted: #9aa392;
+  --color-brand: var(--color-olive-300);
+  --color-brand-soft: #24351b;
+  --color-accent: var(--color-amber-warm-400);
+  --color-accent-soft: #3a2c11;
+  --color-danger: var(--color-brick-300);
+  --color-danger-soft: #3a1c17;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-border: var(--color-border);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-brand: var(--color-brand);
+  --color-brand-soft: var(--color-brand-soft);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    /* أرقام إنجليزية بعرض ثابت: لا ترقص الأرقام حين تتغيّر قيمتها. */
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: 'tnum' 1, 'lnum' 1;
+    overscroll-behavior-y: none;
+  }
+
+  /* الأرقام تبقى لاتينية واتجاهها LTR حتى داخل نص عربي. */
+  .num {
+    font-variant-numeric: tabular-nums lining-nums;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  ::selection {
+    background-color: var(--color-brand-soft);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}
