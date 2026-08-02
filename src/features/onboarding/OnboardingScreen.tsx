@@ -46,9 +46,19 @@ export function OnboardingScreen() {
     setBusy(true)
     setError(null)
 
+    /*
+     * موعد مبدئي داخل النافذة القادمة لا على حافّتها.
+     *
+     * وضعُه بعد دورة كاملة بالضبط يجعله يقع خارج تقويم الاثني عشر شهراً بشهر
+     * واحد، فيرى المستخدمُ الجديد تقويماً فارغاً بعد أن أضاف التزاماً للتوّ —
+     * وهي أسوأ رسالة يمكن أن تعطيها شاشة اسمها "عشان ما تتفاجأ".
+     * setDate(0) يرجع إلى آخر يوم في الشهر السابق فيدخل داخل النافذة.
+     * المستخدم يصحّح التاريخ الحقيقي لاحقاً من التعديل.
+     */
     const months = tpl.default_recurrence_months || 12
     const due = new Date()
     due.setMonth(due.getMonth() + months)
+    due.setDate(0)
 
     const suggested =
       tpl.suggested_min != null && tpl.suggested_max != null

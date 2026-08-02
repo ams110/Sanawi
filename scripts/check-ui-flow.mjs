@@ -38,6 +38,10 @@ const page = await ctx.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+// الاستجابات الفاشلة تُسجَّل بمسارها: "Failed to load resource" وحده لا يقول أيّ مورد.
+page.on('response', (r) => {
+  if (r.status() >= 500) errors.push(`${r.status()} ${r.url().replace(URL_BASE, '')}`)
+})
 
 try {
   // 1) التسجيل
@@ -77,12 +81,51 @@ try {
   step('الإيداع رفع الرصيد', before !== after, `${before} ← ${after}`)
 
   // 6) القائمة تعرض الالتزام ومجموع الشهر
-  await page.locator('header a').first().click()
+  await page.getByRole('link', { name: /الالتزامات/ }).last().click()
   await page.getByText('لازم يطلع من حسابك هالشهر').waitFor({ timeout: 10000 })
-  const monthly = await page.locator('section p.num').first().innerText()
   const cards = await page.locator('article').count()
-  step('القائمة تعرض المجموع والكارت', cards === 1 && /₪/.test(monthly), `${cards} كارت · ${monthly}`)
+  step('القائمة تعرض الكارت', cards === 1, `${cards} كارت`)
   await page.screenshot({ path: `${OUT}/flow-4-list.png`, fullPage: true })
+
+  // 7) الدخل: إضافة مصدر أسبوعي والتحقق من التحويل × 4.333
+  await page.getByRole('link', { name: /الدخل/ }).click()
+  await page.getByText('مصادر الدخل').waitFor({ timeout: 10000 })
+  await page.getByPlaceholder('الاسم').first().fill('راتب')
+  await page.getByPlaceholder('المبلغ').first().fill('2000')
+  await page.getByRole('button', { name: '+ ضيف مصدر دخل' }).click()
+  await page.getByText(/يعني/).waitFor({ timeout: 10000 })
+  const equivalent = await page.getByText(/يعني/).innerText()
+  // 2,000 أسبوعياً = 8,667 شهرياً (لا 8,000)
+  step('الأسبوعي يتحوّل بـ 4.333', /8,66[67]/.test(equivalent), equivalent)
+  await page.screenshot({ path: `${OUT}/flow-5-money.png`, fullPage: true })
+
+  // 8) لوحة الشهر تحسب المتاح للصرف
+  await page.getByRole('link', { name: /^الشهر$/ }).click()
+  await page.getByText('بيضل معك للصرف').waitFor({ timeout: 10000 })
+  const available = await page.locator('section p.num').nth(1).innerText()
+  step('لوحة الشهر تحسب المتاح', /₪/.test(available), available)
+  await page.screenshot({ path: `${OUT}/flow-6-month.png`, fullPage: true })
+
+  // 9) التقويم يعرض الاستحقاق في شهره
+  await page.getByRole('link', { name: /التقويم/ }).click()
+  await page.getByText('الـ12 شهر الجاية').waitFor({ timeout: 10000 })
+  // ol > li لا ol li: الثانية تلتقط عناصر قائمة الاستحقاقات المتداخلة أيضاً.
+  const monthRows = await page.locator('ol > li').count()
+  const withDues = await page.locator('ol > li:has(.num)').count()
+  step('التقويم يعرض 12 شهراً', monthRows === 12, `${monthRows} شهر · ${withDues} فيه استحقاق`)
+  await page.screenshot({ path: `${OUT}/flow-7-calendar.png`, fullPage: true })
+
+  // 10) الدفع يجدّد الدورة ويعرض القسط الجديد
+  await page.getByRole('link', { name: /الالتزامات/ }).last().click()
+  await page.locator('article a').first().click()
+  await page.getByText('قسطك الشهري').waitFor({ timeout: 10000 })
+  await page.getByRole('button', { name: 'اندفع ✓' }).click()
+  await page.getByText('أكّد الدفع').waitFor({ timeout: 5000 })
+  await page.getByRole('dialog').getByRole('button', { name: 'اندفع ✓' }).click()
+  await page.getByText(/بدون ما تحس/).waitFor({ timeout: 15000 })
+  const success = await page.getByRole('dialog').innerText()
+  step('الدفع جدّد الدورة وعرض القسط الجديد', /قسطك الجديد/.test(success), success.split('\n')[2] ?? '')
+  await page.screenshot({ path: `${OUT}/flow-8-paid.png`, fullPage: true })
 
   step('وحدة التحكم بلا أخطاء', errors.length === 0, errors.slice(0, 2).join(' | '))
 } catch (err) {

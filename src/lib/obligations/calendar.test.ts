@@ -118,3 +118,30 @@ describe('تقويم 12 شهر', () => {
     expect(cal[3]!.dues).toHaveLength(2)
   })
 })
+
+describe('الموعد المبدئي في المقدمة', () => {
+  it('يظهر داخل نافذة الاثني عشر شهراً لا خارجها', () => {
+    // المقدمة تضع الموعد بعد دورة كاملة ثم ترجع يوماً واحداً (setDate(0)).
+    const due = new Date(TODAY)
+    due.setMonth(due.getMonth() + 12)
+    due.setDate(0)
+
+    const cal = buildCalendar(
+      [{ id: 'a', name: 'تأمين', totalAmount: 5750, nextDueDate: due, recurrenceMonths: 12 }],
+      opts,
+    )
+    expect(calendarTotal(cal)).toBe(5750)
+    expect(cal[11]!.total).toBe(5750)
+  })
+
+  it('الموعد بعد دورة كاملة بالضبط يقع خارج النافذة — سبب التعديل أعلاه', () => {
+    const due = new Date(TODAY)
+    due.setMonth(due.getMonth() + 12)
+
+    const cal = buildCalendar(
+      [{ id: 'a', name: 'تأمين', totalAmount: 5750, nextDueDate: due, recurrenceMonths: 12 }],
+      opts,
+    )
+    expect(calendarTotal(cal)).toBe(0)
+  })
+})
