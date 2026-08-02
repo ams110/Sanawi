@@ -7,8 +7,30 @@ import { ObligationsScreen } from '@/features/obligations/ObligationsScreen'
 import { ObligationForm } from '@/features/obligations/ObligationForm'
 import { ObligationDetail } from '@/features/obligations/ObligationDetail'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { lazy, Suspense } from 'react'
+
+// الاستيراد الكسول يبقي المعاينة خارج الحزمة الرئيسية.
+const ComponentPreview = lazy(() =>
+  import('@/dev/ComponentPreview').then((m) => ({ default: m.ComponentPreview })),
+)
+
+function DevPreview() {
+  return (
+    <div className="min-h-dvh bg-bg">
+      <Suspense fallback={null}>
+        <ComponentPreview />
+      </Suspense>
+    </div>
+  )
+}
 
 export default function App() {
+  // معاينة المكوّنات في التطوير فقط: تُحذف من حزمة الإنتاج لأن الشرط ثابت
+  // عند البناء، فيزيلها التقليم مع المكوّن كله.
+  if (import.meta.env.DEV && window.location.pathname === '/preview') {
+    return <DevPreview />
+  }
+
   // بلا مفاتيح لا فائدة من المصادقة ولا من التوجيه: نوجّه المستخدم للإعداد.
   if (!isSupabaseConfigured) return <SetupScreen />
 

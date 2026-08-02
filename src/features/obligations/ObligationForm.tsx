@@ -6,6 +6,13 @@ import { formatMoney, formatMonthsRemaining } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { BridgeNotice } from '@/components/ui/BridgeNotice'
 import { TemplatePicker } from './TemplatePicker'
+import { PartnersField } from '@/features/partners/PartnersField'
+import {
+  listShares,
+  saveShares,
+  validateShares,
+  type PartnerShareDraft,
+} from '@/features/partners/api'
 import {
   createObligation,
   getObligation,
@@ -43,10 +50,12 @@ export function ObligationForm() {
   const [nextDueDate, setNextDueDate] = useState(defaultDueDate(12))
   const [recurrenceMonths, setRecurrenceMonths] = useState(12)
   const [sharePercent, setSharePercent] = useState(100)
+  const [partners, setPartners] = useState<PartnerShareDraft[]>([])
   const [fundBalance, setFundBalance] = useState(0)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [shareError, setShareError] = useState<string | null>(null)
 
   useEffect(() => {
     if (isEdit) return
@@ -71,6 +80,9 @@ export function ObligationForm() {
         setFundBalance(Number(found.balance?.my_fund_balance ?? 0))
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'ما قدرنا نجيب الالتزام'))
+
+    // حصص الشركاء تُجلب على حدة: فشلها لا يمنع تعديل بقية الحقول.
+    listShares(id).then(setPartners).catch(() => setPartners([]))
   }, [isEdit, id])
 
   // المعاينة الحية: تُحسب من نفس المحرّك الذي تستعمله الشاشات، لا نسخة ثانية منه.
@@ -102,6 +114,11 @@ export function ObligationForm() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!user) return
+
+    const shareProblem = validateShares(sharePercent, partners)
+    setShareError(shareProblem)
+    if (shareProblem) return
+
     setError(null)
     setSaving(true)
 
@@ -119,12 +136,15 @@ export function ObligationForm() {
     try {
       if (isEdit && id) {
         await updateObligation(id, draft)
+        await saveShares(id, user.id, partners)
       } else {
         const created = await createObligation(draft, user.id)
+        await saveShares(created.id, user.id, partners)
         void track(user.id, 'obligation_created', {
           category,
           is_bridge: calc.isBridge,
           recurrence_months: recurrenceMonths,
+          partner_count: partners.length,
         })
         navigate(`/obligations/${created.id}`, { replace: true })
         return
@@ -227,27 +247,21 @@ export function ObligationForm() {
           </div>
         </div>
 
-        <label className="block space-y-1.5">
-          <span className="flex items-baseline justify-between">
-            <span className="text-sm font-semibold text-text">حصتك منه</span>
-            <span className="num text-sm text-text-muted">{sharePercent}%</span>
-          </span>
-          <input
-            type="range"
-            min={10}
-            max={100}
-            step={5}
-            value={sharePercent}
-            onChange={(e) => setSharePercent(Number(e.target.value))}
-            className="w-full accent-[var(--color-brand)]"
-          />
-          {sharePercent < 100 && (
-            <span className="block text-[13px] text-text-muted">
-              حصتك <span className="num">{formatMoney(calc.myTotal)}</span> من أصل{' '}
-              <span className="num">{formatMoney(totalAmount)}</span> — القسط محسوب على حصتك بس.
-            </span>
-          )}
-        </label>
+        <PartnersField
+          mySharePercent={sharePercent}
+          onMyShareChange={setSharePercent}
+          partners={partners}
+          onPartnersChange={setPartners}
+          totalAmount={totalAmount}
+          error={shareError}
+        />
+
+        {sharePercent < 100 && (
+          <p className="rounded-xl bg-surface-muted px-3 py-2.5 text-[13px] text-text-muted">
+            حصتك <span className="num">{formatMoney(calc.myTotal)}</span> من أصل{' '}
+            <span className="num">{formatMoney(totalAmount)}</span> — القسط محسوب على حصتك بس.
+          </p>
+        )}
       </section>
 
       {error && (

@@ -5,6 +5,9 @@ import { formatDate, formatMoney, formatMonthsRemaining } from '@/lib/format'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import { BridgeNotice } from '@/components/ui/BridgeNotice'
 import { Button } from '@/components/ui/Button'
+import { PartnerSettlements } from '@/features/partners/PartnerSettlements'
+import { listSettlements } from '@/features/partners/api'
+import type { PartnerSettlement } from '@/lib/db/types'
 import { addDeposit, archiveObligation, getObligation, track, type ObligationWithCalc } from './api'
 
 export function ObligationDetail() {
@@ -12,6 +15,8 @@ export function ObligationDetail() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [item, setItem] = useState<ObligationWithCalc | null>(null)
+  const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
+  const [payerId, setPayerId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +24,13 @@ export function ObligationDetail() {
   const load = useCallback(async () => {
     if (!id) return
     try {
-      setItem(await getObligation(id))
+      const [found, shares] = await Promise.all([
+        getObligation(id),
+        // فشل التسوية لا يمنع عرض الالتزام نفسه.
+        listSettlements(id).catch(() => [] as PartnerSettlement[]),
+      ])
+      setItem(found)
+      setSettlements(shares)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ما قدرنا نجيب الالتزام')
     } finally {
@@ -35,8 +46,11 @@ export function ObligationDetail() {
     if (!user || !item) return
     setBusy(true)
     try {
-      await addDeposit(item.obligation.id, user.id, item.calc.monthlyInstallment)
-      void track(user.id, 'deposit_added', { obligation_id: item.obligation.id })
+      await addDeposit(item.obligation.id, user.id, item.calc.monthlyInstallment, payerId)
+      void track(user.id, 'deposit_added', {
+        obligation_id: item.obligation.id,
+        by_partner: payerId !== null,
+      })
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ما قدرنا نسجّل الإيداع')
@@ -121,7 +135,31 @@ export function ObligationDetail() {
         </p>
       )}
 
+      {settlements.length > 0 && (
+        <PartnerSettlements
+          settlements={settlements}
+          mine={{ owed: calc.myTotal, deposited: myBalance }}
+        />
+      )}
+
       <div className="space-y-3">
+        {settlements.length > 0 && calc.monthlyInstallment > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-sm font-semibold text-text">مين بيودع؟</span>
+            <div className="flex flex-wrap gap-2">
+              <PayerChip label="أنا" active={payerId === null} onClick={() => setPayerId(null)} />
+              {settlements.map((s) => (
+                <PayerChip
+                  key={s.partner_id}
+                  label={s.partner_name}
+                  active={payerId === s.partner_id}
+                  onClick={() => setPayerId(s.partner_id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {calc.monthlyInstallment > 0 && (
           <Button onClick={deposit} loading={busy} className="w-full">
             أودعت {formatMoney(calc.monthlyInstallment)} ✓
@@ -139,6 +177,28 @@ export function ObligationDetail() {
         </div>
       </div>
     </div>
+  )
+}
+
+function PayerChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+        active ? 'border-brand bg-brand-soft text-brand' : 'border-border bg-surface text-text-muted'
+      }`}
+    >
+      {label}
+    </button>
   )
 }
 
