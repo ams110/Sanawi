@@ -1,5 +1,20 @@
 # قاعدة البيانات
 
+## ربط Supabase MCP (اختياري، على جهازك أنت)
+
+لا يوجد `.mcp.json` في المستودع عن قصد: وجوده يجعل Claude Code يطلب الموافقة
+على الخادم في كل جلسة، والمصادقة تحتاج متصفحاً فلا تكتمل في بيئة بعيدة.
+
+إن أردته محلياً، شغّل في مجلد المشروع:
+
+```bash
+claude mcp add --scope local --transport http supabase \
+  "https://mcp.supabase.com/mcp?project_ref=YOUR_PROJECT_REF&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+```
+
+ثم `claude` ثم `/mcp` واختر supabase للمصادقة. `--scope local` يبقيه على
+جهازك ولا يدخل المستودع.
+
 ## التطبيق
 
 افتح [Supabase Dashboard](https://supabase.com/dashboard) → مشروعك → **SQL Editor** →
