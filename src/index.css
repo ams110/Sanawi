@@ -6,10 +6,19 @@
 @import '@fontsource/ibm-plex-sans-arabic/600.css';
 @import '@fontsource/ibm-plex-sans-arabic/700.css';
 
+/*
+ * العبرية ضرورية لا تحسينية: القوالب الإسرائيلية فيها טסט و טיפול و ארנונה،
+ * والنسخة العربية من الخط لا تحمل حروفاً عبرية فيسقط المتصفح على خط عشوائي
+ * وتظهر الكلمة مشوّهة. النسختان من عائلة واحدة فلا يُلحظ الانتقال بينهما.
+ */
+@import '@fontsource/ibm-plex-sans-hebrew/400.css';
+@import '@fontsource/ibm-plex-sans-hebrew/500.css';
+@import '@fontsource/ibm-plex-sans-hebrew/700.css';
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --font-sans: 'IBM Plex Sans Arabic', 'IBM Plex Sans Hebrew', system-ui, sans-serif;
 
   /* هوية سنوي: أخضر زيتوني + كهرماني دافئ. لا بنفسجي ولا أزرق افتراضي. */
   --color-olive-50: #f2f6ec;
@@ -113,7 +122,13 @@
     overscroll-behavior-y: none;
   }
 
-  /* الأرقام تبقى لاتينية واتجاهها LTR حتى داخل نص عربي. */
+  /*
+   * الأرقام تبقى لاتينية واتجاهها LTR حتى داخل نص عربي.
+   *
+   * قاعدة: ضعها على الرقم وحده لا على سطر يخلط عربياً بأرقام.
+   * وضعها على السطر كله يجعل اتجاهه LTR فتقفز الكلمة العربية أو علامة %
+   * إلى الجهة الخطأ، والنص في الـ DOM يبقى سليماً فلا يظهر الخطأ إلا بالعين.
+   */
   .num {
     font-variant-numeric: tabular-nums lining-nums;
     direction: ltr;

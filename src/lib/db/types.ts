@@ -3,12 +3,18 @@
  *
  * مكتوبة يدوياً لتطابق ملفات supabase/migrations. حين يصير المشروع متاحاً
  * يمكن توليدها آلياً بـ `supabase gen types typescript` واستبدال هذا الملف.
+ *
+ * تحذير: صفوف الجداول هنا `type` لا `interface` عن قصد.
+ * الـ interface لا يملك index signature ضمنياً فلا يطابق
+ * `Record<string, unknown>` الذي يشترطه supabase-js، فيفشل الشرط صمتاً
+ * ويستنتج TypeScript أن كل صف هو never — فتنهار كل استدعاءات select
+ * و insert برسائل لا تشير إلى السبب من قريب ولا بعيد.
  */
 
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type IncomeFrequency = 'weekly' | 'biweekly' | 'monthly'
 
-export interface Profile {
+export type Profile = {
   id: string
   display_name: string | null
   currency: string
@@ -20,7 +26,7 @@ export interface Profile {
   created_at: string
 }
 
-export interface ObligationGroup {
+export type ObligationGroup = {
   id: string
   user_id: string
   name: string
@@ -29,7 +35,7 @@ export interface ObligationGroup {
   created_at: string
 }
 
-export interface Obligation {
+export type Obligation = {
   id: string
   user_id: string
   group_id: string | null
@@ -46,7 +52,7 @@ export interface Obligation {
   created_at: string
 }
 
-export interface ObligationPartner {
+export type ObligationPartner = {
   id: string
   user_id: string
   name: string
@@ -54,7 +60,7 @@ export interface ObligationPartner {
   created_at: string
 }
 
-export interface ObligationPartnerShare {
+export type ObligationPartnerShare = {
   id: string
   user_id: string
   obligation_id: string
@@ -62,7 +68,7 @@ export interface ObligationPartnerShare {
   share_percent: number
 }
 
-export interface FundDeposit {
+export type FundDeposit = {
   id: string
   user_id: string
   obligation_id: string
@@ -74,7 +80,7 @@ export interface FundDeposit {
   created_at: string
 }
 
-export interface ObligationPayment {
+export type ObligationPayment = {
   id: string
   user_id: string
   obligation_id: string
@@ -84,7 +90,7 @@ export interface ObligationPayment {
   created_at: string
 }
 
-export interface IncomeSource {
+export type IncomeSource = {
   id: string
   user_id: string
   name: string
@@ -94,7 +100,7 @@ export interface IncomeSource {
   created_at: string
 }
 
-export interface FixedCommitment {
+export type FixedCommitment = {
   id: string
   user_id: string
   name: string
@@ -104,7 +110,7 @@ export interface FixedCommitment {
   created_at: string
 }
 
-export interface Expense {
+export type Expense = {
   id: string
   user_id: string
   group_id: string | null
@@ -115,7 +121,7 @@ export interface Expense {
   created_at: string
 }
 
-export interface ObligationTemplate {
+export type ObligationTemplate = {
   id: string
   name_ar: string
   name_he: string | null
@@ -129,7 +135,7 @@ export interface ObligationTemplate {
   sort_order: number
 }
 
-export interface AppEvent {
+export type AppEvent = {
   id: string
   user_id: string
   event_name: string
@@ -138,7 +144,7 @@ export interface AppEvent {
 }
 
 /** مشهد محسوب — لا يُكتب فيه. */
-export interface ObligationBalance {
+export type ObligationBalance = {
   obligation_id: string
   user_id: string
   fund_balance: number
@@ -149,7 +155,7 @@ export interface ObligationBalance {
 }
 
 /** مشهد محسوب — لا يُكتب فيه. */
-export interface PartnerSettlement {
+export type PartnerSettlement = {
   obligation_id: string
   user_id: string
   partner_id: string
@@ -160,15 +166,22 @@ export interface PartnerSettlement {
   outstanding: number
 }
 
+/**
+ * supabase-js يشترط حقل Relationships على كل جدول ومشهد. بدونه لا يطابق
+ * النوعُ GenericSchema فيستنتج TypeScript صمتاً أن كل صف هو never،
+ * وتنهار كل استدعاءات select و insert برسائل لا تشير إلى السبب.
+ * مصفوفة فارغة كافية: لا نستعمل الضمّ التلقائي عبر العلاقات.
+ */
 type Table<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
   Row: Row
   Insert: Insert
   Update: Update
+  Relationships: []
 }
 
-type View<Row> = { Row: Row }
+type View<Row> = { Row: Row; Relationships: [] }
 
-export interface Database {
+export type Database = {
   public: {
     Tables: {
       profiles: Table<Profile>
@@ -188,8 +201,9 @@ export interface Database {
       obligation_balances: View<ObligationBalance>
       partner_settlements: View<PartnerSettlement>
     }
-    Functions: Record<string, never>
-    Enums: Record<string, never>
-    CompositeTypes: Record<string, never>
+    // نفس شكل ما يولّده `supabase gen types` للمجموعات الفارغة.
+    Functions: { [_ in never]: never }
+    Enums: { [_ in never]: never }
+    CompositeTypes: { [_ in never]: never }
   }
 }

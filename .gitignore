@@ -9,3 +9,4 @@ dist-ssr
 android
 ios
 .screenshots
+.test-account.json

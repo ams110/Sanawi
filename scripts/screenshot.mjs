@@ -1,5 +1,5 @@
 /**
- * لقطات شاشة للوضعين الفاتح والغامق + فحص سلوك وضع الجسر.
+ * لقطات شاشة للوضعين الفاتح والغامق مع فحوص سلوك.
  * التشغيل: npm run dev  ثم  node scripts/screenshot.mjs
  * المخرجات في .screenshots (متجاهَل من git).
  */
@@ -14,6 +14,12 @@ const URL_BASE = process.env.APP_URL ?? 'http://localhost:5173'
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 let failures = 0
 
+const check = (label, actual, expected) => {
+  const ok = actual === expected
+  if (!ok) failures++
+  console.log(`${ok ? '✅' : '❌'} ${label}: ${actual}${ok ? '' : ` (متوقّع: ${expected})`}`)
+}
+
 for (const scheme of ['light', 'dark']) {
   const ctx = await browser.newContext({
     viewport: { width: 400, height: 900 },
@@ -27,33 +33,12 @@ for (const scheme of ['light', 'dark']) {
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
 
   await page.goto(URL_BASE, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(600)
-  await page.screenshot({ path: `${OUT}/bridge-${scheme}.png`, fullPage: true })
+  await page.waitForTimeout(800)
+  await page.screenshot({ path: `${OUT}/start-${scheme}.png`, fullPage: true })
 
-  const headline = () => page.locator('section').first().locator('p.num').first().innerText()
-  const bridgeVisible = () => page.getByRole('status').count()
-
-  const checks = [
-    ['اتجاه الصفحة RTL', await page.evaluate(() => document.documentElement.dir), 'rtl'],
-    ['قسط وضع الجسر', await headline(), '₪ 2,000'],
-    ['تحذير الجسر ظاهر', await bridgeVisible(), 1],
-  ]
-
-  // ندفع الموعد إلى دورة كاملة: يجب أن ينزل القسط ويختفي التحذير.
-  await page.locator('input[type=range]').first().fill('12')
-  await page.waitForTimeout(400)
-  checks.push(
-    ['القسط بعد دورة كاملة', await headline(), '₪ 500'],
-    ['اختفاء التحذير', await bridgeVisible(), 0],
-    ['أخطاء وحدة التحكم', errors.length, 0],
-  )
-  await page.screenshot({ path: `${OUT}/normal-${scheme}.png`, fullPage: true })
-
-  for (const [label, actual, expected] of checks) {
-    const ok = actual === expected
-    if (!ok) failures++
-    console.log(`${ok ? '✅' : '❌'} [${scheme}] ${label}: ${actual}`)
-  }
+  check(`[${scheme}] اتجاه الصفحة`, await page.evaluate(() => document.documentElement.dir), 'rtl')
+  check(`[${scheme}] عنوان سنوي ظاهر`, await page.getByText('سنوي').first().isVisible(), true)
+  check(`[${scheme}] أخطاء وحدة التحكم`, errors.length, 0)
   if (errors.length) console.log(errors)
 
   await ctx.close()

@@ -1,261 +1,185 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { calculateObligation } from '@/lib/obligations/calc'
-import { formatMoney, formatMonthYear, formatMonthsRemaining } from '@/lib/format'
-import { ProgressRing } from '@/components/ui/ProgressRing'
-import { BridgeNotice } from '@/components/ui/BridgeNotice'
+import { BrowserRouter, Navigate, Route, Routes, Link, useLocation } from 'react-router-dom'
+import { isSupabaseConfigured } from '@/lib/supabase'
+import { AuthProvider, useAuth } from '@/features/auth/AuthProvider'
+import { AuthScreen } from '@/features/auth/AuthScreen'
+import { SetupScreen } from '@/components/SetupScreen'
+import { ObligationsScreen } from '@/features/obligations/ObligationsScreen'
+import { ObligationForm } from '@/features/obligations/ObligationForm'
+import { ObligationDetail } from '@/features/obligations/ObligationDetail'
+import { ProfileProvider, useProfile } from '@/features/profile/ProfileProvider'
+import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen'
+import { MonthScreen } from '@/features/month/MonthScreen'
+import { CalendarScreen } from '@/features/calendar/CalendarScreen'
+import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { lazy, Suspense } from 'react'
+import { useTranslation } from 'react-i18next'
 
-/**
- * شاشة معاينة مؤقتة للمرحلة 1.
- * غرضها الوحيد أن يرى المستخدم محرّك الحسابات وهو يعمل قبل ربط قاعدة البيانات،
- * وستُستبدل بشاشة «إضافة التزام» الحقيقية حالما تجهز جداول Supabase.
- */
+// الاستيراد الكسول يبقي المعاينة خارج الحزمة الرئيسية.
+const ComponentPreview = lazy(() =>
+  import('@/dev/ComponentPreview').then((m) => ({ default: m.ComponentPreview })),
+)
 
-const STATUS_TEXT = {
-  on_track: { label: 'ملحّق', className: 'bg-brand-soft text-brand' },
-  slightly_behind: { label: 'متأخر شوي', className: 'bg-accent-soft text-accent' },
-  behind: { label: 'متأخر', className: 'bg-danger-soft text-danger' },
-} as const
-
-const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: 'system', label: 'النظام' },
-  { value: 'light', label: 'فاتح' },
-  { value: 'dark', label: 'غامق' },
-]
-
-function addMonths(months: number): string {
-  const d = new Date()
-  d.setMonth(d.getMonth() + months)
-  return d.toISOString().slice(0, 10)
+function DevPreview() {
+  return (
+    <div className="min-h-dvh bg-bg">
+      <Suspense fallback={null}>
+        <ComponentPreview />
+      </Suspense>
+    </div>
+  )
 }
 
 export default function App() {
-  const [name, setName] = useState('تأمين السيارة')
-  const [totalAmount, setTotalAmount] = useState(6000)
-  const [monthsAhead, setMonthsAhead] = useState(3)
-  const [recurrenceMonths, setRecurrenceMonths] = useState(12)
-  const [fundBalance, setFundBalance] = useState(0)
-  const [sharePercent, setSharePercent] = useState(100)
+  // معاينة المكوّنات في التطوير فقط: تُحذف من حزمة الإنتاج لأن الشرط ثابت
+  // عند البناء، فيزيلها التقليم مع المكوّن كله.
+  if (import.meta.env.DEV && window.location.pathname === '/preview') {
+    return <DevPreview />
+  }
 
-  const nextDueDate = useMemo(() => addMonths(monthsAhead), [monthsAhead])
-
-  const calc = useMemo(
-    () =>
-      calculateObligation({
-        totalAmount,
-        mySharePercent: sharePercent,
-        myFundBalance: fundBalance,
-        nextDueDate,
-        recurrenceMonths,
-        cycleStartDate: new Date().toISOString().slice(0, 10),
-      }),
-    [totalAmount, sharePercent, fundBalance, nextDueDate, recurrenceMonths],
-  )
-
-  const status = STATUS_TEXT[calc.status]
+  // بلا مفاتيح لا فائدة من المصادقة ولا من التوجيه: نوجّه المستخدم للإعداد.
+  if (!isSupabaseConfigured) return <SetupScreen />
 
   return (
-    <div className="min-h-dvh bg-bg pb-16">
-      <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-5 py-3">
-          <div>
-            <h1 className="text-lg font-bold text-text">سنوي</h1>
-            <p className="text-xs text-text-muted">معاينة محرّك الحسابات — المرحلة 1</p>
-          </div>
-          <ThemeSwitch />
-        </div>
-      </header>
+    <BrowserRouter>
+      <AuthProvider>
+        <ProfileProvider>
+          <Shell />
+        </ProfileProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  )
+}
 
-      <main className="mx-auto max-w-lg space-y-5 px-5 py-6">
-        {/* الرقم الرئيسي: يُقرأ في نصف ثانية */}
-        <section className="rounded-3xl border border-border bg-surface p-6 text-center">
-          <p className="text-sm text-text-muted">قسطك الشهري لهاد الالتزام</p>
-          <p className="num mt-2 text-6xl font-bold leading-none text-brand">
-            {formatMoney(calc.monthlyInstallment)}
-          </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
-            <span className={`rounded-full px-3 py-1 font-semibold ${status.className}`}>
-              {status.label}
-            </span>
-            <span className="text-text-muted">
-              {formatMonthsRemaining(calc.monthsRemaining, calc.isOverdue)} ·{' '}
-              {formatMonthYear(nextDueDate)}
-            </span>
-          </div>
-        </section>
+function Shell() {
+  const { session, loading } = useAuth()
+  const { profile, loading: profileLoading } = useProfile()
 
-        {calc.isBridge && (
-          <BridgeNotice
-            bridgeInstallment={calc.monthlyInstallment}
-            normalInstallment={calc.normalInstallment}
-            monthsRemaining={calc.monthsRemaining}
-            recurrenceMonths={recurrenceMonths}
-          />
+  if (loading || (session && profileLoading)) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-bg">
+        <span className="size-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+      </div>
+    )
+  }
+
+  if (!session) return <AuthScreen />
+
+  // المقدمة تسبق كل شيء ولا تُعرض إلا لمن لم يكملها.
+  // فشل جلب الملف لا يحبس المستخدم: نكمل إلى التطبيق بدل شاشة عالقة.
+  if (profile && !profile.onboarding_completed) return <OnboardingScreen />
+
+  return (
+    <div className="min-h-dvh bg-bg pb-24">
+      <Header />
+      <main className="mx-auto max-w-lg">
+        <Routes>
+          <Route path="/" element={<Navigate to="/month" replace />} />
+          <Route path="/month" element={<MonthScreen />} />
+          <Route path="/calendar" element={<CalendarScreen />} />
+          <Route path="/money" element={<MoneyScreen />} />
+          <Route path="/obligations" element={<ObligationsScreen />} />
+          <Route path="/obligations/new" element={<ObligationForm />} />
+          <Route path="/obligations/:id" element={<ObligationDetail />} />
+          <Route path="/obligations/:id/edit" element={<ObligationForm />} />
+          <Route path="*" element={<Navigate to="/month" replace />} />
+        </Routes>
+      </main>
+      <BottomNav />
+    </div>
+  )
+}
+
+const TABS = [
+  { to: '/month', key: 'nav.month', icon: '📊' },
+  { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
+  { to: '/calendar', key: 'nav.calendar', icon: '📅' },
+  { to: '/money', key: 'nav.money', icon: '💰' },
+] as const
+
+/**
+ * تنقّل سفلي: الإبهام يصل إلى أسفل الشاشة لا إلى أعلاها،
+ * والتطبيق يُستعمل من التلفون بيد واحدة في 95% من الوقت.
+ */
+function BottomNav() {
+  const { t } = useTranslation()
+  const { pathname } = useLocation()
+
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg/95 backdrop-blur">
+      <ul className="mx-auto flex max-w-lg items-stretch pb-[env(safe-area-inset-bottom)]">
+        {TABS.map((tab) => {
+          const active = pathname === tab.to || pathname.startsWith(`${tab.to}/`)
+          return (
+            <li key={tab.to} className="flex-1">
+              <Link
+                to={tab.to}
+                aria-current={active ? 'page' : undefined}
+                className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
+                  active ? 'text-brand' : 'text-text-muted'
+                }`}
+              >
+                <span className="text-lg leading-none" aria-hidden="true">
+                  {tab.icon}
+                </span>
+                {t(tab.key)}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </nav>
+  )
+}
+
+const THEME_OPTIONS = [
+  { value: 'system', key: 'theme.system' },
+  { value: 'light', key: 'theme.light' },
+  { value: 'dark', key: 'theme.dark' },
+] as const satisfies readonly { value: ThemePreference; key: string }[]
+
+function Header() {
+  const { t } = useTranslation()
+  const { signOut } = useAuth()
+  const { preference, setPreference } = useTheme()
+  const { pathname } = useLocation()
+  const isTab = TABS.some((tab) => tab.to === pathname)
+
+  return (
+    <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
+      <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
+        {isTab ? (
+          <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
+        ) : (
+          <Link to="/obligations" className="text-sm font-bold text-brand">
+            ← {t('obligations.backToList')}
+          </Link>
         )}
 
-        {/* كارت الالتزام كما سيظهر في شاشة الالتزامات */}
-        <section className="rounded-3xl border border-border bg-surface p-4">
-          <div className="flex items-center gap-4">
-            <ProgressRing progress={calc.progress} status={calc.status} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-bold text-text">{name || 'بدون اسم'}</p>
-              {/* لا نضع .num على سطر مختلط: اتجاه LTR يقلب موضع الكلمة العربية بينهما. */}
-              <p className="text-sm text-text-muted">
-                <span className="num">{formatMoney(fundBalance)}</span>
-                {' من '}
-                <span className="num">{formatMoney(calc.myTotal)}</span>
-              </p>
-            </div>
-            <div className="text-end">
-              <p className="num text-lg font-bold text-text">
-                {formatMoney(calc.monthlyInstallment)}
-              </p>
-              <p className="text-xs text-text-muted">بالشهر</p>
-            </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-xl border border-border bg-surface p-0.5">
+            {THEME_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setPreference(opt.value)}
+                className={`rounded-lg px-2 py-1 text-xs font-semibold transition ${
+                  preference === opt.value ? 'bg-brand-soft text-brand' : 'text-text-muted'
+                }`}
+              >
+                {t(opt.key)}
+              </button>
+            ))}
           </div>
-          {sharePercent < 100 && (
-            <p className="mt-3 rounded-xl bg-surface-muted px-3 py-2 text-[13px] text-text-muted">
-              مشترك: حصتك <span className="num">{sharePercent}%</span> من{' '}
-              <span className="num">{formatMoney(totalAmount)}</span>
-            </p>
-          )}
-        </section>
-
-        {/* المدخلات — معاينة حية: كل تغيير ينعكس فوراً فوق */}
-        <section className="space-y-4 rounded-3xl border border-border bg-surface p-5">
-          <h2 className="text-sm font-bold text-text-muted">جرّب الأرقام</h2>
-
-          <Field label="اسم الالتزام">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand"
-            />
-          </Field>
-
-          <Field label="المبلغ الكامل" hint={formatMoney(totalAmount)}>
-            <input
-              type="number"
-              inputMode="numeric"
-              value={totalAmount}
-              onChange={(e) => setTotalAmount(Math.max(0, Number(e.target.value) || 0))}
-              className="num w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand"
-            />
-          </Field>
-
-          <Slider
-            label="الموعد الجاي"
-            hint={`${monthsAhead} شهر`}
-            min={1}
-            max={24}
-            value={monthsAhead}
-            onChange={setMonthsAhead}
-          />
-
-          <Field label="الدورية">
-            <div className="flex gap-2">
-              {[12, 6, 3, 0].map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setRecurrenceMonths(m)}
-                  className={`flex-1 rounded-xl border px-2 py-2 text-sm font-semibold transition ${
-                    recurrenceMonths === m
-                      ? 'border-brand bg-brand-soft text-brand'
-                      : 'border-border bg-bg text-text-muted'
-                  }`}
-                >
-                  {m === 0 ? 'مرة وحدة' : `${m} شهور`}
-                </button>
-              ))}
-            </div>
-          </Field>
-
-          <Slider
-            label="اللي جمعته لهلأ"
-            hint={formatMoney(fundBalance)}
-            min={0}
-            max={Math.max(1, totalAmount)}
-            step={50}
-            value={fundBalance}
-            onChange={setFundBalance}
-          />
-
-          <Slider
-            label="حصتك من الالتزام"
-            hint={`${sharePercent}%`}
-            min={10}
-            max={100}
-            step={5}
-            value={sharePercent}
-            onChange={setSharePercent}
-          />
-        </section>
-      </main>
-    </div>
-  )
-}
-
-function ThemeSwitch() {
-  const { preference, setPreference } = useTheme()
-  return (
-    <div className="flex rounded-xl border border-border bg-surface p-0.5">
-      {THEME_OPTIONS.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => setPreference(opt.value)}
-          className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-            preference === opt.value ? 'bg-brand-soft text-brand' : 'text-text-muted'
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="flex items-baseline justify-between">
-        <span className="text-sm font-semibold text-text">{label}</span>
-        {hint && <span className="num text-sm text-text-muted">{hint}</span>}
-      </span>
-      {children}
-    </label>
-  )
-}
-
-function Slider({
-  label,
-  hint,
-  min,
-  max,
-  step = 1,
-  value,
-  onChange,
-}: {
-  label: string
-  hint: string
-  min: number
-  max: number
-  step?: number
-  value: number
-  onChange: (next: number) => void
-}) {
-  return (
-    <Field label={label} hint={hint}>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-[var(--color-brand)]"
-      />
-    </Field>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="text-xs font-semibold text-text-muted"
+          >
+            {t('theme.signOut')}
+          </button>
+        </div>
+      </div>
+    </header>
   )
 }
