@@ -106,8 +106,50 @@ export type FixedCommitment = {
   name: string
   amount: number
   day_of_month: number | null
+  icon: string | null
+  /** آخر دفعة — فارغ يعني متكرّر بلا نهاية. */
+  ends_on: string | null
+  /** أصل الدين للعرض؛ الحساب يقوم على amount و ends_on. */
+  total_amount: number | null
+  my_share_percent: number
   is_active: boolean
   created_at: string
+}
+
+export type CommitmentPartnerShare = {
+  id: string
+  user_id: string
+  commitment_id: string
+  partner_id: string
+  share_percent: number
+}
+
+export type CommitmentTemplate = {
+  id: string
+  name_ar: string
+  name_he: string | null
+  name_en: string | null
+  category: string
+  icon: string
+  suggested_min: number | null
+  suggested_max: number | null
+  is_installment: boolean
+  country: string
+  sort_order: number
+}
+
+export type CommitmentDetail = {
+  commitment_id: string
+  user_id: string
+  name: string
+  icon: string | null
+  amount: number
+  ends_on: string | null
+  total_amount: number | null
+  my_share_percent: number
+  my_amount: number
+  /** فارغ للبنود بلا نهاية. */
+  payments_left: number | null
 }
 
 export type Expense = {
@@ -208,7 +250,9 @@ export type Database = {
       fixed_commitments: Table<FixedCommitment>
       expenses: Table<Expense>
       expense_categories: Table<ExpenseCategory>
+      commitment_partner_shares: Table<CommitmentPartnerShare>
       obligation_templates: Table<ObligationTemplate>
+      commitment_templates: Table<CommitmentTemplate>
       events: Table<AppEvent>
       bill_payments: Table<BillPayment>
     }
@@ -216,6 +260,7 @@ export type Database = {
       obligation_balances: View<ObligationBalance>
       partner_settlements: View<PartnerSettlement>
       bill_averages: View<BillAverage>
+      commitment_details: View<CommitmentDetail>
     }
     // نفس شكل ما يولّده `supabase gen types` للمجموعات الفارغة.
     Functions: { [_ in never]: never }

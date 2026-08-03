@@ -23,11 +23,14 @@ npm run dev
 | `npx vitest run` | اختبارات محرّك الحسابات |
 | `node scripts/screenshot.mjs` | لقطات الوضعين الفاتح والغامق + فحص وضع الجسر (يتطلب `npm run dev` يعمل) |
 | `npm run check:expenses` | فحص المصاريف اليومية على قاعدة حقيقية: التصنيفات وRLS والتلخيص |
+| `npm run check:commitments` | فحص البنود الشهرية: القوالب والأقساط وحصص الشركاء |
 
 ## البنية
 
 ```
 src/lib/obligations/calc.ts   محرّك الحسابات — نقي، بلا React ولا Supabase
+src/lib/commitments/calc.ts   البنود الشهرية: الأقساط التي تنتهي وحصص الشركاء
+src/lib/expenses/calc.ts      المصاريف اليومية: التلخيص وإسقاط الوتيرة
 src/lib/format.ts             تنسيق العملة والتواريخ (العملة واللغة وسيطات لا ثوابت)
 src/lib/i18n/ar.ts            كل نصوص الواجهة
 src/lib/theme.tsx             الثيم: النظام / فاتح / غامق

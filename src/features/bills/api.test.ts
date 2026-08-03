@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { monthKey, shiftMonth, summarizeBills, type BillRow } from './api'
 
-const commitment = (id: string) =>
-  ({ id, user_id: 'u', name: 'كهربا', amount: 300, day_of_month: null, is_active: true, created_at: '' })
+const commitment = (id: string) => ({
+  id,
+  user_id: 'u',
+  name: 'كهربا',
+  amount: 300,
+  day_of_month: null,
+  icon: '💡',
+  ends_on: null,
+  total_amount: null,
+  my_share_percent: 100,
+  is_active: true,
+  created_at: '',
+})
 
 const row = (id: string, amount: number | null, paid: boolean): BillRow => ({
   commitment: commitment(id),
