@@ -5,7 +5,10 @@ const config: CapacitorConfig = {
   appName: 'سنوي',
   webDir: 'dist',
   /*
-   * التطبيق يحمّل واجهته من GitHub Pages لا من الأصول المحزومة.
+   * التطبيق يحمّل واجهته من الموقع المنشور لا من الأصول المحزومة.
+   *
+   * العنوان دومين مخصّص لا `ams110.github.io/Sanawi/`: الأخير يردّ 301 إلى
+   * الدومين المخصّص، وتوفير قفزةٍ عند كل فتح خيرٌ من دفعها.
    *
    * بهذا تصل كل ميزة جديدة بإعادة تحميل، بلا تنصيب APK. التنازل أن التطبيق
    * لا يفتح بلا إنترنت — وهو تنازل نظري هنا: كل رقم فيه يأتي من Supabase،
@@ -15,7 +18,7 @@ const config: CapacitorConfig = {
    * الأيقونة — أي ما يمسّ النظام لا الواجهة.
    */
   server: {
-    url: 'https://ams110.github.io/Sanawi/',
+    url: 'https://sanawi.kabblan.com/',
     cleartext: false,
   },
   android: {
