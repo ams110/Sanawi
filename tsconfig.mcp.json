@@ -1,0 +1,45 @@
+{
+  /*
+   * بناء خادم MCP.
+   *
+   * الجذر هو جذر المستودع لا مجلد mcp، لأن الخادم يستورد محرّكات الحساب من
+   * src/lib مباشرةً: القسط الذي يقوله كلود هو نفس الرقم الذي تعرضه الشاشة لأنه
+   * خارج من الدالة نفسها. الثمن مسار مخرجات متداخل (mcp/dist/mcp/index.js)،
+   * وهو أرخص من نسخةٍ ثانية من الحسابات تنحرف عن الأولى بعد أول تعديل.
+   *
+   * منفصل عن tsconfig.app.json عمداً: ذاك مبنيّ للمتصفح بـ moduleResolution
+   * bundler وبلا انبعاث، وهذا يُنتج ESM لـ Node.
+   */
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "outDir": "mcp/dist",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "moduleDetection": "force",
+    "verbatimModuleSyntax": true,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "mcp/**/*.ts",
+    "src/lib/db/types.ts",
+    "src/lib/obligations/calc.ts",
+    "src/lib/obligations/renewal.ts",
+    "src/lib/obligations/calendar.ts",
+    "src/lib/budget/calc.ts",
+    "src/lib/budget/month.ts",
+    "src/lib/commitments/calc.ts",
+    "src/lib/expenses/calc.ts",
+    "src/lib/budget/groupCost.ts"
+  ],
+  "exclude": ["mcp/dist"]
+}

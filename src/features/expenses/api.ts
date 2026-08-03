@@ -1,10 +1,11 @@
 import { supabase } from '@/lib/supabase'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
 import type { ExpenseRow } from '@/lib/expenses/calc'
+import { toDateKey, toMonthKey } from '@/lib/date'
 
 /** أول يوم في الشهر بصيغة ISO — مفتاح الشهر نفسه المستعمل في الفواتير. */
 export function monthKey(date: Date = new Date()): string {
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10)
+  return toMonthKey(date)
 }
 
 export function shiftMonth(key: string, delta: number): string {
@@ -16,7 +17,7 @@ export function shiftMonth(key: string, delta: number): string {
 /** اليوم الأخير في شهر المفتاح — حدّ الاستعلام الأعلى. */
 function monthEnd(key: string): string {
   const d = new Date(`${key}T00:00:00`)
-  return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10)
+  return toDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 0))
 }
 
 /**

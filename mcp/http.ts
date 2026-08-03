@@ -1,0 +1,230 @@
+/**
+ * نقل HTTP — لخادمٍ بعيد يُضاف إلى كلود برابط، بلا جهاز يشغّله.
+ *
+ * مبنيّ على `Request`/`Response` القياسيين لا على أنواع Node، فيعمل كما هو في
+ * Deno وSupabase Edge Functions وأي بيئة تفهم fetch. هذا هو الفرق الذي يجعل
+ * الخادم قابلاً للنشر أصلاً: صاحب التطبيق على تلفونه، ولا كمبيوتر يشغّل
+ * عمليةً عبر stdio.
+ *
+ * عديم الحالة: كل نداء POST يحمل رسالة JSON-RPC واحدة، ويُبنى له خادمٌ جديد
+ * فيردّ ثم يُغلق. لا جلسات ولا SSE — أبسط ما يفي بالبروتوكول، وأقلّ ما يمكن
+ * أن ينكسر في بيئة تُطفَأ فيها العملية بين النداءين.
+ *
+ * أمّا جلسة Supabase فتُشارَك بين النداءات داخل النسخة الواحدة: `connect`
+ * يُمرَّر من الخارج محفوظاً، فلا يتكرّر تسجيل الدخول مع كل رسالة.
+ */
+
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import { createSanawiServer, SERVER_INFO } from './server.js'
+import { createSession, readConfig, type Config, type Connection } from './session.js'
+import { env } from './env.js'
+
+/**
+ * نقلٌ لرسالة واحدة.
+ *
+ * `StreamableHTTPServerTransport` في SDK مكتوب على `IncomingMessage` و
+ * `ServerResponse` من Node، وهما غير موجودين في Deno. النقل هنا يحقّق الواجهة
+ * نفسها بأبسط شكل: ندفع الرسالة الواردة، وننتظر أول رسالة صادرة.
+ */
+class SingleMessageTransport implements Transport {
+  onmessage?: (message: JSONRPCMessage) => void
+  onclose?: () => void
+  onerror?: (error: Error) => void
+
+  private settle!: (message: JSONRPCMessage | null) => void
+  readonly reply: Promise<JSONRPCMessage | null>
+
+  constructor() {
+    this.reply = new Promise((resolve) => {
+      this.settle = resolve
+    })
+  }
+
+  async start(): Promise<void> {}
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    this.settle(message)
+  }
+
+  async close(): Promise<void> {
+    // من لم يردّ لا يُنتظر إلى الأبد: الإشعارات تُغلق بلا رد وهذا صحيح.
+    this.settle(null)
+    this.onclose?.()
+  }
+}
+
+const JSON_HEADERS = { 'content-type': 'application/json' }
+
+/**
+ * ترويسات CORS.
+ *
+ * كلود ينادي الخادم من متصفّح المستخدم في بعض المسارات، فبدونها يُرفض النداء
+ * قبل أن يصل إلى الكود. `mcp-protocol-version` و`mcp-session-id` ترويستان
+ * يرسلهما العميل، ويجب أن تكونا مسموحتين صراحةً.
+ */
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'POST, GET, OPTIONS',
+  'access-control-allow-headers':
+    'authorization, content-type, mcp-protocol-version, mcp-session-id, x-sanawi-token',
+  'access-control-max-age': '86400',
+}
+
+function jsonRpcError(id: unknown, code: number, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ jsonrpc: '2.0', id: id ?? null, error: { code, message } }),
+    { status, headers: { ...JSON_HEADERS, ...CORS_HEADERS } },
+  )
+}
+
+/**
+ * هل يحمل النداء المفتاح؟
+ *
+ * الرابط عام، والبيانات مالية. المفتاح يُقبل من ثلاثة مواضع لأن عملاء MCP
+ * يختلفون فيما يسمحون بضبطه: ترويسة `Authorization: Bearer`، أو ترويسة
+ * `x-sanawi-token`، أو آخر مقطع في المسار — وهذا الأخير هو ما يعمل مع عميلٍ
+ * لا يقبل إلا رابطاً مجرّداً.
+ *
+ * المقارنة بطول ثابت: مقارنة النصوص العادية تخرج عند أول حرف مختلف، وفرقُ
+ * الزمن يسرّب المفتاح حرفاً حرفاً لمن يقيسه.
+ */
+function tokenMatches(request: Request, url: URL, expected: string): boolean {
+  const bearer = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
+  const header = request.headers.get('x-sanawi-token')
+  const tail = url.pathname.split('/').filter(Boolean).at(-1)
+
+  return [bearer, header, tail].some((value) => value !== undefined && safeEqual(value, expected))
+}
+
+function safeEqual(a: string | null | undefined, b: string): boolean {
+  if (typeof a !== 'string' || a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+export interface HttpHandlerOptions {
+  config: Config
+  connect: () => Promise<Connection>
+  /** المفتاح الذي يحرس الرابط. فارغ = الرابط مفتوح، ولا يُسمح به إلا صراحةً. */
+  token: string
+}
+
+export function createFetchHandler(options: HttpHandlerOptions) {
+  const { config, connect, token } = options
+
+  return async function handle(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: CORS_HEADERS })
+    }
+
+    if (request.method === 'GET') {
+      // العميل يفتح GET ليطلب قناة SSE. لا نملكها — والبروتوكول يجعل 405 هي
+      // الإجابة الصحيحة، فينتقل العميل إلى الردّ المباشر بدل أن ينتظر بثّاً
+      // لا يأتي. أي GET آخر هو فحص حياة: يقول «أنا هنا» ولا يكشف رقماً واحداً.
+      if ((request.headers.get('accept') ?? '').includes('text/event-stream')) {
+        return jsonRpcError(null, -32601, 'لا بثّ SSE — الردود مباشرة على POST.', 405)
+      }
+      return new Response(
+        JSON.stringify({ ...SERVER_INFO, transport: 'http', readOnly: config.readOnly }),
+        { headers: { ...JSON_HEADERS, ...CORS_HEADERS } },
+      )
+    }
+
+    if (request.method === 'DELETE') {
+      // إنهاء جلسة — لا جلسات هنا، فالإنهاء ناجح بلا عمل.
+      return new Response(null, { status: 204, headers: CORS_HEADERS })
+    }
+
+    if (request.method !== 'POST') {
+      return jsonRpcError(null, -32600, 'الطريقة غير مدعومة — استعمل POST.', 405)
+    }
+
+    if (token && !tokenMatches(request, url, token)) {
+      return jsonRpcError(null, -32001, 'مفتاح غير صحيح.', 401)
+    }
+
+    let payload: unknown
+    try {
+      payload = await request.json()
+    } catch {
+      return jsonRpcError(null, -32700, 'جسم الطلب ليس JSON صالحاً.', 400)
+    }
+
+    // الدفعات أُزيلت من البروتوكول، لكن عميلاً قديماً قد يرسلها — نرفضها بوضوح
+    // بدل أن نعالج أول رسالة ونُسقط الباقي صامتين.
+    if (Array.isArray(payload)) {
+      return jsonRpcError(null, -32600, 'الدفعات غير مدعومة — أرسل رسالة واحدة.', 400)
+    }
+
+    const message = payload as JSONRPCMessage & { id?: unknown; method?: unknown }
+    const server = createSanawiServer(config, connect)
+    const transport = new SingleMessageTransport()
+
+    /*
+     * الإشعار لا رد له.
+     *
+     * `notifications/initialized` يصل بلا `id`، فانتظارُ ردٍّ عليه انتظارٌ لما
+     * لا يأتي — وهو تعليقٌ تامّ للنداء لا خطأ يظهر. نميّزه قبل الانتظار لا
+     * بعده، ونردّ 202 كما يتوقّع البروتوكول.
+     */
+    const isNotification = message.id === undefined || message.id === null
+
+    try {
+      await server.connect(transport)
+      transport.onmessage?.(message)
+
+      if (isNotification) return new Response(null, { status: 202, headers: CORS_HEADERS })
+
+      const reply = await transport.reply
+      if (!reply) return new Response(null, { status: 202, headers: CORS_HEADERS })
+
+      return new Response(JSON.stringify(reply), {
+        headers: { ...JSON_HEADERS, ...CORS_HEADERS },
+      })
+    } catch (error) {
+      return jsonRpcError(
+        message.id,
+        -32603,
+        error instanceof Error ? error.message : String(error),
+        500,
+      )
+    } finally {
+      await server.close().catch(() => {})
+    }
+  }
+}
+
+/**
+ * المدخل الجاهز لبيئات fetch.
+ *
+ * يقرأ الإعداد ويُنشئ الجلسة مرة واحدة عند تحميل الوحدة، فتُعاد على كل النداءات
+ * ما دامت النسخة حيّة. سقوط الإعداد يصير رداً 500 مفهوماً لا انهياراً صامتاً
+ * عند أول رسالة.
+ */
+export function createSanawiFetchHandler(): (request: Request) => Promise<Response> {
+  try {
+    const config = readConfig()
+    const token = (env('SANAWI_MCP_TOKEN') ?? '').trim()
+
+    if (!token && env('SANAWI_ALLOW_PUBLIC') !== '1') {
+      throw new Error(
+        'SANAWI_MCP_TOKEN ناقص. الرابط عام والبيانات مالية، فبلا مفتاح يقرأ حسابَك من يعرف الرابط.\n' +
+          'ولّد مفتاحاً عشوائياً طويلاً وضعه في أسرار الدالة.\n' +
+          'لتشغيلٍ مفتوح عن قصد — في فحصٍ محلي مثلاً — اضبط SANAWI_ALLOW_PUBLIC=1.',
+      )
+    }
+
+    return createFetchHandler({ config, connect: createSession(config), token })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return async () =>
+      new Response(JSON.stringify({ error: message }), {
+        status: 500,
+        headers: { ...JSON_HEADERS, ...CORS_HEADERS },
+      })
+  }
+}

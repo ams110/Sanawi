@@ -5,6 +5,7 @@ import { formatDate, formatMoney } from '@/lib/format'
 import { useRefresh } from '@/lib/refresh'
 import type { IncomeEntry, IncomeSource } from '@/lib/db/types'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
+import { toDateKey } from '@/lib/date'
 import {
   addIncomeEntry,
   deleteIncomeEntry,
@@ -17,7 +18,7 @@ const inputClass =
   'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand'
 
 const monthKey = (d = new Date()) =>
-  new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
+  toDateKey(new Date(d.getFullYear(), d.getMonth(), 1))
 
 function EntryRow({
   entry,
@@ -150,7 +151,7 @@ export function IncomeEntries({
   const [amount, setAmount] = useState(0)
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [name, setName] = useState('')
-  const [receivedAt, setReceivedAt] = useState(() => new Date().toISOString().slice(0, 10))
+  const [receivedAt, setReceivedAt] = useState(() => toDateKey())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

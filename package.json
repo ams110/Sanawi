@@ -9,10 +9,14 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
+    "build:mcp": "tsc -p tsconfig.mcp.json",
+    "mcp": "node mcp/dist/mcp/index.js",
     "check:db": "node scripts/check-db.mjs",
+    "check:mcp": "node scripts/check-mcp.mjs",
     "check:flow": "node scripts/check-flow.mjs",
     "check:ui": "node scripts/screenshot.mjs",
     "check:uiflow": "node scripts/check-ui-flow.mjs",
+    "build:edge": "node scripts/build-edge.mjs",
     "check:expenses": "node --experimental-strip-types scripts/check-expenses.mjs",
     "check:commitments": "node --experimental-strip-types scripts/check-commitments.mjs",
     "check:goals": "node --experimental-strip-types scripts/check-goals.mjs",
@@ -29,6 +33,7 @@
     "@capacitor/status-bar": "^8.0.3",
     "@fontsource/ibm-plex-sans-arabic": "^5.3.0",
     "@fontsource/ibm-plex-sans-hebrew": "^5.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@supabase/supabase-js": "^2.111.0",
     "@tailwindcss/vite": "^4.3.3",
     "date-fns": "^4.4.0",
@@ -38,7 +43,8 @@
     "react-i18next": "^17.0.11",
     "react-router-dom": "^7.11.0",
     "recharts": "^3.10.1",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import type { ExpenseCategory } from '@/lib/db/types'
 import { addCategory, addExpense, monthKey } from './api'
+import { toDateKey } from '@/lib/date'
 
 const inputClass =
   'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand'
@@ -209,7 +210,7 @@ export function AddExpenseForm({
  */
 function defaultDate(month: string): string {
   const today = new Date()
-  return monthKey(today) === month ? today.toISOString().slice(0, 10) : month
+  return monthKey(today) === month ? toDateKey(today) : month
 }
 
 function NewCategoryFields({

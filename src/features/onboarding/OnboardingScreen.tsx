@@ -8,6 +8,7 @@ import { TemplatePicker } from '@/features/obligations/TemplatePicker'
 import { createObligation, listTemplates, track } from '@/features/obligations/api'
 import { Button } from '@/components/ui/Button'
 import type { ObligationTemplate } from '@/lib/db/types'
+import { toDateKey } from '@/lib/date'
 
 /**
  * أول تشغيل: شاشتا شرح ثم إضافة أول التزام من القوالب.
@@ -71,7 +72,7 @@ export function OnboardingScreen() {
           name: tpl.name_ar,
           category: tpl.category,
           total_amount: suggested,
-          next_due_date: due.toISOString().slice(0, 10),
+          next_due_date: toDateKey(due),
           recurrence_months: tpl.default_recurrence_months,
           my_share_percent: 100,
           group_id: null,

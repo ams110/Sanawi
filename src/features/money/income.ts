@@ -1,12 +1,13 @@
 import { supabase } from '@/lib/supabase'
 import type { IncomeEntry } from '@/lib/db/types'
+import { toDateKey } from '@/lib/date'
 
 /** حدود الشهر: أوّله وآخره بصيغة ISO. */
 export function monthBounds(key: string): { start: string; end: string } {
   const d = new Date(`${key}T00:00:00`)
   return {
     start: key,
-    end: new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10),
+    end: toDateKey(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
   }
 }
 

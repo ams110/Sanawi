@@ -1,9 +1,17 @@
 import { supabase } from '@/lib/supabase'
 import type { BillAverage, BillPayment, FixedCommitment } from '@/lib/db/types'
+import { toDateKey, toMonthKey } from '@/lib/date'
 
-/** مفتاح الشهر: أول يوم فيه بصيغة ISO. */
+/**
+ * مفتاح الشهر: أول يوم فيه بصيغة ISO.
+ *
+ * يُبنى من حقول التقويم المحلي لا عبر `toISOString`. الأخير يحوّل إلى UTC،
+ * فأول آب في القدس (UTC+3) يصير `2026-07-31` — مفتاحاً لشهر تموز. النتيجة
+ * كانت فاتورةً تُحفظ تحت الشهر السابق وترويسةً تقول «يوليو» والمستخدم يسجّل
+ * أغسطس. لم يظهر العطل لأن التطوير والاختبارات تعمل على UTC حيث الفرق صفر.
+ */
 export function monthKey(date: Date = new Date()): string {
-  return new Date(date.getFullYear(), date.getMonth(), 1).toISOString().slice(0, 10)
+  return toMonthKey(date)
 }
 
 export function shiftMonth(key: string, delta: number): string {
@@ -69,7 +77,7 @@ export async function saveBill(
       commitment_id: commitmentId,
       billing_month: month,
       amount,
-      paid_at: paid ? new Date().toISOString().slice(0, 10) : null,
+      paid_at: paid ? toDateKey() : null,
       method_id: methodId,
     },
     { onConflict: 'commitment_id,billing_month' },
