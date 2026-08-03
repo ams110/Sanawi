@@ -31,7 +31,15 @@ import {
   monthKey,
   type ObligationView,
 } from '../data.js'
-import { guard, longDate, money, monthYear, ok, recurrenceLabel } from '../format.js'
+import {
+  CATEGORY_LABEL,
+  guard,
+  longDate,
+  money,
+  monthYear,
+  ok,
+  recurrenceLabel,
+} from '../format.js'
 import {
   billRowOut,
   calendarMonthOut,
@@ -552,7 +560,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 
       // المجموعة كيانٌ صريح يُبحث عنه، والتصنيف نصٌّ على الالتزام نفسه.
       const found = group ? await findGroup(connection, group) : null
-      const label = found ? found.name : category!
+      const label = found
+        ? found.name
+        : (CATEGORY_LABEL[category!.toLowerCase()] ?? category!)
 
       const [obligations, expenses] = await Promise.all([
         loadObligations(connection),

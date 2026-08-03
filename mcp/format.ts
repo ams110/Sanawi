@@ -68,6 +68,22 @@ export function isoDate(date: Date = new Date()): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
+/**
+ * أسماء التصنيفات كما تظهر في التطبيق.
+ *
+ * منسوخة من `categories` في `src/lib/i18n/ar.ts` لا مستوردة: ملف اللغة يمرّ
+ * على i18next الذي يلمس `document` عند التحميل، فلا يعيش في Node. والنسخة
+ * هنا ستةُ أسطر ثابتة، أرخص من إخراج ملف اللغة من المتصفح لأجلها.
+ */
+export const CATEGORY_LABEL: Record<string, string> = {
+  car: 'السيارة',
+  health: 'الصحة',
+  events: 'مناسبات',
+  home: 'البيت',
+  lifestyle: 'سفر وترفيه',
+  other: 'متفرقات',
+}
+
 export const STATUS_LABEL: Record<string, string> = {
   on_track: 'ملحّق',
   slightly_behind: 'متأخر قليلاً',
