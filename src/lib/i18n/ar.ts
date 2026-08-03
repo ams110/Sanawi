@@ -21,6 +21,7 @@ export const ar = {
     total: 'المجموع',
     me: 'أنا',
     loading: '...',
+    refresh: 'حدّث',
   },
 
   theme: {

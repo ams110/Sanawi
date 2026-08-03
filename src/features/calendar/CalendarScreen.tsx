@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { buildCalendar, calendarTotal, heaviestMonth } from '@/lib/obligations/calendar'
 import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
+import { useRefresh } from '@/lib/refresh'
 
 /**
  * تقويم الاثني عشر شهراً — أوضح شاشة في التطبيق عمداً.
@@ -11,6 +12,7 @@ import { listObligations, type ObligationWithCalc } from '@/features/obligations
  * لا رسوم بيانية هنا: شريط بطول نسبي يُقرأ أسرع من أي مخطط.
  */
 export function CalendarScreen() {
+  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const [items, setItems] = useState<ObligationWithCalc[]>([])
   const [loading, setLoading] = useState(true)
@@ -24,8 +26,9 @@ export function CalendarScreen() {
       setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
     } finally {
       setLoading(false)
+      setBusy(false)
     }
-  }, [t])
+  }, [t, refreshToken, setBusy])
 
   useEffect(() => {
     void load()

@@ -13,6 +13,7 @@ import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -45,7 +46,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ProfileProvider>
-          <Shell />
+          <RefreshProvider>
+            <Shell />
+          </RefreshProvider>
         </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
@@ -135,6 +138,26 @@ function BottomNav() {
   )
 }
 
+/** زر التحديث: هدف لمس كامل لا أيقونة صغيرة — يُضغط بالإبهام أثناء المشي. */
+function RefreshButton() {
+  const { t } = useTranslation()
+  const { refresh, busy } = useRefresh()
+
+  return (
+    <button
+      type="button"
+      onClick={refresh}
+      disabled={busy}
+      aria-label={t('common.refresh')}
+      className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface text-text-muted transition disabled:opacity-50"
+    >
+      <span className={`text-base leading-none ${busy ? 'animate-spin' : ''}`} aria-hidden="true">
+        ⟳
+      </span>
+    </button>
+  )
+}
+
 const THEME_OPTIONS = [
   { value: 'system', key: 'theme.system' },
   { value: 'light', key: 'theme.light' },
@@ -160,6 +183,7 @@ function Header() {
         )}
 
         <div className="flex items-center gap-2">
+          <RefreshButton />
           <div className="flex rounded-xl border border-border bg-surface p-0.5">
             {THEME_OPTIONS.map((opt) => (
               <button

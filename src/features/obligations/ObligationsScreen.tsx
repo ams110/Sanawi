@@ -7,8 +7,10 @@ import { ObligationCard } from './ObligationCard'
 import { scheduleObligationReminders } from '@/features/reminders/schedule'
 import { addDeposit, listObligations, track, type ObligationWithCalc } from './api'
 import { useTranslation } from 'react-i18next'
+import { useRefresh } from '@/lib/refresh'
 
 export function ObligationsScreen() {
+  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { user } = useAuth()
   const [items, setItems] = useState<ObligationWithCalc[]>([])
@@ -27,8 +29,9 @@ export function ObligationsScreen() {
       setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
     } finally {
       setLoading(false)
+      setBusy(false)
     }
-  }, [t])
+  }, [t, refreshToken, setBusy])
 
   useEffect(() => {
     void load()
