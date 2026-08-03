@@ -23,7 +23,7 @@ import {
   calendarFrom,
   findGroup,
   findObligation,
-  loadGroupExpenses,
+  loadExpensesFor,
   loadGroups,
   loadMonth,
   loadMoneyItems,
@@ -504,20 +504,27 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   server.registerTool(
     'sanawi_group_cost',
     {
-      title: 'التكلفة الحقيقية لمجموعة',
-      description: `كم تكلّف مجموعة (السيارة مثلاً) فعلاً في السنة والشهر: كل التزاماتها الدورية محسوبةً سنوياً، زائد مصاريفها الفعلية خلال آخر 12 شهراً.
+      title: 'التكلفة الحقيقية لبند',
+      description: `كم يكلّف بندٌ (السيارة مثلاً) فعلاً في السنة والشهر: كل التزاماته الدورية محسوبةً سنوياً، زائد مصاريفه الفعلية خلال آخر 12 شهراً.
 
 الرقم عادةً أكبر بكثير مما يظنّه صاحبه، وهذا هو المقصود من الأداة. التزام كل 3 شهور يُحتسب 4 مرات في السنة، وكل 24 شهراً نصف مرة.
 
-المدخلات:
-  - group (string): معرّف المجموعة أو اسمها («السيارة»)
+المدخلات — مرّر واحداً منهما لا كليهما:
+  - category (string): تصنيف الالتزامات. المستعملة في التطبيق: car, health, events, home, lifestyle, other. هذا هو الوضع المعتاد.
+  - group (string): معرّف مجموعة أو اسمها، لمن يرتّب التزاماته بمجموعات صريحة.
 
 المخرجات: obligations_yearly و expenses_yearly و total_yearly و total_monthly و lines[] مرتّبة تنازلياً بنصيب كل بند.`,
       inputSchema: {
-        group: z.string().min(1).describe('معرّف المجموعة أو اسمها'),
+        category: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('تصنيف الالتزامات: car / health / events / home / lifestyle / other'),
+        group: z.string().min(1).optional().describe('معرّف المجموعة أو اسمها'),
       },
       outputSchema: {
-        group_id: z.string(),
+        scope: z.enum(['category', 'group']),
+        group_id: z.string().nullable(),
         group_name: z.string(),
         currency: z.string(),
         obligations_yearly: z.number(),
@@ -535,31 +542,44 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       },
       annotations: READ_ONLY,
     },
-    guard(async ({ group }) => {
+    guard(async ({ category, group }) => {
+      if ((category && group) || (!category && !group)) {
+        throw new Error('مرّر category أو group — واحداً منهما لا كليهما ولا لا شيء.')
+      }
+
       const connection = await connect()
-      const found = await findGroup(connection, group)
       const currency = connection.currency
+
+      // المجموعة كيانٌ صريح يُبحث عنه، والتصنيف نصٌّ على الالتزام نفسه.
+      const found = group ? await findGroup(connection, group) : null
+      const label = found ? found.name : category!
 
       const [obligations, expenses] = await Promise.all([
         loadObligations(connection),
-        loadGroupExpenses(connection, found.id),
+        loadExpensesFor(connection, found ? { groupId: found.id } : { category: category! }),
       ])
 
+      const belongs = found
+        ? (item: ObligationView) => item.obligation.group_id === found.id
+        : (item: ObligationView) =>
+            (item.obligation.category ?? '').toLowerCase() === category!.toLowerCase()
+
+      const matched = obligations.filter(belongs)
+
       const cost = computeGroupCost(
-        obligations
-          .filter((item) => item.obligation.group_id === found.id)
-          .map(({ obligation }) => ({
-            name: obligation.name,
-            totalAmount: Number(obligation.total_amount),
-            mySharePercent: Number(obligation.my_share_percent),
-            recurrenceMonths: obligation.recurrence_months,
-          })),
+        matched.map(({ obligation }) => ({
+          name: obligation.name,
+          totalAmount: Number(obligation.total_amount),
+          mySharePercent: Number(obligation.my_share_percent),
+          recurrenceMonths: obligation.recurrence_months,
+        })),
         expenses.map((e) => ({ amount: Number(e.amount), spentAt: e.spent_at })),
       )
 
       const structured = {
-        group_id: found.id,
-        group_name: found.name,
+        scope: (found ? 'group' : 'category') as 'group' | 'category',
+        group_id: found?.id ?? null,
+        group_name: label,
         currency,
         obligations_yearly: cost.obligationsYearly,
         expenses_yearly: cost.expensesYearly,
@@ -568,8 +588,16 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         lines: cost.lines,
       }
 
+      if (matched.length === 0 && expenses.length === 0) {
+        return ok(
+          `لا التزامات ولا مصاريف تحت «${label}». ` +
+            (found ? '' : 'التصنيفات المستعملة تظهر في sanawi_list_obligations ضمن حقل category.'),
+          structured,
+        )
+      }
+
       const text = [
-        `## ${found.name} — التكلفة الحقيقية`,
+        `## ${label} — التكلفة الحقيقية`,
         '',
         `**${money(cost.totalYearly, currency)} في السنة · ${money(cost.totalMonthly, currency)} في الشهر**`,
         '',
@@ -599,11 +627,11 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 المدخلات:
   - kind ('groups' | 'partners' | 'templates' | 'money'): أي قائمة
 
-المخرجات: kind و items[]. شكل العنصر يختلف بالقائمة:
-  groups → { id, name, icon, color }
-  partners → { id, name }
-  templates → { id, name, category, recurrence_months, suggested_min, suggested_max }
-  money → { incomes: [{ id, name, amount, frequency }], fixed_commitments: [{ id, name, amount, day_of_month }] }`,
+المخرجات تختلف بالقائمة:
+  groups → items[] من { id, name, icon, color }
+  partners → items[] من { id, name }
+  templates → items[] من { id, name, category, recurrence_months, suggested_min, suggested_max }
+  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency } و fixed_commitments[] من { id, name, amount, day_of_month }`,
       inputSchema: {
         kind: z.enum(['groups', 'partners', 'templates', 'money']).describe('أي قائمة تريد'),
       },

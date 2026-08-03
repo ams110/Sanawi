@@ -140,22 +140,43 @@ export function guard<A>(
  *
  * أخطاء PostgREST تصل بأكواد لا معنى لها عند القراءة، وأشهرها هنا خرق قيد
  * أو صفٌّ لا تصل إليه RLS. نترجمها إلى سببها الحقيقي في هذا التطبيق.
+ *
+ * ولا نشترط `instanceof Error`: supabase-js لا يبني صنف الخطأ إلا مع
+ * `throwOnError`، وبدونه يعيد كائناً عادياً في `{ data, error }`. الاشتراط
+ * كان يبتلع كل خطأ من القاعدة ويحوّله إلى «[object Object]» — أي أن كل رفضٍ
+ * من RLS أو خرقٍ لقيد يصل المستخدم بلا سبب مقروء.
  */
+interface ErrorLike {
+  message?: unknown
+  code?: unknown
+  details?: unknown
+  hint?: unknown
+}
+
 export function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as { code?: string }).code
-    switch (code) {
-      case '23514':
-        return `القيمة مرفوضة من قاعدة البيانات: ${error.message}. راجع الحدود (المبالغ موجبة، النسبة بين 0 و100).`
-      case '23503':
-        return `مُعرّف مرتبط غير موجود: ${error.message}. تأكّد من id المجموعة أو الالتزام.`
-      case '23505':
-        return `الصف موجود مسبقاً: ${error.message}.`
-      case 'PGRST116':
-        return 'لا يوجد صف بهذا المعرّف — أو أنه لا يخصّ هذا الحساب.'
-      default:
-        return error.message
-    }
+  const shaped: ErrorLike = typeof error === 'object' && error !== null ? error : {}
+  const message =
+    typeof shaped.message === 'string' && shaped.message ? shaped.message : String(error)
+  const code = typeof shaped.code === 'string' ? shaped.code : undefined
+  const hint = typeof shaped.hint === 'string' && shaped.hint ? ` (${shaped.hint})` : ''
+
+  switch (code) {
+    case '23514':
+      return `القيمة مرفوضة من قاعدة البيانات: ${message}${hint}. راجع الحدود: المبالغ موجبة، والنسبة بين 1 و100، ومبلغ الإيداع لا يساوي صفراً.`
+    case '23502':
+      return `حقل مطلوب ناقص: ${message}${hint}.`
+    case '23503':
+      return `مُعرّف مرتبط غير موجود: ${message}${hint}. تأكّد من id المجموعة أو الالتزام.`
+    case '23505':
+      return `الصف موجود مسبقاً: ${message}${hint}.`
+    case 'PGRST116':
+      return 'لا يوجد صف بهذا المعرّف — أو أنه لا يخصّ هذا الحساب.'
+    case '42501':
+      return `منعت سياسات RLS العملية: ${message}. الصف يخصّ حساباً آخر، أو ينقصه user_id.`
+    case 'PGRST301':
+    case '401':
+      return 'انتهت صلاحية الجلسة. أعد تشغيل الخادم من عميل MCP ليدخل من جديد.'
+    default:
+      return code ? `${message} (${code})` : message
   }
-  return String(error)
 }

@@ -21,6 +21,10 @@ const env = Object.fromEntries(
 
 const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
 
+/** مفتاح تاريخ من التقويم المحلي — نظير `toDateKey` في src/lib/format.ts. */
+const dateKey = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
 let failures = 0
 const step = (label, ok, detail = '') => {
   if (!ok) failures++
@@ -100,9 +104,9 @@ const { data: obligation, error: createError } = await supabase
     name: 'تأمين السيارة (فحص)',
     category: 'car',
     total_amount: 6000,
-    next_due_date: due.toISOString().slice(0, 10),
+    next_due_date: dateKey(due),
     recurrence_months: 12,
-    cycle_start_date: new Date().toISOString().slice(0, 10),
+    cycle_start_date: dateKey(),
     baseline_installment: 500,
     my_share_percent: 100,
     is_active: true,
@@ -118,7 +122,7 @@ if (obligation) {
     obligation_id: obligation.id,
     partner_id: null,
     amount: 2000,
-    deposit_date: new Date().toISOString().slice(0, 10),
+    deposit_date: dateKey(),
   })
   step('تسجيل إيداع', !depositError, depositError?.message)
 

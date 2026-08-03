@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { toDateKey } from '@/lib/date'
 import type {
   Obligation,
   ObligationBalance,
@@ -87,7 +88,7 @@ export async function createObligation(
   draft: ObligationDraft,
   userId: string,
 ): Promise<Obligation> {
-  const cycleStart = new Date().toISOString().slice(0, 10)
+  const cycleStart = toDateKey()
 
   // القسط المرجعي يُثبَّت عند الإنشاء على أساس الدورة الكاملة، لا على الدورة
   // المضغوطة الأولى: وإلا بقي المستخدم "متأخراً" إلى الأبد بمقياس مستحيل.
@@ -140,7 +141,7 @@ export async function addDeposit(
       user_id: userId,
       partner_id: partnerId,
       amount,
-      deposit_date: new Date().toISOString().slice(0, 10),
+      deposit_date: toDateKey(),
     })
     .select()
     .single()
@@ -192,8 +193,8 @@ export async function markPaid(
     recurrenceMonths: o.recurrence_months,
   })
 
-  const paidDate = result.cycleStartDate.toISOString().slice(0, 10)
-  const nextDue = result.nextDueDate?.toISOString().slice(0, 10) ?? o.next_due_date
+  const paidDate = toDateKey(result.cycleStartDate)
+  const nextDue = result.nextDueDate ? toDateKey(result.nextDueDate) : o.next_due_date
 
   const { error: paymentError } = await supabase.from('obligation_payments').insert({
     obligation_id: o.id,

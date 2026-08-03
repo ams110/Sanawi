@@ -223,23 +223,34 @@ export async function findGroup(
   throw new Error(`«${reference}» يطابق أكثر من مجموعة: ${matches.map((g) => g.name).join('، ')}.`)
 }
 
-export async function loadGroupExpenses(
+export async function loadExpensesFor(
   { db }: Connection,
-  groupId: string,
+  key: { groupId: string } | { category: string },
 ): Promise<Expense[]> {
   // نافذة سنة وشهر: `computeGroupCost` يقصّها إلى 12 شهراً، والشهر الزائد
   // يغطّي فروق التقويم بدل أن يُسقط مصروفاً على الحدّ.
   const since = new Date()
   since.setMonth(since.getMonth() - 13)
 
-  const { data, error } = await db
-    .from('expenses')
-    .select('*')
-    .eq('group_id', groupId)
-    .gte('spent_at', isoDate(since))
-    .order('spent_at', { ascending: false })
+  const query = db.from('expenses').select('*').gte('spent_at', isoDate(since))
+  if ('groupId' in key) query.eq('group_id', key.groupId)
+
+  const { data, error } = await query.order('spent_at', { ascending: false })
   if (error) throw error
-  return (data ?? []) as Expense[]
+  const rows = (data ?? []) as Expense[]
+
+  if ('groupId' in key) return rows
+
+  /*
+   * التصنيف يُرشَّح هنا لا في القاعدة.
+   *
+   * `.eq()` يترجم إلى `=` وهي حسّاسة لحالة الأحرف، بينما مطابقة الالتزامات
+   * تتجاهلها. فمصروفٌ صُنّف `Car` كان يسقط من حساب تكلفة `car` بصمت، فيظهر
+   * الرقم أصغر مما هو — وهو الاتجاه الخطأ في تطبيق كل غرضه أن يُظهر التكلفة
+   * على حقيقتها. الصفوف عشرات، والترشيح هنا أرخص من عمود مفهرس بحالة موحّدة.
+   */
+  const needle = key.category.trim().toLowerCase()
+  return rows.filter((row) => (row.category ?? '').trim().toLowerCase() === needle)
 }
 
 /**

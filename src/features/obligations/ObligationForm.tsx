@@ -22,6 +22,7 @@ import {
 } from './api'
 import type { ObligationTemplate } from '@/lib/db/types'
 import { useTranslation } from 'react-i18next'
+import { toDateKey } from '@/lib/date'
 
 const RECURRENCES = [
   { value: 12, key: 'form.recurrenceYearly' },
@@ -33,7 +34,7 @@ const RECURRENCES = [
 function defaultDueDate(monthsAhead: number): string {
   const d = new Date()
   d.setMonth(d.getMonth() + monthsAhead)
-  return d.toISOString().slice(0, 10)
+  return toDateKey(d)
 }
 
 export function ObligationForm() {
@@ -96,7 +97,7 @@ export function ObligationForm() {
         myFundBalance: fundBalance,
         nextDueDate,
         recurrenceMonths,
-        cycleStartDate: new Date().toISOString().slice(0, 10),
+        cycleStartDate: toDateKey(),
       }),
     [totalAmount, sharePercent, fundBalance, nextDueDate, recurrenceMonths],
   )

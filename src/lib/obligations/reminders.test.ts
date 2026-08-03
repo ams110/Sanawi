@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildReminders, reminderId, REMINDER_DAYS } from './reminders'
+import { toDateKey } from '../date'
 
 const TODAY = new Date('2026-08-02T00:00:00')
 
@@ -55,8 +56,10 @@ describe('بناء التنبيهات', () => {
 
   it('يضبط التاريخ قبل الموعد بالعدد الصحيح من الأيام', () => {
     const r = buildReminders([obligation], options)
-    expect(r[0]!.at.toISOString().slice(0, 10)).toBe('2026-11-01')
-    expect(r[2]!.at.toISOString().slice(0, 10)).toBe('2026-11-24')
+    // التنبيه لحظةٌ محلية (التاسعة صباحاً عند المستخدم)، فيُقاس بالتقويم المحلي.
+    // ‏`toISOString` يحوّل إلى UTC فينزلق اليوم في المناطق البعيدة عن غرينتش.
+    expect(toDateKey(r[0]!.at)).toBe('2026-11-01')
+    expect(toDateKey(r[2]!.at)).toBe('2026-11-24')
   })
 
   it('يطلقها التاسعة صباحاً افتراضاً', () => {

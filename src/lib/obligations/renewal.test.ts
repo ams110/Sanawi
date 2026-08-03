@@ -12,7 +12,10 @@ describe('التجديد بعد الدفع', () => {
       recurrenceMonths: 12,
       paidDate: PAID,
     })
-    expect(r.nextDueDate?.toISOString().slice(0, 10)).toBe('2027-11-01')
+    // حقول التقويم المحلي لا toISOString: الأخيرة تنزلق يوماً في أي منطقة موجبة.
+    expect(r.nextDueDate?.getFullYear()).toBe(2027)
+    expect(r.nextDueDate?.getMonth()).toBe(10)
+    expect(r.nextDueDate?.getDate()).toBe(1)
   })
 
   it('ينزل بالقسط بعد اكتمال الدورة — أهم أثر للتجديد', () => {

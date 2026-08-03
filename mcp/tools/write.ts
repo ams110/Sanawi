@@ -13,7 +13,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
-import type { FundDeposit, Obligation, ObligationPartner } from '../../src/lib/db/types.js'
+import type {
+  BillPayment,
+  FundDeposit,
+  Obligation,
+  PartnerSettlement,
+} from '../../src/lib/db/types.js'
 import type { Connection } from '../session.js'
 import { findGroup, findObligation, monthKey } from '../data.js'
 import { guard, isoDate, longDate, money, monthYear, ok, recurrenceLabel } from '../format.js'
@@ -28,6 +33,24 @@ const WRITES = {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
+/**
+ * حصةٌ أقل من 100٪ تعني شركاء، وحصصهم صفوفٌ في `obligation_partner_shares`
+ * لا تكتبها هذه الأدوات.
+ *
+ * الكتابة بلا حصص تترك المجموع ناقصاً عن 100٪، وهو بالضبط ما يرفضه التطبيق
+ * (`validateShares`) عند أول محاولة لتعديل الالتزام من الشاشة: يصير الالتزام
+ * محبوساً في حالة لا يقبلها المكان الوحيد القادر على إصلاحها. الرفض هنا أرخص.
+ */
+function requireFullShare(percent: number | undefined): void {
+  if (percent !== undefined && percent < 100) {
+    throw new Error(
+      'حصة أقل من 100٪ تعني وجود شركاء، وحصصهم لا تُكتب من هذه الأدوات — ومجموع الحصص' +
+        ' يجب أن يساوي 100٪ بالضبط وإلا رفض التطبيق تعديل الالتزام بعدها.' +
+        ' أنشئه بحصة 100٪، ثم اضبط الشركاء وحصصهم من شاشة الالتزام في التطبيق.',
+    )
+  }
+}
+
 function requireDate(value: string, field: string): string {
   if (!DATE.test(value)) {
     throw new Error(`${field} يجب أن يكون بصيغة YYYY-MM-DD — وصل «${value}».`)
@@ -38,27 +61,44 @@ function requireDate(value: string, field: string): string {
   return value
 }
 
-/** يعيد استعمال الشريك بالاسم نفسه بدل إنشاء نسخة ثانية منه في كل إيداع. */
-async function ensurePartner({ db, userId }: Connection, name: string): Promise<string> {
-  const trimmed = name.trim()
-  const { data: existing, error: readError } = await db
-    .from('obligation_partners')
-    .select('*')
-    .order('created_at', { ascending: true })
-  if (readError) throw readError
-
-  const match = ((existing ?? []) as ObligationPartner[]).find(
-    (p) => p.name.trim().toLowerCase() === trimmed.toLowerCase(),
-  )
-  if (match) return match.id
-
+/**
+ * شريكٌ له حصة في هذا الالتزام بالذات — ولا يُنشأ هنا.
+ *
+ * كانت الأداة تُنشئ الشريك عند أول إيداع باسمه. المشكلة أن الشريك بلا صفٍّ في
+ * `obligation_partner_shares` لا يظهر في مشهد `partner_settlements` إطلاقاً
+ * (المشهد يبدأ من جدول الحصص)، فيختفي إيداعه من التسوية بينما يُحسب في رصيد
+ * الصندوق: مالٌ في الصندوق لا يُنسب إلى أحد. وحصةُ الشريك تُحفظ مع التحقّق من
+ * أن المجموع 100٪ بالضبط، وهو تحقّق يعيش في `validateShares` بالواجهة ولا
+ * تستطيع أداة واحدة أداءه ذرّياً.
+ *
+ * فالقاعدة هنا: الشركاء يُضبطون من شاشة الالتزام، وهذه الأداة تنسب الإيداع
+ * إلى شريك قائم فقط.
+ */
+async function resolvePartner(
+  { db }: Connection,
+  obligationId: string,
+  name: string,
+): Promise<string> {
   const { data, error } = await db
-    .from('obligation_partners')
-    .insert({ user_id: userId, name: trimmed })
-    .select()
-    .single()
+    .from('partner_settlements')
+    .select('partner_id, partner_name')
+    .eq('obligation_id', obligationId)
   if (error) throw error
-  return (data as ObligationPartner).id
+
+  const partners = (data ?? []) as Pick<PartnerSettlement, 'partner_id' | 'partner_name'>[]
+  const needle = name.trim().toLowerCase()
+  const match = partners.find((p) => p.partner_name.trim().toLowerCase() === needle)
+  if (match) return match.partner_id
+
+  const known = partners.map((p) => p.partner_name).join('، ')
+  throw new Error(
+    `«${name}» ليس شريكاً في هذا الالتزام. ` +
+      (known
+        ? `شركاؤه: ${known}.`
+        : 'لا شركاء عليه — حصتك فيه 100٪.') +
+      ' حصص الشركاء تُضبط من شاشة الالتزام في التطبيق لأن مجموعها يجب أن يساوي 100٪ بالضبط،' +
+      ' وإيداعٌ باسم شريك بلا حصة يدخل الصندوق بلا أن يُنسب إلى أحد.',
+  )
 }
 
 export function registerWriteTools(server: McpServer, connect: () => Promise<Connection>): void {
@@ -105,6 +145,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       annotations: WRITES,
     },
     guard(async (input) => {
+      requireFullShare(input.my_share_percent)
       const connection = await connect()
       const dueDate = requireDate(input.next_due_date, 'next_due_date')
       const groupId = input.group ? (await findGroup(connection, input.group)).id : null
@@ -181,6 +222,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       annotations: WRITES,
     },
     guard(async (input) => {
+      requireFullShare(input.my_share_percent)
       const connection = await connect()
       const target = await findObligation(connection, input.obligation)
 
@@ -239,7 +281,17 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
     },
     guard(async ({ obligation }) => {
       const connection = await connect()
-      const target = await findObligation(connection, obligation)
+      // نبحث في المؤرشف أيضاً: الأداة معلَنة idempotent، ونداءٌ ثانٍ كان يفشل
+      // بـ«لا يوجد التزام بهذا الاسم» فيبدو وكأن الالتزام اختفى من الحساب.
+      const target = await findObligation(connection, obligation, { includeArchived: true })
+
+      if (!target.obligation.is_active) {
+        return ok(`**${target.obligation.name}** مؤرشف أصلاً — لم يتغيّر شيء.`, {
+          id: target.obligation.id,
+          name: target.obligation.name,
+          archived: true,
+        })
+      }
 
       const { error } = await connection.db
         .from('obligations')
@@ -263,12 +315,12 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       title: 'إيداع في صندوق التزام',
       description: `يسجّل إيداعاً في صندوق التزام ويعيد الرصيد والقسط بعده.
 
-هذه أكثر أداة تُستعمل: «حطّيت 500 على تأمين السيارة». الإيداع باسم شريك يُنسب إليه في تسوية الشركاء، وإن كان الشريك جديداً يُنشأ تلقائياً بالاسم نفسه.
+هذه أكثر أداة تُستعمل: «حطّيت 500 على تأمين السيارة». الإيداع باسم شريك يُنسب إليه في تسوية الشركاء، ويُرفض إن لم تكن له حصة على هذا الالتزام.
 
 المدخلات:
   - obligation (string): المعرّف أو الاسم
   - amount (number): المبلغ، أكبر من 0
-  - partner_name (string): اسم الشريك المودِع، اختياري. اتركه فارغاً حين يودع المستخدم بنفسه.
+  - partner_name (string): اسم شريك **له حصة مضبوطة في هذا الالتزام**، اختياري. اتركه فارغاً حين يودع المستخدم بنفسه — وهو الغالب. الشركاء وحصصهم يُضبطون من شاشة الالتزام في التطبيق لا من هنا.
   - date (string): YYYY-MM-DD، افتراضياً اليوم
   - note (string): اختياري
 
@@ -299,7 +351,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const target = await findObligation(connection, input.obligation)
       const depositDate = input.date ? requireDate(input.date, 'date') : isoDate()
       const partnerId = input.partner_name
-        ? await ensurePartner(connection, input.partner_name)
+        ? await resolvePartner(connection, target.obligation.id, input.partner_name)
         : null
 
       const { data, error } = await connection.db
@@ -469,7 +521,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 المدخلات:
   - commitment (string): معرّف البند الثابت أو اسمه («كهرباء»). القائمة من sanawi_list_reference بـ kind='money'.
   - amount (number): المبلغ الفعلي، 0 أو أكثر
-  - paid (boolean): هل دُفعت، افتراضياً true
+  - paid (boolean): هل دُفعت. اتركه فارغاً لتصحيح المبلغ دون المساس بحالة الدفع؛ الفاتورة الجديدة تُعتبر مدفوعة ما لم تُمرِّر false.
   - month (string): YYYY-MM، افتراضياً الشهر الحالي
   - note (string): اختياري
 
@@ -477,7 +529,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       inputSchema: {
         commitment: z.string().min(1).describe('معرّف البند الثابت أو اسمه'),
         amount: z.number().min(0).describe('المبلغ الفعلي'),
-        paid: z.boolean().default(true).describe('هل دُفعت الفاتورة'),
+        paid: z.boolean().optional().describe('هل دُفعت الفاتورة — فارغ يبقي الحالة الحالية'),
         month: z.string().optional().describe('الشهر YYYY-MM، افتراضياً الشهر الحالي'),
         note: z.string().max(200).optional(),
       },
@@ -521,14 +573,34 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       }
 
       const commitment = matches[0]!
+
+      /*
+       * ندمج مع الصف القائم بدل استبداله.
+       *
+       * `upsert` في PostgREST يكتب كل عمود يرد في الجسم، فتصحيح المبلغ وحده
+       * كان يمحو الملاحظة ويعيد كتابة تاريخ الدفع. والوصف يدعو صراحةً إلى
+       * إعادة النداء لتصحيح المبلغ، فالمسار الموصى به هو نفسه المسار المُتلِف.
+       */
+      const { data: current, error: readCurrentError } = await connection.db
+        .from('bill_payments')
+        .select('*')
+        .eq('commitment_id', commitment.id)
+        .eq('billing_month', key)
+        .maybeSingle()
+      if (readCurrentError) throw readCurrentError
+
+      const existing = current as BillPayment | null
+      const paid = input.paid ?? (existing ? existing.paid_at !== null : true)
+
       const { error } = await connection.db.from('bill_payments').upsert(
         {
           user_id: connection.userId,
           commitment_id: commitment.id,
           billing_month: key,
           amount: input.amount,
-          paid_at: input.paid ? isoDate() : null,
-          note: input.note ?? null,
+          // تاريخ دفعٍ قائم يبقى كما هو: إعادة التسجيل تصحيح مبلغ لا دفعٌ ثانٍ.
+          paid_at: paid ? (existing?.paid_at ?? isoDate()) : null,
+          note: input.note ?? existing?.note ?? null,
         },
         { onConflict: 'commitment_id,billing_month' },
       )
@@ -539,7 +611,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
       return ok(
         `سُجّلت فاتورة **${commitment.name}** لشهر ${monthYear(key)}: ${money(input.amount, currency)}` +
-          (input.paid ? ' — مدفوعة ✅' : ' — لم تُدفع بعد') +
+           (paid ? ' — مدفوعة ✅' : ' — لم تُدفع بعد') +
           '.\n' +
           `المقدَّر في الميزانية ${money(budgeted, currency)}` +
           (Math.abs(drift) > 0.5
@@ -552,7 +624,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           month: key,
           amount: input.amount,
           budgeted,
-          paid: input.paid,
+          paid,
         },
       )
     }),
