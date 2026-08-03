@@ -5,55 +5,39 @@
  * التشغيل: node scripts/check-expenses.mjs
  */
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync, existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { summarizeExpenses } from '../src/lib/expenses/calc.ts'
+import {
+  allOf,
+  createReporter,
+  readEnv,
+  requireTables,
+  rowsOf,
+  signInTestAccount,
+} from './lib/checks.mjs'
 
-const env = Object.fromEntries(
-  readFileSync(fileURLToPath(new URL('../.env', import.meta.url)), 'utf8')
-    .split('\n')
-    .filter((l) => l.includes('='))
-    .map((l) => {
-      const i = l.indexOf('=')
-      return [l.slice(0, i).trim(), l.slice(i + 1).trim()]
-    }),
+const env = readEnv(import.meta.url)
+const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
+const { step, finish } = createReporter()
+
+await requireTables(
+  supabase,
+  ['expense_categories', 'expenses'],
+  'supabase/migrations/0009_expense_categories.sql',
 )
 
-const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
-
-let failures = 0
-const step = (label, ok, detail = '') => {
-  if (!ok) failures++
-  console.log(`${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
-}
-
-const CRED_PATH = fileURLToPath(new URL('../.test-account.json', import.meta.url))
-if (!existsSync(CRED_PATH)) {
-  console.log('❌ لا حساب فحص محفوظ — شغّل scripts/check-flow.mjs أولاً')
-  process.exit(1)
-}
-
-const creds = JSON.parse(readFileSync(CRED_PATH, 'utf8'))
-const { data: auth, error: authErr } = await supabase.auth.signInWithPassword(creds)
-if (authErr || !auth.session) {
-  step('دخول بحساب الفحص', false, authErr?.message ?? 'بلا جلسة')
-  process.exit(1)
-}
-step('دخول بحساب الفحص', true, creds.email)
-const userId = auth.session.user.id
+const { creds, userId } = await signInTestAccount(supabase, import.meta.url, step)
 
 // 1) التصنيفات الافتراضية موجودة ومقروءة.
-const { data: cats, error: catsErr } = await supabase
-  .from('expense_categories')
-  .select('*')
-  .order('sort_order')
-if (catsErr) {
-  step('قراءة التصنيفات', false, catsErr.message)
-  process.exit(1)
-}
+const cats = rowsOf(
+  await supabase.from('expense_categories').select('*').order('sort_order'),
+  'قراءة التصنيفات',
+  step,
+)
+if (!cats) finish()
+
 const defaults = cats.filter((c) => c.user_id === null)
 step('التصنيفات الافتراضية', defaults.length >= 12, `${defaults.length} تصنيف`)
-step('لكل تصنيف أيقونة', defaults.every((c) => c.icon?.length > 0))
+step('لكل تصنيف أيقونة', allOf(defaults, (c) => c.icon?.length > 0))
 
 // 2) تصنيف خاص بالمستخدم.
 const { data: mine, error: mineErr } = await supabase
@@ -69,11 +53,12 @@ const { error: delErr } = await supabase
   .from('expense_categories')
   .delete()
   .eq('id', target.id)
-const { count: stillThere } = await supabase
+// select عادي لا head: الأخير يبتلع رسالة الخطأ فيبدو الصف المفقود موجوداً.
+const { data: stillThere } = await supabase
   .from('expense_categories')
-  .select('id', { count: 'exact', head: true })
+  .select('id')
   .eq('id', target.id)
-step('التصنيف الافتراضي لا يُحذف', stillThere === 1, delErr ? delErr.message : 'الصف باقٍ')
+step('التصنيف الافتراضي لا يُحذف', (stillThere ?? []).length === 1, delErr ? delErr.message : 'الصف باقٍ')
 
 // 4) تسجيل مصاريف في الشهر الجاري.
 const today = new Date()
@@ -101,12 +86,13 @@ step('تسجيل 4 مصاريف', !insErr && inserted?.length === 4, insErr?.mes
 const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0)
   .toISOString()
   .slice(0, 10)
-const { data: fetched, error: fetchErr } = await supabase
-  .from('expenses')
-  .select('*')
-  .gte('spent_at', month)
-  .lte('spent_at', monthEnd)
-step('قراءة مصاريف الشهر', !fetchErr && fetched.length >= 4, fetchErr?.message ?? `${fetched?.length} صف`)
+const fetched = rowsOf(
+  await supabase.from('expenses').select('*').gte('spent_at', month).lte('spent_at', monthEnd),
+  'قراءة مصاريف الشهر',
+  step,
+)
+if (!fetched) finish()
+step('قراءة مصاريف الشهر', fetched.length >= 4, `${fetched.length} صف`)
 
 // 6) التلخيص يطابق ما أُدخل — المحرّك نفسه الذي تستعمله الشاشة.
 const summary = summarizeExpenses(
@@ -139,11 +125,7 @@ step('لا تسرّب بلا جلسة', (leaked ?? []).length === 0, `${(leaked 
 await supabase.auth.signInWithPassword(creds)
 await supabase.from('expenses').delete().in('id', (inserted ?? []).map((r) => r.id))
 if (mine?.id) await supabase.from('expense_categories').delete().eq('id', mine.id)
-const { count: left } = await supabase
-  .from('expenses')
-  .select('id', { count: 'exact', head: true })
-  .gte('spent_at', month)
-step('تنظيف', true, `بقي ${left ?? 0} مصروف سابق`)
+const { data: left } = await supabase.from('expenses').select('id').gte('spent_at', month)
+step('تنظيف', true, `بقي ${(left ?? []).length} مصروف سابق`)
 
-console.log(failures === 0 ? '\n✅ كل الفحوص نجحت' : `\n❌ ${failures} فحص فشل`)
-process.exit(failures === 0 ? 0 : 1)
+finish()
