@@ -22,6 +22,7 @@ npm run dev
 | `npm run build` | فحص الأنواع ثم بناء الإنتاج |
 | `npx vitest run` | اختبارات محرّك الحسابات |
 | `node scripts/screenshot.mjs` | لقطات الوضعين الفاتح والغامق + فحص وضع الجسر (يتطلب `npm run dev` يعمل) |
+| `npm run check:expenses` | فحص المصاريف اليومية على قاعدة حقيقية: التصنيفات وRLS والتلخيص |
 
 ## البنية
 
