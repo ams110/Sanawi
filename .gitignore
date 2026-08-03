@@ -20,3 +20,4 @@ android/app/src/main/assets/public
 
 # دالّة Supabase مولَّدة من mcp/ عند النشر — ليست مصدراً
 supabase/functions/
+supabase/config.toml

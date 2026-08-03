@@ -19,6 +19,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # سرٌّ ناقص لا يفشل هنا من تلقائه: `supabase secrets set` يقبل قيمةً
+      # فارغة بصمت، فتُنشر دالّة ترفض الإقلاع، ويقرأ صاحبها «تعذّر الاتصال»
+      # في كلود بلا سبب. الفحص هنا يسمّي السرّ الناقص بالاسم.
+      - name: التحقّق من الأسرار
+        env:
+          TOKEN: ${{ secrets.SANAWI_MCP_TOKEN }}
+          SECRETS: |
+            SUPABASE_ACCESS_TOKEN=${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+            SUPABASE_PROJECT_REF=${{ secrets.SUPABASE_PROJECT_REF != '' }}
+            VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL != '' }}
+            VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY != '' }}
+            SANAWI_EMAIL=${{ secrets.SANAWI_EMAIL != '' }}
+            SANAWI_PASSWORD=${{ secrets.SANAWI_PASSWORD != '' }}
+            SANAWI_MCP_TOKEN=${{ secrets.SANAWI_MCP_TOKEN != '' }}
+        run: |
+          missing=""
+          while IFS='=' read -r name present; do
+            [ -z "$name" ] && continue
+            [ "$present" = "true" ] || missing="$missing $name"
+          done <<< "$SECRETS"
+
+          if [ -n "$missing" ]; then
+            echo "::error::أسرار ناقصة:$missing"
+            echo "أضِفها في Settings ← Secrets and variables ← Actions." >> $GITHUB_STEP_SUMMARY
+            echo "الناقص:$missing" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          # المفتاح القصير ليس مفتاحاً: الرابط كلمةُ سرّ وحيدة تحرس بيانات مالية.
+          if [ ${#TOKEN} -lt 24 ]; then
+            echo "::error::SANAWI_MCP_TOKEN أقصر من 24 حرفاً — الرابط هو كلمة السر الوحيدة."
+            exit 1
+          fi
+
+          echo "الأسرار السبعة موجودة." >> $GITHUB_STEP_SUMMARY
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -42,6 +78,17 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+
+      # الـ CLI يقرأ إعداد المشروع من هنا. يُكتب في التدفّق لا في المستودع:
+      # معرّف المشروع سرّ، ولا يدخل ملفاً يُقرأ من الجميع.
+      - name: إعداد المشروع
+        run: |
+          cat > supabase/config.toml <<'TOML'
+          project_id = "sanawi"
+
+          [functions.sanawi-mcp]
+          verify_jwt = false
+          TOML
 
       # الأسرار تُضبط من هنا لا من لوحة Supabase: كتابةُ كلمة سرّ في متصفّح
       # تلفون أسهل خطأً، والقيمة الواحدة يجب أن تعيش في مكان واحد.
