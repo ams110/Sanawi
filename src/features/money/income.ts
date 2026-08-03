@@ -43,6 +43,21 @@ export async function addIncomeEntry(
   if (error) throw error
 }
 
+export async function updateIncomeEntry(
+  id: string,
+  patch: { amount?: number; sourceId?: string | null; name?: string | null; receivedAt?: string },
+): Promise<void> {
+  const row: Partial<IncomeEntry> = {}
+  if (patch.amount !== undefined) row.amount = patch.amount
+  if (patch.sourceId !== undefined) row.source_id = patch.sourceId
+  if (patch.name !== undefined) row.name = patch.name
+  if (patch.receivedAt !== undefined) row.received_at = patch.receivedAt
+
+  if (Object.keys(row).length === 0) return
+  const { error } = await supabase.from('income_entries').update(row).eq('id', id)
+  if (error) throw error
+}
+
 export async function deleteIncomeEntry(id: string): Promise<void> {
   const { error } = await supabase.from('income_entries').delete().eq('id', id)
   if (error) throw error

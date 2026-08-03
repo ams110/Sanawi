@@ -9,11 +9,15 @@ import { deleteBill, listBills, monthKey, saveBill, shiftMonth, summarizeBills, 
 import { AddCommitmentForm } from './AddCommitmentForm'
 import { MonthlyLoadPanel } from './MonthlyLoadPanel'
 import { SharesEditor } from './SharesEditor'
+import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
+import { Button as UiButton } from '@/components/ui/Button'
 import {
+  archiveCommitment,
   listCommitmentDetails,
   listCommitmentShares,
   listPartners,
   listPaymentMethods,
+  updateCommitment,
 } from './commitments'
 import { dueInfo, sortBills } from '@/lib/commitments/due'
 import type {
@@ -281,6 +285,24 @@ function BillCard({
   )
   const isAutomatic = Boolean(defaultMethod?.is_automatic)
 
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState(row.commitment.name)
+  const [editAmount, setEditAmount] = useState(budgeted)
+  const [editDay, setEditDay] = useState<number | null>(row.commitment.day_of_month)
+  const [editMethod, setEditMethod] = useState<string | null>(row.commitment.default_method_id)
+  const [editEndsOn, setEditEndsOn] = useState(row.commitment.ends_on ?? '')
+  const [editError, setEditError] = useState<string | null>(null)
+
+  const cancelEdit = () => {
+    setEditName(row.commitment.name)
+    setEditAmount(budgeted)
+    setEditDay(row.commitment.day_of_month)
+    setEditMethod(row.commitment.default_method_id)
+    setEditEndsOn(row.commitment.ends_on ?? '')
+    setEditError(null)
+    setEditing(false)
+  }
+
   // المبلغ المقترح يتدرّج: الفاتورة المسجّلة، فمتوسّط السنة، فتقدير الميزانية.
   const [amount, setAmount] = useState(
     () => Number(row.payment?.amount ?? 0) || Math.round(average) || budgeted,
@@ -315,18 +337,123 @@ function BillCard({
           )}
           {row.commitment.name}
         </span>
-        <span
-          className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
-            paid
-              ? 'bg-brand text-bg'
-              : recorded
-                ? 'bg-accent-soft text-accent'
-                : 'bg-surface-muted text-text-muted'
-          }`}
-        >
-          {paid ? t('bills.paid') : recorded ? t('bills.outstanding') : t('bills.notRecorded')}
+        <span className="flex shrink-0 items-center gap-1">
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+              paid
+                ? 'bg-brand text-bg'
+                : recorded
+                  ? 'bg-accent-soft text-accent'
+                  : 'bg-surface-muted text-text-muted'
+            }`}
+          >
+            {paid ? t('bills.paid') : recorded ? t('bills.outstanding') : t('bills.notRecorded')}
+          </span>
+          {!editing && <EditButton onClick={() => setEditing(true)} />}
         </span>
       </div>
+
+      <InlineEdit
+        open={editing}
+        onCancel={cancelEdit}
+        canSave={editName.trim().length > 0 && editAmount > 0}
+        error={editError}
+        title={t('bills.editTitle')}
+        onSave={async () => {
+          setEditError(null)
+          try {
+            await updateCommitment(row.commitment.id, {
+              name: editName.trim(),
+              amount: editAmount,
+              dayOfMonth: editDay,
+              defaultMethodId: editMethod,
+              endsOn: editEndsOn || null,
+            })
+            setEditing(false)
+            await onReload()
+          } catch (err) {
+            setEditError(err instanceof Error ? err.message : t('bills.editFailed'))
+          }
+        }}
+        extraAction={
+          <div className="space-y-1 border-t border-border pt-2">
+            <UiButton
+              type="button"
+              variant="danger"
+              className="w-full"
+              onClick={async () => {
+                await archiveCommitment(row.commitment.id)
+                await onReload()
+              }}
+            >
+              {t('bills.archive')}
+            </UiButton>
+            <p className="text-center text-[11px] text-text-muted">{t('bills.archiveHint')}</p>
+          </div>
+        }
+      >
+        <input
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          placeholder={t('bills.editName')}
+          className={editInputClass}
+        />
+        <div className="flex gap-2">
+          <input
+            type="number"
+            inputMode="decimal"
+            value={editAmount || ''}
+            onChange={(e) => setEditAmount(Math.max(0, Number(e.target.value) || 0))}
+            placeholder={t('bills.monthlyAmount')}
+            className={`num ${editInputClass}`}
+          />
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={31}
+            value={editDay ?? ''}
+            onChange={(e) =>
+              setEditDay(
+                e.target.value === ''
+                  ? null
+                  : Math.min(31, Math.max(1, Number(e.target.value) || 1)),
+              )
+            }
+            placeholder={t('bills.dayOfMonth')}
+            className={`num ${editInputClass}`}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {methods.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setEditMethod(editMethod === m.id ? null : m.id)}
+              aria-pressed={editMethod === m.id}
+              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                editMethod === m.id
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-border bg-bg text-text-muted'
+              }`}
+            >
+              <span aria-hidden="true">{m.icon}</span> {m.name_ar}
+            </button>
+          ))}
+        </div>
+
+        {/* تاريخ النهاية يظهر دائماً في التعديل: قد يتحوّل بندٌ عادي إلى قسط. */}
+        <label className="block space-y-1">
+          <span className="text-[11px] font-semibold text-text-muted">{t('bills.endsOn')}</span>
+          <input
+            type="date"
+            value={editEndsOn}
+            onChange={(e) => setEditEndsOn(e.target.value)}
+            className={`num ${editInputClass}`}
+          />
+        </label>
+      </InlineEdit>
 
       <p className="text-xs text-text-muted">
         {t('bills.budgeted', { amount: formatMoney(budgeted) })}

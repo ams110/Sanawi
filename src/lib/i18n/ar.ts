@@ -11,6 +11,9 @@ export const ar = {
   },
 
   common: {
+    edit2: 'عدّل',
+    saveEdit: 'احفظ التعديل',
+    cancelEdit: 'ألغِ',
     save: 'احفظ',
     cancel: 'إلغاء',
     edit: 'عدّل',
@@ -112,6 +115,8 @@ export const ar = {
     thisMonth: 'هذا الشهر',
     loadFailed: 'ما قدرنا نجيب المصاريف',
     saveFailed: 'ما قدرنا نسجّل المصروف',
+    editTitle: 'عدّل المصروف',
+    editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
   month: {
@@ -157,6 +162,8 @@ export const ar = {
     saved: 'انحفظ ✓',
     saveFailed: 'ما قدرنا نحفظ',
     loadFailed: 'ما قدرنا نجيب البيانات',
+    editSource: 'عدّل المصدر',
+    editFailed: 'ما قدرنا نحفظ التعديل',
     emptyIncome: 'ما ضفت ولا مصدر دخل',
     emptyFixed: 'ما ضفت ولا التزام ثابت',
   },
@@ -297,6 +304,11 @@ export const ar = {
     saveMethod: 'ضيف الطريقة',
     payableCount: 'لازم تدفع {{count}} فاتورة',
     payableNone: 'ما ضل عليك ولا فاتورة تدفعها 👌',
+    editTitle: 'عدّل البند',
+    editName: 'الاسم',
+    archive: 'شيل البند',
+    archiveHint: 'بيختفي من الشاشات وبيضل تاريخ فواتيره محفوظ',
+    editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
   categories: {
@@ -358,6 +370,8 @@ export const ar = {
     noIncomeYet: 'ما سجّلت ولا دفعة دخل هالشهر',
     removeIncome: 'احذف',
     incomeFailed: 'ما قدرنا نسجّل الدخل',
+    editIncome: 'عدّل الدفعة',
+    editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
   goal: {

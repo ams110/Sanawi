@@ -17,7 +17,8 @@
     "check:commitments": "node --experimental-strip-types scripts/check-commitments.mjs",
     "check:goals": "node --experimental-strip-types scripts/check-goals.mjs",
     "check:month": "node --experimental-strip-types scripts/check-month.mjs",
-    "check:due": "node --experimental-strip-types scripts/check-due.mjs"
+    "check:due": "node --experimental-strip-types scripts/check-due.mjs",
+    "check:edit": "node --experimental-strip-types scripts/check-edit.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
