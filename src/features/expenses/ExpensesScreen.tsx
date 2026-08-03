@@ -6,6 +6,7 @@ import { summarizeExpenses } from '@/lib/expenses/calc'
 import { useRefresh } from '@/lib/refresh'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
 import { AddExpenseForm } from './AddExpenseForm'
+import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import {
   deleteExpense,
   listCategories,
@@ -13,6 +14,7 @@ import {
   monthKey,
   shiftMonth,
   toCalcRows,
+  updateExpense,
 } from './api'
 
 export function ExpensesScreen() {
@@ -162,7 +164,7 @@ export function ExpensesScreen() {
         </section>
       )}
 
-      <ExpenseList rows={rows} byId={byId} onDeleted={load} />
+      <ExpenseList rows={rows} byId={byId} categories={categories} onChanged={load} />
     </div>
   )
 }
@@ -223,11 +225,13 @@ function NavArrow({
 function ExpenseList({
   rows,
   byId,
-  onDeleted,
+  categories,
+  onChanged,
 }: {
   rows: Expense[]
   byId: Map<string, ExpenseCategory>
-  onDeleted: () => Promise<void>
+  categories: ExpenseCategory[]
+  onChanged: () => Promise<void>
 }) {
   const { t } = useTranslation()
 
@@ -244,30 +248,135 @@ function ExpenseList({
     <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
       <h2 className="text-sm font-bold text-text">{t('expenses.listTitle')}</h2>
       <ul className="space-y-2">
-        {rows.map((e) => {
-          const cat = e.category_id ? byId.get(e.category_id) : null
-          return (
-            <li
-              key={e.id}
-              className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5"
-            >
-              <span className="text-lg" aria-hidden="true">
-                {cat?.icon ?? '📦'}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-text">
-                  {cat?.name_ar ?? t('expenses.uncategorized')}
-                  {e.is_unexpected && ' ⚡'}
-                </p>
-                <p className="num text-xs text-text-muted">{formatDate(e.spent_at)}</p>
-              </div>
-              <span className="num text-sm font-bold text-text">{formatMoney(Number(e.amount))}</span>
-              <DeleteButton id={e.id} onDeleted={onDeleted} />
-            </li>
-          )
-        })}
+        {rows.map((e) => (
+          <ExpenseRow
+            key={e.id}
+            expense={e}
+            category={e.category_id ? (byId.get(e.category_id) ?? null) : null}
+            categories={categories}
+            onChanged={onChanged}
+          />
+        ))}
       </ul>
     </section>
+  )
+}
+
+function ExpenseRow({
+  expense,
+  category,
+  categories,
+  onChanged,
+}: {
+  expense: Expense
+  category: ExpenseCategory | null
+  categories: ExpenseCategory[]
+  onChanged: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [amount, setAmount] = useState(Number(expense.amount))
+  const [categoryId, setCategoryId] = useState(expense.category_id)
+  const [spentAt, setSpentAt] = useState(expense.spent_at)
+  const [isUnexpected, setIsUnexpected] = useState(expense.is_unexpected)
+  const [error, setError] = useState<string | null>(null)
+
+  // الرجوع عن التعديل يعيد القيم الأصلية لا آخر ما كُتب في الحقول.
+  const cancel = () => {
+    setAmount(Number(expense.amount))
+    setCategoryId(expense.category_id)
+    setSpentAt(expense.spent_at)
+    setIsUnexpected(expense.is_unexpected)
+    setError(null)
+    setEditing(false)
+  }
+
+  return (
+    <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="text-lg" aria-hidden="true">
+          {category?.icon ?? '📦'}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-text">
+            {category?.name_ar ?? t('expenses.uncategorized')}
+            {expense.is_unexpected && ' ⚡'}
+          </p>
+          <p className="num text-xs text-text-muted">{formatDate(expense.spent_at)}</p>
+        </div>
+        <span className="num text-sm font-bold text-text">
+          {formatMoney(Number(expense.amount))}
+        </span>
+        {!editing && (
+          <>
+            <EditButton onClick={() => setEditing(true)} />
+            <DeleteButton id={expense.id} onDeleted={onChanged} />
+          </>
+        )}
+      </div>
+
+      <InlineEdit
+        open={editing}
+        onCancel={cancel}
+        canSave={amount > 0}
+        error={error}
+        title={t('expenses.editTitle')}
+        onSave={async () => {
+          setError(null)
+          try {
+            await updateExpense(expense.id, { amount, categoryId, spentAt, isUnexpected })
+            setEditing(false)
+            await onChanged()
+          } catch (err) {
+            setError(err instanceof Error ? err.message : t('expenses.editFailed'))
+          }
+        }}
+      >
+        <div className="flex gap-2">
+          <input
+            type="number"
+            inputMode="decimal"
+            value={amount || ''}
+            onChange={(ev) => setAmount(Math.max(0, Number(ev.target.value) || 0))}
+            className={`num ${editInputClass}`}
+          />
+          <input
+            type="date"
+            value={spentAt}
+            onChange={(ev) => setSpentAt(ev.target.value)}
+            className={`num ${editInputClass}`}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-1.5">
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategoryId(categoryId === c.id ? null : c.id)}
+              aria-pressed={categoryId === c.id}
+              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                categoryId === c.id
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-border bg-bg text-text-muted'
+              }`}
+            >
+              <span aria-hidden="true">{c.icon}</span> {c.name_ar}
+            </button>
+          ))}
+        </div>
+
+        <label className="flex items-center gap-2 text-xs font-semibold text-text">
+          <input
+            type="checkbox"
+            checked={isUnexpected}
+            onChange={(ev) => setIsUnexpected(ev.target.checked)}
+            className="size-4 accent-warning"
+          />
+          {t('expenses.markUnexpected')}
+        </label>
+      </InlineEdit>
+    </li>
   )
 }
 

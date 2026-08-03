@@ -3,6 +3,7 @@ import type {
   CommitmentDetail,
   CommitmentPartnerShare,
   CommitmentTemplate,
+  FixedCommitment,
   ObligationPartner,
   PaymentMethod,
 } from '@/lib/db/types'
@@ -89,6 +90,52 @@ export async function addCommitment(
     .single()
   if (error) throw error
   return data.id
+}
+
+/**
+ * تعديل بندٍ شهري.
+ *
+ * حقولٌ اختيارية لا كائنٌ كامل: من يغيّر الموعد وحده لا ينبغي أن يعيد
+ * إرسال الاسم والمبلغ، وإرسالهما يخاطر بالكتابة فوق تعديلٍ من جهازٍ آخر.
+ */
+export async function updateCommitment(
+  id: string,
+  patch: {
+    name?: string
+    amount?: number
+    icon?: string | null
+    dayOfMonth?: number | null
+    defaultMethodId?: string | null
+    endsOn?: string | null
+    totalAmount?: number | null
+  },
+): Promise<void> {
+  const row: Partial<FixedCommitment> = {}
+  if (patch.name !== undefined) row.name = patch.name
+  if (patch.amount !== undefined) row.amount = patch.amount
+  if (patch.icon !== undefined) row.icon = patch.icon
+  if (patch.dayOfMonth !== undefined) row.day_of_month = patch.dayOfMonth
+  if (patch.defaultMethodId !== undefined) row.default_method_id = patch.defaultMethodId
+  if (patch.endsOn !== undefined) row.ends_on = patch.endsOn
+  if (patch.totalAmount !== undefined) row.total_amount = patch.totalAmount
+
+  if (Object.keys(row).length === 0) return
+  const { error } = await supabase.from('fixed_commitments').update(row).eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * أرشفة لا حذف.
+ *
+ * الحذف يمحو معه كل فواتير الشهور الماضية بالتتابع، فيضيع تاريخٌ لا يُسترجع.
+ * البند المؤرشف يختفي من الشاشات ويبقى تاريخه سليماً.
+ */
+export async function archiveCommitment(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('fixed_commitments')
+    .update({ is_active: false })
+    .eq('id', id)
+  if (error) throw error
 }
 
 export async function listPartners(): Promise<ObligationPartner[]> {

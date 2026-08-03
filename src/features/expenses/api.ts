@@ -88,6 +88,28 @@ export async function addExpense(
   if (error) throw error
 }
 
+export async function updateExpense(
+  id: string,
+  patch: {
+    amount?: number
+    categoryId?: string | null
+    spentAt?: string
+    isUnexpected?: boolean
+    note?: string | null
+  },
+): Promise<void> {
+  const row: Partial<Expense> = {}
+  if (patch.amount !== undefined) row.amount = patch.amount
+  if (patch.categoryId !== undefined) row.category_id = patch.categoryId
+  if (patch.spentAt !== undefined) row.spent_at = patch.spentAt
+  if (patch.isUnexpected !== undefined) row.is_unexpected = patch.isUnexpected
+  if (patch.note !== undefined) row.note = patch.note
+
+  if (Object.keys(row).length === 0) return
+  const { error } = await supabase.from('expenses').update(row).eq('id', id)
+  if (error) throw error
+}
+
 export async function deleteExpense(id: string): Promise<void> {
   const { error } = await supabase.from('expenses').delete().eq('id', id)
   if (error) throw error
