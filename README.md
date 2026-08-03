@@ -85,6 +85,10 @@ cd android && ./gradlew assembleDebug
 (`server.url` في `capacitor.config.ts`). فأي تغيير في الواجهة يصل بإعادة تحميل
 من داخل التطبيق — زر «حدّث التطبيق» في شاشة الدخل — بلا تنصيب APK.
 
+العنوان دومين مخصّص: `sanawi.kabblan.com` بسجل `CNAME` يشير إلى
+`ams110.github.io`. ومع الدومين المخصّص يُخدَم الموقع من الجذر، فلا يُعيَّن
+`VITE_BASE_PATH` في التدفّق.
+
 يبقى بناء APK لازماً حين يتغيّر ما يمسّ النظام: إضافة أصلية، إذن، أيقونة.
 
 **تفعيل يدويّ مرة واحدة:** Settings → Pages → Source → **GitHub Actions**.
