@@ -11,6 +11,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { env } from './env.js'
 import type { Database } from '../src/lib/db/types.js'
 
 export type Db = SupabaseClient<Database>
@@ -32,7 +33,7 @@ export class ConfigError extends Error {}
  * فمن يشغّل الخادم من داخل المستودع لا يحتاج نسخ القيم مرتين.
  */
 function readEnv(primary: string, fallback?: string): string | undefined {
-  const value = process.env[primary] ?? (fallback ? process.env[fallback] : undefined)
+  const value = env(primary) ?? (fallback ? env(fallback) : undefined)
   return value?.trim() || undefined
 }
 
@@ -76,7 +77,7 @@ export function readConfig(): Config {
     anonKey: anonKey!,
     email: email!,
     password: password!,
-    readOnly: TRUTHY.has((process.env.SANAWI_READ_ONLY ?? '').trim().toLowerCase()),
+    readOnly: TRUTHY.has((env('SANAWI_READ_ONLY') ?? '').trim().toLowerCase()),
   }
 }
 

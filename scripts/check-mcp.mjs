@@ -432,7 +432,104 @@ await fake.stop()
 
 if (!failed) console.log('✓ السبع عشرة أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
 
-/* ── 5. نداء حقيقي، إن وُجد حساب ──────────────────────────── */
+/* ── 5. النقل البعيد: HTTP بالمفتاح ───────────────────────── */
+
+console.log('\n── النقل البعيد (HTTP) ──\n')
+{
+  const { createServer } = await import('node:http')
+  const { createFetchHandler } = await import(new URL('mcp/dist/mcp/http.js', root).href)
+  const { StreamableHTTPClientTransport } = await import(
+    '@modelcontextprotocol/sdk/client/streamableHttp.js'
+  )
+
+  const remoteFake = await startFakeSupabase()
+  const config = {
+    url: remoteFake.url,
+    anonKey: remoteFake.anonKey,
+    email: remoteFake.email,
+    password: remoteFake.password,
+    readOnly: false,
+  }
+  const { createSession } = await import(new URL('mcp/dist/mcp/session.js', root).href)
+  const TOKEN = 'token-for-the-check-only'
+  const handler = createFetchHandler({ config, connect: createSession(config), token: TOKEN })
+
+  // جسر من خادم Node إلى معالِج fetch — نفس المعالِج الذي يعمل على Deno.
+  const bridge = createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    const body = Buffer.concat(chunks)
+    const request = new Request(`http://127.0.0.1${req.url}`, {
+      method: req.method,
+      headers: req.headers,
+      body: body.length > 0 ? body : undefined,
+    })
+    const response = await handler(request)
+    res.writeHead(response.status, Object.fromEntries(response.headers))
+    res.end(Buffer.from(await response.arrayBuffer()))
+  })
+  await new Promise((r) => bridge.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${bridge.address().port}`
+
+  // بلا مفتاح: يُرفض قبل أن يلمس القاعدة.
+  const denied = await fetch(`${base}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })
+  expect('الرابط بلا مفتاح يُرفض', denied.status, 401)
+
+  const wrong = await fetch(`${base}/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer not-the-token' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })
+  expect('مفتاح خاطئ يُرفض', wrong.status, 401)
+
+  // فحص الحياة مسموح بلا مفتاح ولا يكشف بيانات.
+  const health = await fetch(`${base}/mcp`)
+  expect('فحص الحياة', health.status, 200)
+
+  // المفتاح في آخر المسار — الشكل الذي يعمل مع عميلٍ لا يقبل إلا رابطاً.
+  const viaPath = await fetch(`${base}/mcp/${TOKEN}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })
+  expect('المفتاح في المسار يُقبل', viaPath.status, 200)
+
+  // ثم عميل MCP حقيقي عبر النقل الرسمي.
+  const remote = new Client({ name: 'sanawi-check-http', version: '1.0.0' })
+  await remote.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { authorization: `Bearer ${TOKEN}` } },
+    }),
+  )
+
+  const remoteTools = (await remote.listTools()).tools
+  expect('عدد الأدوات عبر HTTP', remoteTools.length, tools.length)
+
+  await remote.callTool({ name: 'sanawi_add_income', arguments: { name: 'راتب', amount: 9000 } })
+  const overview = await remote.callTool({ name: 'sanawi_month_overview', arguments: {} })
+  if (overview.isError) fail(`HTTP: ${overview.content?.[0]?.text}`)
+  expect('الدخل عبر HTTP', overview.structuredContent?.monthly_income, 9000)
+
+  // القراءة والكتابة تتعاقبان على نفس الحساب رغم أن كل رسالة خادمٌ جديد.
+  await remote.callTool({
+    name: 'sanawi_create_obligation',
+    arguments: { name: 'تأمين', total_amount: 1200, next_due_date: inMonths(12) },
+  })
+  const listed = await remote.callTool({ name: 'sanawi_list_obligations', arguments: {} })
+  expect('الحالة محفوظة بين النداءات', listed.structuredContent?.count, 1)
+
+  await remote.close()
+  await new Promise((r) => bridge.close(r))
+  await remoteFake.stop()
+
+  if (!failed) console.log('✓ النقل البعيد يعمل، والمفتاح يحرس الرابط فعلاً.')
+}
+
+/* ── 6. نداء حقيقي، إن وُجد حساب ──────────────────────────── */
 
 if (hasAccount) {
   console.log('\nنداء sanawi_month_overview على الحساب الحقيقي…')

@@ -1,0 +1,82 @@
+name: نشر خادم MCP
+
+# التشغيل يدويّ من صفحة Actions — تكفي ضغطة من المتصفّح على التلفون، فلا
+# يحتاج نشرُ الخادم كمبيوتراً ولا Supabase CLI على جهاز.
+#
+# ولا يعمل على كل دفعة عن قصد: النشر يبدّل خادماً حيّاً مربوطاً بكلود، وتبديله
+# من تلقائه مع كل تعديل في الواجهة ليس ما يريده أحد.
+on:
+  workflow_dispatch:
+    inputs:
+      read_only:
+        description: 'وضع القراءة فقط (أدوات الكتابة لا تُسجَّل أصلاً)'
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: تنصيب الحزم
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+      # الفحص قبل النشر لا بعده: الدالّة البعيدة لا يراها صاحبها حين تنكسر،
+      # فالعطل يجب أن يظهر هنا لا في أول سؤال يسأله كلود.
+      - name: فحص الخادم
+        run: |
+          npm run build:mcp
+          npm run check:mcp
+
+      - name: تجهيز دالّة Supabase
+        run: npm run build:edge
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # الأسرار تُضبط من هنا لا من لوحة Supabase: كتابةُ كلمة سرّ في متصفّح
+      # تلفون أسهل خطأً، والقيمة الواحدة يجب أن تعيش في مكان واحد.
+      - name: ضبط أسرار الدالّة
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase secrets set \
+            --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
+            SANAWI_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
+            SANAWI_SUPABASE_ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            SANAWI_EMAIL="${{ secrets.SANAWI_EMAIL }}" \
+            SANAWI_PASSWORD="${{ secrets.SANAWI_PASSWORD }}" \
+            SANAWI_MCP_TOKEN="${{ secrets.SANAWI_MCP_TOKEN }}" \
+            SANAWI_READ_ONLY="${{ inputs.read_only && '1' || '0' }}"
+
+      # ‏--no-verify-jwt ضروري: كلود ليس مستخدماً في Supabase ولا يحمل JWT منها.
+      # الحارس هو SANAWI_MCP_TOKEN داخل الدالّة، ويرفض أي نداء بلا مفتاح.
+      - name: نشر الدالّة
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy sanawi-mcp \
+            --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
+            --no-verify-jwt
+
+      - name: الرابط
+        run: |
+          echo "### خادم MCP منشور" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'أضِف هذا الرابط في كلود ← Settings ← Connectors ← Add custom connector:' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/sanawi-mcp/<SANAWI_MCP_TOKEN>" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'ضع مكان `<SANAWI_MCP_TOKEN>` قيمةَ السرّ نفسها. الرابط كلمةُ سرّ — لا تشاركه.' >> $GITHUB_STEP_SUMMARY
+          echo "الوضع: ${{ inputs.read_only && 'قراءة فقط' || 'قراءة وكتابة' }}" >> $GITHUB_STEP_SUMMARY

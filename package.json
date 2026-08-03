@@ -15,7 +15,8 @@
     "check:mcp": "node scripts/check-mcp.mjs",
     "check:flow": "node scripts/check-flow.mjs",
     "check:ui": "node scripts/screenshot.mjs",
-    "check:uiflow": "node scripts/check-ui-flow.mjs"
+    "check:uiflow": "node scripts/check-ui-flow.mjs",
+    "build:edge": "node scripts/build-edge.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
