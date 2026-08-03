@@ -7,6 +7,7 @@ import { formatMoney } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { Button } from '@/components/ui/Button'
 import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
+import { IncomeEntries } from './IncomeEntries'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
 import {
@@ -126,6 +127,8 @@ export function MoneyScreen() {
           }}
         />
       </section>
+
+      {user && <IncomeEntries userId={user.id} sources={incomes} />}
 
       <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
         <div className="flex items-baseline justify-between">
