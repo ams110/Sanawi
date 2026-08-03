@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { formatMoney } from '@/lib/format'
+import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { useRefresh } from '@/lib/refresh'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
@@ -177,10 +177,9 @@ function MonthNav({
   onShift: (delta: number) => void
 }) {
   const { t } = useTranslation()
-  const label = new Date(`${month}T00:00:00`).toLocaleDateString('ar', {
-    month: 'long',
-    year: 'numeric',
-  })
+  // التنسيق من الدالة المشتركة لا من toLocaleDateString هنا: تنسيقان
+  // للتاريخ في تطبيقٍ واحد يعني أن تغيير أحدهما يترك الآخر.
+  const label = formatMonthYear(month)
 
   return (
     <div className="flex items-center justify-between">
@@ -260,7 +259,7 @@ function ExpenseList({
                   {cat?.name_ar ?? t('expenses.uncategorized')}
                   {e.is_unexpected && ' ⚡'}
                 </p>
-                <p className="num text-xs text-text-muted">{e.spent_at}</p>
+                <p className="num text-xs text-text-muted">{formatDate(e.spent_at)}</p>
               </div>
               <span className="num text-sm font-bold text-text">{formatMoney(Number(e.amount))}</span>
               <DeleteButton id={e.id} onDeleted={onDeleted} />

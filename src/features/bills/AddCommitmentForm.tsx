@@ -2,8 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatMoney } from '@/lib/format'
-import type { CommitmentTemplate } from '@/lib/db/types'
-import { addCommitment, listCommitmentTemplates } from './commitments'
+import type { CommitmentTemplate, PaymentMethod } from '@/lib/db/types'
+import { addCommitment, listCommitmentTemplates, listPaymentMethods } from './commitments'
 
 const inputClass =
   'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand'
@@ -25,6 +25,9 @@ export function AddCommitmentForm({
   const { t } = useTranslation()
 
   const [templates, setTemplates] = useState<CommitmentTemplate[]>([])
+  const [methods, setMethods] = useState<PaymentMethod[]>([])
+  const [dayOfMonth, setDayOfMonth] = useState<number | null>(null)
+  const [methodId, setMethodId] = useState<string | null>(null)
   const [picked, setPicked] = useState<CommitmentTemplate | null>(null)
   const [name, setName] = useState('')
   const [amount, setAmount] = useState(0)
@@ -37,8 +40,11 @@ export function AddCommitmentForm({
 
   useEffect(() => {
     if (!open || templates.length > 0) return
-    void listCommitmentTemplates()
-      .then(setTemplates)
+    void Promise.all([listCommitmentTemplates(), listPaymentMethods()])
+      .then(([t, m]) => {
+        setTemplates(t)
+        setMethods(m)
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
   }, [open, templates.length])
 
@@ -65,6 +71,8 @@ export function AddCommitmentForm({
         endsOn: isInstallment ? endsOn : null,
         totalAmount: isInstallment && totalAmount > 0 ? totalAmount : null,
         mySharePercent: 100,
+        dayOfMonth,
+        defaultMethodId: methodId,
       })
       setPicked(null)
       setName('')
@@ -72,6 +80,8 @@ export function AddCommitmentForm({
       setIsInstallment(false)
       setEndsOn('')
       setTotalAmount(0)
+      setDayOfMonth(null)
+      setMethodId(null)
       setOpen(false)
       await onAdded()
     } catch (err) {
@@ -158,6 +168,52 @@ export function AddCommitmentForm({
           </p>
         )}
       </div>
+
+      {/*
+       * الموعد قبل خانة القسط: أكثر البنود ليست أقساطاً، وكلّها لها موعد.
+       * وضعُ الأشيع أولاً يجعل الحقل الأخير اختيارياً بصرياً لا مطلوباً.
+       */}
+      <label className="block space-y-1">
+        <span className="text-xs font-semibold text-text-muted">
+          {t('bills.dayOfMonth')} — {t('bills.dayHint')}
+        </span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={31}
+          value={dayOfMonth ?? ''}
+          onChange={(e) => {
+            const v = Number(e.target.value)
+            setDayOfMonth(e.target.value === '' ? null : Math.min(31, Math.max(1, v || 1)))
+          }}
+          placeholder={t('bills.noDay')}
+          className={`num ${inputClass}`}
+        />
+      </label>
+
+      {methods.length > 0 && (
+        <div className="space-y-1">
+          <span className="text-xs font-semibold text-text-muted">{t('bills.methodHint')}</span>
+          <div className="flex flex-wrap gap-1.5">
+            {methods.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setMethodId(methodId === m.id ? null : m.id)}
+                aria-pressed={methodId === m.id}
+                className={`rounded-xl border px-2.5 py-1.5 text-xs font-semibold ${
+                  methodId === m.id
+                    ? 'border-brand bg-brand-soft text-brand'
+                    : 'border-border bg-bg text-text-muted'
+                }`}
+              >
+                <span aria-hidden="true">{m.icon}</span> {m.name_ar}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <label className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5">
         <input

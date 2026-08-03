@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
-import { formatMoney } from '@/lib/format'
+import { formatDate, formatMoney } from '@/lib/format'
 import { useRefresh } from '@/lib/refresh'
 import type { IncomeEntry, IncomeSource } from '@/lib/db/types'
 import { addIncomeEntry, deleteIncomeEntry, listIncomeEntries, sumIncomeEntries } from './income'
@@ -101,7 +101,7 @@ export function IncomeEntries({
                   <p className="truncate text-sm font-semibold text-text">
                     {row.name ?? source?.name ?? t('panel.incomeActual')}
                   </p>
-                  <p className="num text-xs text-text-muted">{row.received_at}</p>
+                  <p className="num text-xs text-text-muted">{formatDate(row.received_at)}</p>
                 </div>
                 <span className="num text-sm font-bold text-brand">
                   {formatMoney(Number(row.amount))}

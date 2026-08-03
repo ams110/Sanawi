@@ -106,6 +106,7 @@ export type FixedCommitment = {
   name: string
   amount: number
   day_of_month: number | null
+  default_method_id: string | null
   icon: string | null
   /** آخر دفعة — فارغ يعني متكرّر بلا نهاية. */
   ends_on: string | null
@@ -164,6 +165,7 @@ export type Expense = {
   spent_at: string
   note: string | null
   created_at: string
+  method_id: string | null
 }
 
 export type IncomeEntry = {
@@ -175,6 +177,18 @@ export type IncomeEntry = {
   amount: number
   received_at: string
   note: string | null
+  created_at: string
+}
+
+export type PaymentMethod = {
+  id: string
+  /** فارغ = طريقة افتراضية يراها الجميع. */
+  user_id: string | null
+  name_ar: string
+  icon: string
+  /** اقتطاع تلقائي: يُراجَع ولا يُدفع باليد. */
+  is_automatic: boolean
+  sort_order: number
   created_at: string
 }
 
@@ -262,6 +276,7 @@ export type Database = {
       fixed_commitments: Table<FixedCommitment>
       expenses: Table<Expense>
       expense_categories: Table<ExpenseCategory>
+      payment_methods: Table<PaymentMethod>
       income_entries: Table<IncomeEntry>
       commitment_partner_shares: Table<CommitmentPartnerShare>
       obligation_templates: Table<ObligationTemplate>
@@ -293,6 +308,7 @@ export type BillPayment = {
   paid_at: string | null
   note: string | null
   created_at: string
+  method_id: string | null
 }
 
 /** مشهد محسوب — لا يُكتب فيه. */

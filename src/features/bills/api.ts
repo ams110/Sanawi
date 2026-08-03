@@ -61,6 +61,7 @@ export async function saveBill(
   month: string,
   amount: number,
   paid: boolean,
+  methodId: string | null = null,
 ): Promise<void> {
   const { error } = await supabase.from('bill_payments').upsert(
     {
@@ -69,6 +70,7 @@ export async function saveBill(
       billing_month: month,
       amount,
       paid_at: paid ? new Date().toISOString().slice(0, 10) : null,
+      method_id: methodId,
     },
     { onConflict: 'commitment_id,billing_month' },
   )

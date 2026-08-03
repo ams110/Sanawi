@@ -4,7 +4,42 @@ import type {
   CommitmentPartnerShare,
   CommitmentTemplate,
   ObligationPartner,
+  PaymentMethod,
 } from '@/lib/db/types'
+
+/**
+ * طرق الدفع: الافتراضية والخاصة معاً.
+ *
+ * سياسة القراءة في القاعدة تضمّ الاثنين، فلا حاجة لاستعلامين.
+ */
+export async function listPaymentMethods(): Promise<PaymentMethod[]> {
+  const { data, error } = await supabase
+    .from('payment_methods')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('name_ar', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as PaymentMethod[]
+}
+
+export async function addPaymentMethod(
+  userId: string,
+  input: { nameAr: string; icon: string; isAutomatic: boolean },
+): Promise<PaymentMethod> {
+  const { data, error } = await supabase
+    .from('payment_methods')
+    .insert({
+      user_id: userId,
+      name_ar: input.nameAr,
+      icon: input.icon,
+      is_automatic: input.isAutomatic,
+      sort_order: 900,
+    })
+    .select()
+    .single()
+  if (error) throw error
+  return data as PaymentMethod
+}
 
 export async function listCommitmentTemplates(
   country = 'IL',
@@ -33,6 +68,8 @@ export async function addCommitment(
     endsOn: string | null
     totalAmount: number | null
     mySharePercent: number
+    dayOfMonth: number | null
+    defaultMethodId: string | null
   },
 ): Promise<string> {
   const { data, error } = await supabase
@@ -45,6 +82,8 @@ export async function addCommitment(
       ends_on: input.endsOn,
       total_amount: input.totalAmount,
       my_share_percent: input.mySharePercent,
+      day_of_month: input.dayOfMonth,
+      default_method_id: input.defaultMethodId,
     })
     .select('id')
     .single()
