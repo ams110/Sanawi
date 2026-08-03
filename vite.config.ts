@@ -19,6 +19,9 @@ export default defineConfig(({ mode }) => {
   const useProxy = env.VITE_SUPABASE_URL?.startsWith('/') && Boolean(target)
 
   return {
+    // الموقع على GitHub Pages يُخدَم من /Sanawi/ لا من الجذر، وداخل التطبيق
+    // المغلَّف من الجذر. المتغيّر يفصل الحالتين بلا شرطٍ في الكود.
+    base: env.VITE_BASE_PATH || '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: { '@': new URL('./src', import.meta.url).pathname },

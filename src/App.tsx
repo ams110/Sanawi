@@ -12,6 +12,7 @@ import { MonthScreen } from '@/features/month/MonthScreen'
 import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
+import { BillsScreen } from '@/features/bills/BillsScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
@@ -82,6 +83,7 @@ function Shell() {
           <Route path="/month" element={<MonthScreen />} />
           <Route path="/calendar" element={<CalendarScreen />} />
           <Route path="/money" element={<MoneyScreen />} />
+          <Route path="/bills" element={<BillsScreen />} />
           <Route path="/insights" element={<InsightsScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
@@ -99,6 +101,7 @@ const TABS = [
   { to: '/month', key: 'nav.month', icon: '📊' },
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
   { to: '/calendar', key: 'nav.calendar', icon: '📅' },
+  { to: '/bills', key: 'bills.tab', icon: '🧾' },
   { to: '/money', key: 'nav.money', icon: '💰' },
   { to: '/insights', key: 'insights.tab', icon: '🔍' },
 ] as const

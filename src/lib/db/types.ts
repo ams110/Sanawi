@@ -196,14 +196,39 @@ export type Database = {
       expenses: Table<Expense>
       obligation_templates: Table<ObligationTemplate>
       events: Table<AppEvent>
+      bill_payments: Table<BillPayment>
     }
     Views: {
       obligation_balances: View<ObligationBalance>
       partner_settlements: View<PartnerSettlement>
+      bill_averages: View<BillAverage>
     }
     // نفس شكل ما يولّده `supabase gen types` للمجموعات الفارغة.
     Functions: { [_ in never]: never }
     Enums: { [_ in never]: never }
     CompositeTypes: { [_ in never]: never }
   }
+}
+
+export type BillPayment = {
+  id: string
+  user_id: string
+  commitment_id: string
+  /** أول يوم في الشهر — مفتاح الشهر لا تاريخ الفاتورة. */
+  billing_month: string
+  amount: number
+  /** فارغ = مسجّلة ولم تُدفع بعد. */
+  paid_at: string | null
+  note: string | null
+  created_at: string
+}
+
+/** مشهد محسوب — لا يُكتب فيه. */
+export type BillAverage = {
+  commitment_id: string
+  user_id: string
+  name: string
+  budgeted_amount: number
+  paid_count: number
+  average_amount: number
 }

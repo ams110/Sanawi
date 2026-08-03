@@ -6,7 +6,7 @@ import { updateProfile } from '@/features/profile/api'
 import { formatMoney } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { Button } from '@/components/ui/Button'
-import { BackupSection } from '@/features/backup/BackupSection'
+import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
 import {
@@ -181,6 +181,7 @@ export function MoneyScreen() {
       />
 
       <BackupSection />
+      <UpdateSection />
     </div>
   )
 }

@@ -172,10 +172,41 @@ export const ar = {
     failed: 'ما قدرنا نكمّل',
   },
 
+  update: {
+    title: 'نسخة التطبيق',
+    subtitle: 'الواجهة بتتحدّث من الإنترنت — ما بتحتاج تنصّب من جديد.',
+    button: '⟳ حدّث التطبيق',
+  },
+
   reminders: {
     title: '{{name}} قرب موعده',
     bodyWithAmount: 'باقي {{days}} يوم على {{name}}. لسا ناقصك {{amount}} بالصندوق.',
     bodyReady: 'باقي {{days}} يوم على {{name}} — وصندوقك جاهز 👌',
+  },
+
+  bills: {
+    tab: 'الفواتير',
+    title: 'فواتير الشهر',
+    subtitle: 'سجّل قديش إجت فعلاً، وشو دفعت',
+    recorded: 'مسجّل',
+    paid: 'مدفوع',
+    outstanding: 'باقي عليك',
+    missing: 'لسا {{count}} فاتورة ما سجّلتها',
+    allRecorded: 'سجّلت كل الفواتير 👌',
+    budgeted: 'بالميزانية {{amount}}',
+    average: 'معدّل آخر سنة {{amount}}',
+    aboveBudget: 'أعلى من ميزانيتك بـ {{amount}}',
+    amountLabel: 'قديش إجت',
+    markPaid: 'دفعتها',
+    markUnpaid: 'ما دفعتها',
+    notRecorded: 'ما سجّلتها',
+    save: 'سجّل',
+    clear: 'امسح',
+    empty: 'ضيف التزاماتك الثابتة من شاشة الدخل، وبتظهر هون كل شهر.',
+    goToMoney: 'روح لشاشة الدخل',
+    loadFailed: 'ما قدرنا نجيب الفواتير',
+    saveFailed: 'ما قدرنا نحفظ الفاتورة',
+    thisMonth: 'هذا الشهر',
   },
 
   categories: {
