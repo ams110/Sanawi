@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#3F5D2E"/>
+  <!-- اثنا عشر قطاعاً: شهور السنة، والمكتمل منها يمثّل الصندوق الممتلئ -->
+  <g transform="translate(512,512)">
+    <circle r="300" fill="none" stroke="#2A4020" stroke-width="86"/>
+    <circle r="300" fill="none" stroke="#E8A33D" stroke-width="86"
+            stroke-linecap="round" stroke-dasharray="1414"
+            stroke-dashoffset="410" transform="rotate(-90)"/>
+    <text y="58" text-anchor="middle" fill="#FAF8F3"
+          font-family="IBM Plex Sans Arabic, sans-serif" font-size="300" font-weight="700">س</text>
+  </g>
+</svg>

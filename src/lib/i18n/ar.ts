@@ -171,6 +171,12 @@ export const ar = {
     failed: 'ما قدرنا نكمّل',
   },
 
+  reminders: {
+    title: '{{name}} قرب موعده',
+    bodyWithAmount: 'باقي {{days}} يوم على {{name}}. لسا ناقصك {{amount}} بالصندوق.',
+    bodyReady: 'باقي {{days}} يوم على {{name}} — وصندوقك جاهز 👌',
+  },
+
   categories: {
     car: 'السيارة',
     health: 'الصحة',

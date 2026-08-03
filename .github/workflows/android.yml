@@ -1,0 +1,52 @@
+name: بناء APK
+
+# التشغيل اليدوي هو الافتراض: البناء يستغرق دقائق ويستهلك حصة الإجراءات،
+# ولا معنى لتشغيله على كل دفعة بينما التطبيق يُختبر على الويب أصلاً.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: تنصيب الحزم
+        run: npm ci
+        env:
+          # المتصفحات غير مطلوبة للبناء، وتنزيلها يضيف دقائق بلا فائدة.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+      - name: بناء الويب
+        run: npm run build
+        env:
+          # المفاتيح تأتي من أسرار المستودع: المفتاح العام يُحزم داخل الـ APK
+          # ولا ضرر في ذلك، لكن إبقاءه خارج الشيفرة يجعل تبديل المشروع تعديلَ
+          # إعداد لا تعديلَ كود.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: مزامنة أندرويد
+        run: npx cap sync android
+
+      - name: بناء APK
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sanawi-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
