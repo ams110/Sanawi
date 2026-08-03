@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">سنوي</string>
+    <string name="title_activity_main">سنوي</string>
+    <string name="package_name">com.sanawi.app</string>
+    <string name="custom_url_scheme">com.sanawi.app</string>
+</resources>

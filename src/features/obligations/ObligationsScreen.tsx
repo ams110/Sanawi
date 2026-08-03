@@ -4,6 +4,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { ObligationCard } from './ObligationCard'
+import { scheduleObligationReminders } from '@/features/reminders/schedule'
 import { addDeposit, listObligations, track, type ObligationWithCalc } from './api'
 import { useTranslation } from 'react-i18next'
 
@@ -18,7 +19,10 @@ export function ObligationsScreen() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      setItems(await listObligations())
+      const loaded = await listObligations()
+      setItems(loaded)
+      // فشل الجدولة لا يُفشل عرض الالتزامات: التنبيه مساعِد لا شرط.
+      void scheduleObligationReminders(loaded).catch(() => {})
     } catch (err) {
       setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
     } finally {

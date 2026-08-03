@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2732" height="2732" viewBox="0 0 2732 2732">
+  <rect width="2732" height="2732" fill="#FAF8F3"/>
+  <g transform="translate(1366,1366)">
+    <circle r="300" fill="none" stroke="#E5DFD0" stroke-width="86"/>
+    <circle r="300" fill="none" stroke="#3F5D2E" stroke-width="86"
+            stroke-linecap="round" stroke-dasharray="1414"
+            stroke-dashoffset="410" transform="rotate(-90)"/>
+    <text y="58" text-anchor="middle" fill="#3F5D2E"
+          font-family="IBM Plex Sans Arabic, sans-serif" font-size="300" font-weight="700">س</text>
+  </g>
+</svg>
