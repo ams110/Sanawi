@@ -6,8 +6,9 @@ import { updateProfile } from '@/features/profile/api'
 import { formatMoney } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { Button } from '@/components/ui/Button'
-import { BackupSection } from '@/features/backup/BackupSection'
+import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
+import { useRefresh } from '@/lib/refresh'
 import {
   addFixedCommitment,
   addIncome,
@@ -24,6 +25,7 @@ const FREQUENCIES = [
 ] as const satisfies readonly { value: IncomeFrequency; key: string }[]
 
 export function MoneyScreen() {
+  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { user } = useAuth()
   const { profile, patchLocal } = useProfile()
@@ -43,8 +45,9 @@ export function MoneyScreen() {
       setError(err instanceof Error ? err.message : t('money.loadFailed'))
     } finally {
       setLoading(false)
+      setBusy(false)
     }
-  }, [t])
+  }, [t, refreshToken, setBusy])
 
   useEffect(() => {
     void load()
@@ -178,6 +181,7 @@ export function MoneyScreen() {
       />
 
       <BackupSection />
+      <UpdateSection />
     </div>
   )
 }

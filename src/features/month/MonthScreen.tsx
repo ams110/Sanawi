@@ -7,12 +7,14 @@ import { listObligations } from '@/features/obligations/api'
 import { listFixedCommitments, listIncomes } from '@/features/money/api'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { Button } from '@/components/ui/Button'
+import { useRefresh } from '@/lib/refresh'
 
 /**
  * لوحة الشهر — الشاشة التي تجيب على سؤال واحد:
  * كم يجب أن يخرج من حسابي هذا الشهر، وكم يبقى لي.
  */
 export function MonthScreen() {
+  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { profile } = useProfile()
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
@@ -41,8 +43,9 @@ export function MonthScreen() {
       setError(err instanceof Error ? err.message : t('money.loadFailed'))
     } finally {
       setLoading(false)
+      setBusy(false)
     }
-  }, [profile?.monthly_savings_target, t])
+  }, [profile?.monthly_savings_target, t, refreshToken, setBusy])
 
   useEffect(() => {
     void load()

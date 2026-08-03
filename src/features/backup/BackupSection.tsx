@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Button } from '@/components/ui/Button'
+import { useRefresh } from '@/lib/refresh'
 import { downloadBackup, exportBackup, importBackup, parseBackup } from './api'
 
 /** تصدير واستيراد النسخة الاحتياطية — يظهر أسفل شاشة الدخل. */
@@ -93,6 +94,24 @@ export function BackupSection() {
           {error}
         </p>
       )}
+    </section>
+  )
+}
+
+/** تحديث الواجهة إلى آخر نسخة منشورة — بلا تنصيب APK. */
+export function UpdateSection() {
+  const { t } = useTranslation()
+  const { reloadApp } = useRefresh()
+
+  return (
+    <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
+      <div>
+        <h2 className="text-sm font-bold text-text">{t('update.title')}</h2>
+        <p className="text-xs text-text-muted">{t('update.subtitle')}</p>
+      </div>
+      <Button type="button" variant="secondary" className="w-full" onClick={reloadApp}>
+        {t('update.button')}
+      </Button>
     </section>
   )
 }

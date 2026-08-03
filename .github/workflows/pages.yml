@@ -1,0 +1,56 @@
+name: نشر الواجهة
+
+# كل دمج على main ينشر نسخة جديدة، والتطبيق على التلفون يلتقطها عند إعادة
+# التحميل — فلا يحتاج المستخدم إلى تنصيب APK مع كل ميزة.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# نشرة واحدة في كل مرة، ولا تُلغى نشرةٌ بدأت: إلغاؤها قد يترك الموقع نصف محدَّث.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+      - name: بناء الواجهة
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          # الموقع يُخدَم من مجلد فرعي باسم المستودع لا من الجذر.
+          VITE_BASE_PATH: /Sanawi/
+
+      # التوجيه يقع في المتصفح، وخادم Pages لا يعرف مسارات التطبيق فيردّ 404.
+      # نسخة من index.html باسم 404.html تجعله يعيدها فيكمل التوجيه في الواجهة.
+      - name: صفحة احتياطية للتوجيه
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

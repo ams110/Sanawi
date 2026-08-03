@@ -12,7 +12,9 @@ import { MonthScreen } from '@/features/month/MonthScreen'
 import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
+import { BillsScreen } from '@/features/bills/BillsScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
+import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -45,7 +47,9 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ProfileProvider>
-          <Shell />
+          <RefreshProvider>
+            <Shell />
+          </RefreshProvider>
         </ProfileProvider>
       </AuthProvider>
     </BrowserRouter>
@@ -79,6 +83,7 @@ function Shell() {
           <Route path="/month" element={<MonthScreen />} />
           <Route path="/calendar" element={<CalendarScreen />} />
           <Route path="/money" element={<MoneyScreen />} />
+          <Route path="/bills" element={<BillsScreen />} />
           <Route path="/insights" element={<InsightsScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
@@ -96,6 +101,7 @@ const TABS = [
   { to: '/month', key: 'nav.month', icon: '📊' },
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
   { to: '/calendar', key: 'nav.calendar', icon: '📅' },
+  { to: '/bills', key: 'bills.tab', icon: '🧾' },
   { to: '/money', key: 'nav.money', icon: '💰' },
   { to: '/insights', key: 'insights.tab', icon: '🔍' },
 ] as const
@@ -135,6 +141,26 @@ function BottomNav() {
   )
 }
 
+/** زر التحديث: هدف لمس كامل لا أيقونة صغيرة — يُضغط بالإبهام أثناء المشي. */
+function RefreshButton() {
+  const { t } = useTranslation()
+  const { refresh, busy } = useRefresh()
+
+  return (
+    <button
+      type="button"
+      onClick={refresh}
+      disabled={busy}
+      aria-label={t('common.refresh')}
+      className="flex size-9 items-center justify-center rounded-xl border border-border bg-surface text-text-muted transition disabled:opacity-50"
+    >
+      <span className={`text-base leading-none ${busy ? 'animate-spin' : ''}`} aria-hidden="true">
+        ⟳
+      </span>
+    </button>
+  )
+}
+
 const THEME_OPTIONS = [
   { value: 'system', key: 'theme.system' },
   { value: 'light', key: 'theme.light' },
@@ -160,6 +186,7 @@ function Header() {
         )}
 
         <div className="flex items-center gap-2">
+          <RefreshButton />
           <div className="flex rounded-xl border border-border bg-surface p-0.5">
             {THEME_OPTIONS.map((opt) => (
               <button
