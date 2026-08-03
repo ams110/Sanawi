@@ -24,6 +24,8 @@ npm run dev
 | `node scripts/screenshot.mjs` | لقطات الوضعين الفاتح والغامق + فحص وضع الجسر (يتطلب `npm run dev` يعمل) |
 | `npm run check:expenses` | فحص المصاريف اليومية على قاعدة حقيقية: التصنيفات وRLS والتلخيص |
 | `npm run check:commitments` | فحص البنود الشهرية: القوالب والأقساط وحصص الشركاء |
+| `npm run check:goals` | فحص أهداف الشراء: القوالب والتقدّم والاكتمال |
+| `npm run check:month` | فحص الدخل الفعلي واللوحة الموحّدة |
 
 ## البنية
 
@@ -31,6 +33,7 @@ npm run dev
 src/lib/obligations/calc.ts   محرّك الحسابات — نقي، بلا React ولا Supabase
 src/lib/commitments/calc.ts   البنود الشهرية: الأقساط التي تنتهي وحصص الشركاء
 src/lib/expenses/calc.ts      المصاريف اليومية: التلخيص وإسقاط الوتيرة
+src/lib/budget/month.ts       اللوحة الموحّدة: دخلٌ وصل ناقص كل ما خرج
 src/lib/format.ts             تنسيق العملة والتواريخ (العملة واللغة وسيطات لا ثوابت)
 src/lib/i18n/ar.ts            كل نصوص الواجهة
 src/lib/theme.tsx             الثيم: النظام / فاتح / غامق
