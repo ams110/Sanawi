@@ -11,6 +11,7 @@ import { OnboardingScreen } from '@/features/onboarding/OnboardingScreen'
 import { MonthScreen } from '@/features/month/MonthScreen'
 import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { MoneyScreen } from '@/features/money/MoneyScreen'
+import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -78,6 +79,7 @@ function Shell() {
           <Route path="/month" element={<MonthScreen />} />
           <Route path="/calendar" element={<CalendarScreen />} />
           <Route path="/money" element={<MoneyScreen />} />
+          <Route path="/insights" element={<InsightsScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
           <Route path="/obligations/:id" element={<ObligationDetail />} />
@@ -95,6 +97,7 @@ const TABS = [
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
   { to: '/calendar', key: 'nav.calendar', icon: '📅' },
   { to: '/money', key: 'nav.money', icon: '💰' },
+  { to: '/insights', key: 'insights.tab', icon: '🔍' },
 ] as const
 
 /**

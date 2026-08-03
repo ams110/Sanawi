@@ -6,6 +6,7 @@ import { updateProfile } from '@/features/profile/api'
 import { formatMoney } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { Button } from '@/components/ui/Button'
+import { BackupSection } from '@/features/backup/BackupSection'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import {
   addFixedCommitment,
@@ -175,6 +176,8 @@ export function MoneyScreen() {
           await updateProfile(user.id, { monthly_savings_target: value })
         }}
       />
+
+      <BackupSection />
     </div>
   )
 }
