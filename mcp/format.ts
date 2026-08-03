@@ -17,20 +17,6 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   EGP: 'ج.م',
 }
 
-const MONTHS = [
-  'يناير',
-  'فبراير',
-  'مارس',
-  'أبريل',
-  'مايو',
-  'يونيو',
-  'يوليو',
-  'أغسطس',
-  'سبتمبر',
-  'أكتوبر',
-  'نوفمبر',
-  'ديسمبر',
-] as const
 
 /**
  * حدّ حجم الرد.
@@ -51,15 +37,24 @@ export function money(amount: number, currency = 'ILS'): string {
 const toDate = (value: Date | string): Date =>
   value instanceof Date ? value : new Date(`${value}T00:00:00`)
 
-/** «15 نوفمبر 2026» — أوضح من 2026-11-15 حين يُقرأ بسرعة. */
+/*
+ * التواريخ بالأرقام لا بأسماء الشهور — نفس قاعدة `src/lib/format.ts`.
+ *
+ * أسماء الشهور العربية مذهبان: «أغسطس» في مصر و«آب» في الشام، وأيُّهما اخترتَ
+ * بدا غريباً لنصف القرّاء. والفواتير والبنوك هنا تكتب 8/2026، فتطابق قراءةُ
+ * كلود ما يراه المستخدم في شاشته وفي فاتورته معاً.
+ */
+
+/** «15/11/2026» — يوم/شهر/سنة. */
 export function longDate(value: Date | string): string {
   const d = toDate(value)
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
 }
 
+/** «11/2026» — كما تكتبه الفواتير. */
 export function monthYear(value: Date | string): string {
   const d = toDate(value)
-  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+  return `${d.getMonth() + 1}/${d.getFullYear()}`
 }
 
 /** تاريخ ISO بالتقويم المحلي — `toISOString` يحوّل إلى UTC فيقفز يوماً. */

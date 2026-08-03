@@ -50,6 +50,11 @@ function seed() {
     expenses: [],
     events: [],
     bill_payments: [],
+    expense_categories: [],
+    payment_methods: [],
+    income_entries: [],
+    commitment_partner_shares: [],
+    commitment_templates: [],
     obligation_templates: [
       {
         id: randomUUID(),
@@ -147,10 +152,32 @@ function billAverages(db) {
     })
 }
 
+/**
+ * تفاصيل البنود الشهرية.
+ *
+ * اللوحة الموحّدة تقرأ الحمل من هنا لا من `fixed_commitments`: هذا يحمل حصّتي
+ * بالشيكل ويعرف أيَّ بندٍ انتهى قسطه، وذاك يعطي المبلغ الكامل لكل بندٍ حيّاً
+ * كان أو ميتاً.
+ */
+function commitmentDetails(db) {
+  return db.fixed_commitments
+    .filter((c) => c.is_active)
+    .map((c) => {
+      const shares = db.commitment_partner_shares.filter((s) => s.commitment_id === c.id)
+      const partnersPercent = shares.reduce((t, s) => t + Number(s.share_percent), 0)
+      return {
+        ...c,
+        my_share_percent: Number(c.my_share_percent ?? 100 - partnersPercent) || 100,
+        partner_count: shares.length,
+      }
+    })
+}
+
 const VIEWS = {
   obligation_balances: obligationBalances,
   partner_settlements: partnerSettlements,
   bill_averages: billAverages,
+  commitment_details: commitmentDetails,
 }
 
 /* ── ترجمة استعلام PostgREST ────────────────────────────────── */
@@ -364,8 +391,19 @@ function defaultsFor(table) {
     case 'bill_payments':
       return { paid_at: null, note: null }
     case 'income_sources':
+      return { is_active: true }
     case 'fixed_commitments':
-      return { is_active: true, day_of_month: null }
+      return {
+        is_active: true,
+        day_of_month: null,
+        ends_on: null,
+        total_amount: null,
+        my_share_percent: 100,
+        icon: null,
+        default_method_id: null,
+      }
+    case 'income_entries':
+      return { note: null, source_id: null, received_at: today() }
     default:
       return {}
   }

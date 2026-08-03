@@ -20,21 +20,45 @@ const env = Object.fromEntries(
 
 const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
 
+/*
+ * القائمة تُشتقّ من الهجرات، وتقادُمها عطلٌ صامت: جدولٌ جديد لا يُضاف هنا
+ * لا يُفحص أبداً، والسطر الأخير يقول "كل الجداول موجودة" وهو لم يسأل عنه.
+ * حصل ذلك فعلاً: ستة جداول بقيت خارج الفحص.
+ */
 const TABLES = [
+  // 0001
   'profiles',
   'obligation_groups',
+  // 0002
   'obligations',
   'obligation_partners',
   'obligation_partner_shares',
   'fund_deposits',
   'obligation_payments',
+  // 0003
   'income_sources',
   'fixed_commitments',
   'expenses',
+  // 0004
   'obligation_templates',
+  // 0005
   'events',
+  // 0006
   'obligation_balances',
   'partner_settlements',
+  // 0008
+  'bill_payments',
+  'bill_averages',
+  // 0009
+  'expense_categories',
+  // 0010
+  'commitment_partner_shares',
+  'commitment_templates',
+  'commitment_details',
+  // 0012
+  'income_entries',
+  // 0013
+  'payment_methods',
 ]
 
 console.log(`الاتصال بـ ${env.VITE_SUPABASE_URL}\n`)

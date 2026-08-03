@@ -5,6 +5,14 @@ import { formatMoney } from '@/lib/format'
 import { summarizeMonth, type MonthlySummary } from '@/lib/budget/calc'
 import { listObligations } from '@/features/obligations/api'
 import { listFixedCommitments, listIncomes } from '@/features/money/api'
+import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
+import { listCommitmentDetails } from '@/features/bills/commitments'
+import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
+import { summarizeExpenses } from '@/lib/expenses/calc'
+import { summarizeMonthlyLoad } from '@/lib/commitments/calc'
+import { monthlyIncomeFrom } from '@/lib/budget/calc'
+import type { MonthPanelInput } from '@/lib/budget/month'
+import { MonthPanel } from './MonthPanel'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { Button } from '@/components/ui/Button'
 import { useRefresh } from '@/lib/refresh'
@@ -18,6 +26,7 @@ export function MonthScreen() {
   const { t } = useTranslation()
   const { profile } = useProfile()
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
+  const [panel, setPanel] = useState<MonthPanelInput | null>(null)
   const [hasIncome, setHasIncome] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -25,20 +34,56 @@ export function MonthScreen() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [obligations, incomes, fixed] = await Promise.all([
+      const month = monthKey()
+      const [obligations, incomes, fixed, details, expenses, entries] = await Promise.all([
         listObligations(),
         listIncomes(),
         listFixedCommitments(),
+        listCommitmentDetails(),
+        listExpenses(month),
+        listIncomeEntries(month),
       ])
       setHasIncome(incomes.length > 0)
+
+      const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
+      const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
+
       setSummary(
         summarizeMonth({
           incomes: incomes.map((i) => ({ amount: Number(i.amount), frequency: i.frequency })),
           fixedCommitments: fixed.map((f) => Number(f.amount)),
           obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
-          monthlySavingsTarget: Number(profile?.monthly_savings_target ?? 0),
+          monthlySavingsTarget: savingsTarget,
         }),
       )
+
+      /*
+       * الحمل الشهري يأتي من commitment_details لا من fixed_commitments:
+       * الأول يحمل حصّتي بالشيكل ويعرف أيّ بندٍ انتهى قسطه، والثاني يعطي
+       * المبلغ الكامل لكل بندٍ حيّاً كان أو ميتاً.
+       */
+      const load = summarizeMonthlyLoad(
+        details.map((d) => ({
+          amount: Number(d.amount),
+          endsOn: d.ends_on,
+          mySharePercent: Number(d.my_share_percent),
+        })),
+      )
+      const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
+
+      setPanel({
+        expectedIncome: monthlyIncomeFrom(
+          incomes.map((i) => ({ amount: Number(i.amount), frequency: i.frequency })),
+        ),
+        receivedIncome: sumIncomeEntries(entries),
+        obligationInstallments: Math.round(obligationsTotal * 100) / 100,
+        recurringBills: load.recurring,
+        installments: load.installments,
+        dailyExpenses: spending.total,
+        savingsTarget,
+        daysElapsed: spending.daysElapsed,
+        daysInMonth: spending.daysInMonth,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : t('money.loadFailed'))
     } finally {
@@ -77,6 +122,12 @@ export function MonthScreen() {
           {formatMoney(summary.mustLeaveAccount)}
         </p>
       </section>
+
+      {/*
+       * اللوحة الموحّدة تسبق التفاصيل: هي جواب "كم بيدي" بعد كل شيء، بينما
+       * ما تحتها يجيب "ممّ يتكوّن ذلك".
+       */}
+      {panel && hasIncome && <MonthPanel input={panel} />}
 
       {/* المتاح للصرف: الجواب على "هل أنا مرتاح فعلاً؟" */}
       {hasIncome ? (

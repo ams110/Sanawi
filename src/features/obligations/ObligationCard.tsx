@@ -21,6 +21,14 @@ export function ObligationCard({ item, onDeposit, depositing = false }: Props) {
   const { obligation, calc } = item
   const balance = Number(item.balance?.my_fund_balance ?? 0)
 
+  /*
+   * الهدف التزامٌ لا يتجدّد: recurrence_months = 0. الحساب واحد لكن اللغة
+   * تختلف — لا أحد "يتأخّر" عن رغبةٍ اختارها هو، والاكتمال هنا بشرى لا
+   * مجرّد وصولٍ إلى صفر.
+   */
+  const isGoal = obligation.recurrence_months === 0
+  const isReady = isGoal && calc.remainingAmount <= 0
+
   return (
     <article className="rounded-3xl border border-border bg-surface p-4">
       <Link to={`/obligations/${obligation.id}`} className="flex items-center gap-4">
@@ -29,6 +37,11 @@ export function ObligationCard({ item, onDeposit, depositing = false }: Props) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="truncate text-[15px] font-bold text-text">{obligation.name}</h3>
+            {isGoal && (
+              <span className="shrink-0 rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-bold text-text-muted">
+                {t('goal.label')}
+              </span>
+            )}
             {calc.isBridge && (
               <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-bold text-accent">
                 {t('obligations.bridgeBadge')}
@@ -49,9 +62,15 @@ export function ObligationCard({ item, onDeposit, depositing = false }: Props) {
 
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
         <p className="flex items-center gap-2 text-xs">
-          <span className={`rounded-full px-2 py-0.5 font-semibold ${STATUS_PILL[calc.status]}`}>
-            {t(`status.${calc.status}`)}
-          </span>
+          {isReady ? (
+            <span className="rounded-full bg-brand-soft px-2 py-0.5 font-bold text-brand">
+              {t('goal.ready')}
+            </span>
+          ) : (
+            <span className={`rounded-full px-2 py-0.5 font-semibold ${STATUS_PILL[calc.status]}`}>
+              {isGoal ? t(`goalStatus.${calc.status}`) : t(`status.${calc.status}`)}
+            </span>
+          )}
           <span className="text-text-muted">
             {formatMonthsRemaining(calc.monthsRemaining, calc.isOverdue)} ·{' '}
             {formatMonthYear(obligation.next_due_date)}

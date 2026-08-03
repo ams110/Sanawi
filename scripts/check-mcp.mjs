@@ -205,6 +205,11 @@ function expect(label, actual, wanted) {
 
 /* تواريخ نسبية: اليوم الخامس عشر من شهرٍ بعينه، فيبقى فرق الشهور التقويمية
    ثابتاً مهما كان تاريخ تشغيل الفحص. */
+const monthDay = (day) => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 const inMonths = (n) => {
   const d = new Date()
   const m = new Date(d.getFullYear(), d.getMonth() + n, 15)
@@ -302,14 +307,35 @@ expect('عدد التسويات', detail?.settlements.length, 1)
 expect('على الشريك', detail?.settlements[0]?.owed, 2400)
 expect('باقٍ على الشريك', detail?.settlements[0]?.outstanding, 1900)
 
-// ٥. رقم الشهر
+// ٥. رقم الشهر — اللوحة الموحّدة، نفس محرّك الشاشة
 const month = await call('sanawi_month_overview')
-expect('الدخل', month?.monthly_income, 13300)
-expect('الثابت', month?.fixed_total, 300)
+// لا دخل فعليّ مسجَّل بعد، فالرقم المعتمد هو المقدَّر: 12000 + 300×52÷12.
+expect('الدخل المعتمد', month?.income, 13300)
+expect('الدخل تقدير لا واقع', month?.income_is_actual, false)
 expect('هدف الادخار', month?.savings_target, 500)
-expect('مجموع الأقساط', month?.obligations_total, 975) // ‏375 + 600
-expect('يجب أن يخرج', month?.must_leave_account, 1775)
-expect('الباقي للصرف', month?.available_to_spend, 11525)
+expect('مجموع الأقساط', month?.obligation_installments, 975) // ‏375 + 600
+expect('فواتير متكرّرة', month?.recurring_bills, 300)
+expect('أقساط تنتهي', month?.installments, 0)
+expect('التقدير الثابت', month?.available_to_spend, 11525)
+// ‏13300 − (975 + 300 + 0 + 500) = 11525، ولا مصاريف يومية بعد.
+expect('الباقي فعلاً', month?.remaining, 11525)
+expect('لا تجاوز', month?.is_overspent, false)
+
+// دخلٌ فعليّ يقلب الرقم من تقدير إلى واقع.
+fake.db.income_entries.push({
+  id: '00000000-0000-4000-8000-0000000000cc',
+  user_id: fake.userId,
+  source_id: null,
+  amount: 9000,
+  received_at: monthDay(3),
+  note: null,
+  created_at: '',
+})
+const actual = await call('sanawi_month_overview')
+expect('الدخل صار واقعاً', actual?.income_is_actual, true)
+expect('الدخل الواصل', actual?.income, 9000)
+expect('الفجوة عن المعتاد', actual?.income_gap, -4300)
+expect('الباقي بعد الواقع', actual?.remaining, 7225)
 
 // ٦. التقويم
 const calendar = await call('sanawi_calendar', { months: 12 })
@@ -512,7 +538,7 @@ console.log('\n── النقل البعيد (HTTP) ──\n')
   await remote.callTool({ name: 'sanawi_add_income', arguments: { name: 'راتب', amount: 9000 } })
   const overview = await remote.callTool({ name: 'sanawi_month_overview', arguments: {} })
   if (overview.isError) fail(`HTTP: ${overview.content?.[0]?.text}`)
-  expect('الدخل عبر HTTP', overview.structuredContent?.monthly_income, 9000)
+  expect('الدخل عبر HTTP', overview.structuredContent?.income, 9000)
 
   // القراءة والكتابة تتعاقبان على نفس الحساب رغم أن كل رسالة خادمٌ جديد.
   await remote.callTool({

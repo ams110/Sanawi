@@ -40,23 +40,26 @@ export function formatNumber(amount: number, decimals = 0): string {
 
 import i18n from './i18n'
 
-/**
- * أسماء الشهور تأتي من ملف الترجمة لا من ثابت هنا.
- * نقرأها عند كل نداء لا مرة واحدة: تبديل اللغة يجب أن ينعكس فوراً.
+/*
+ * التواريخ بالأرقام لا بأسماء الشهور.
+ *
+ * أسماء الشهور العربية مذهبان لا واحد: «أغسطس» في مصر و«آب» في الشام،
+ * وأيُّهما اخترتَ بدا غريباً لنصف القرّاء. والفواتير والبنوك هنا تكتب
+ * 8/2026 فتصير القراءة مطابقةً لما يراه المستخدم في مصادره الأخرى.
+ *
+ * والأرقام لا تُترجَم، فتسقط معها مسألةُ لغةِ الشهر من الأساس.
  */
-function monthNames(): readonly string[] {
-  return i18n.t('time.months', { returnObjects: true }) as readonly string[]
-}
 
-/** «نوفمبر 2026» — أوضح من 11/2026 حين تقرأه بسرعة. */
+/** «11/2026» — كما تكتبه الفواتير والبنوك. */
 export function formatMonthYear(date: Date | string): string {
   const d = date instanceof Date ? date : new Date(`${date}T00:00:00`)
-  return `${monthNames()[d.getMonth()]} ${d.getFullYear()}`
+  return `${d.getMonth() + 1}/${d.getFullYear()}`
 }
 
+/** «15/8/2026» — يوم/شهر/سنة، الترتيب المستعمل هنا. */
 export function formatDate(date: Date | string): string {
   const d = date instanceof Date ? date : new Date(`${date}T00:00:00`)
-  return `${d.getDate()} ${monthNames()[d.getMonth()]} ${d.getFullYear()}`
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
 }
 
 /** «بعد 3 شهور» / «هذا الشهر» / «فات موعده» — نص بشري لا رقم مجرّد. */

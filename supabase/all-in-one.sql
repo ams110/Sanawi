@@ -485,3 +485,356 @@ group by c.id, c.user_id, c.name, c.amount;
 comment on view public.bill_averages is
   'المبلغ المقدَّر مقابل المتوسط الفعلي لآخر 12 شهراً';
 
+
+-- المصاريف اليومية: تصنيفات بأيقونات، وتمييز المصروف المفاجئ.
+--
+-- جدول expenses كان موجوداً بلا واجهة ولا تصنيف مفهرس: عمود category نصّي
+-- حرّ. النص الحرّ يصنع تصنيفاتٍ متكرّرة بفروق مسافةٍ أو إملاء، ولا يحمل
+-- أيقونة. هذه الهجرة تعطي التصنيف هويةً وأيقونةً وترتيباً.
+
+-- user_id فارغ = تصنيف افتراضي يراه الجميع. غير الفارغ = تصنيف أضافه صاحبه.
+-- عمودٌ واحد يخدم الحالتين بدل جدولين متطابقين.
+create table if not exists public.expense_categories (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users (id) on delete cascade,
+  name_ar text not null,
+  icon text not null,
+  sort_order int not null default 100,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.expense_categories is
+  'تصنيفات المصاريف — الصفوف بلا user_id افتراضية للجميع';
+
+create index if not exists expense_categories_user_idx
+  on public.expense_categories (user_id, sort_order);
+
+alter table public.expense_categories enable row level security;
+
+-- القراءة تشمل الافتراضي والخاص. الكتابة على الخاص وحده: الافتراضي
+-- تُديره الهجرات، فلا يستطيع مستخدم حذف تصنيف يراه غيره.
+create policy "expense_categories_read" on public.expense_categories
+  for select to authenticated
+  using (user_id is null or (select auth.uid()) = user_id);
+
+create policy "expense_categories_write_own" on public.expense_categories
+  for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+create policy "expense_categories_update_own" on public.expense_categories
+  for update to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create policy "expense_categories_delete_own" on public.expense_categories
+  for delete to authenticated
+  using ((select auth.uid()) = user_id);
+
+insert into public.expense_categories (user_id, name_ar, icon, sort_order)
+values
+  (null, 'أكل ومشروبات', '🍽️', 10),
+  (null, 'تسوّق البيت',  '🛒', 20),
+  (null, 'بنزين ومواصلات', '⛽', 30),
+  (null, 'قهوة وسناكات', '☕', 40),
+  (null, 'مطاعم وخروجات', '🍔', 50),
+  (null, 'صحة ودواء',    '💊', 60),
+  (null, 'ملابس',        '👕', 70),
+  (null, 'هدايا',        '🎁', 80),
+  (null, 'ترفيه واشتراكات', '🎮', 90),
+  (null, 'تصليحات',      '🔧', 100),
+  (null, 'شخصي',         '💇', 110),
+  (null, 'غير ذلك',      '📦', 120)
+on conflict do nothing;
+
+-- الربط بالتصنيف الجديد. عمود category النصّي القديم يبقى كما هو: لا بيانات
+-- فيه (الجدول لم تُستعمل له واجهة قط) وحذفه هجرةٌ هادمة لا داعي لها.
+alter table public.expenses
+  add column if not exists category_id uuid
+    references public.expense_categories (id) on delete set null;
+
+-- المصروف المفاجئ سؤالٌ مستقلّ عن التصنيف: تصليح مفاجئ تصنيفه "تصليحات"
+-- وصفتُه أنه لم يكن في الحسبان. عمودٌ منفصل يجيب "كم يكلّفني غير المتوقَّع
+-- شهرياً" دون إفساد التصنيف.
+alter table public.expenses
+  add column if not exists is_unexpected boolean not null default false;
+
+create index if not exists expenses_user_category_idx
+  on public.expenses (user_id, category_id, spent_at desc);
+
+comment on column public.expenses.category_id is 'التصنيف المفهرس — يحلّ محلّ category النصّي';
+comment on column public.expenses.is_unexpected is 'مصروف لم يكن في الحسبان';
+
+
+-- 0010_commitments_upgrade.sql
+-- الفواتير الشهرية: أيقونة، ونهاية للأقساط، وحصص شركاء.
+--
+-- ثلاث حاجاتٍ يجمعها أن fixed_commitments كان اسماً ومبلغاً فحسب:
+--   1) الفاتورة بلا أيقونة تُقرأ بالنص وحده، وشاشةٌ من عشرة أسطر نصّية
+--      تُمسح بالعين ولا تُقرأ.
+--   2) قرض السيارة فاتورةٌ شهرية بكل شيء إلا أنه ينتهي. جدولٌ مستقلّ له
+--      يكرّر تتبّع الدفع والشركاء واللوحة؛ عمودُ نهايةٍ يكفي.
+--   3) فاتورة البيت تُقسَم مع شريك تماماً كما يُقسَم التأمين، والقسمة
+--      موجودة للالتزامات وحدها.
+
+alter table public.fixed_commitments
+  add column if not exists icon text;
+
+-- تاريخ آخر دفعة. فارغ = متكرّر بلا نهاية (كهرباء، إنترنت).
+-- غير فارغ = قسط أو دين ينتهي، فيُعرض معه "بقي كذا دفعة".
+alter table public.fixed_commitments
+  add column if not exists ends_on date;
+
+-- المبلغ الكلّي للقرض — للعرض والسياق لا للحساب: القسط الشهري هو amount،
+-- وعدد الدفعات يُشتقّ من ends_on. تخزينُ الثلاثة يفتح باب تناقضها.
+alter table public.fixed_commitments
+  add column if not exists total_amount numeric(12, 2)
+    check (total_amount is null or total_amount >= 0);
+
+-- حصّتي من الفاتورة. الباقي على الشركاء في commitment_partner_shares،
+-- مطابقةً لما في obligations حرفاً بحرف حتى يبقى المفهوم واحداً.
+alter table public.fixed_commitments
+  add column if not exists my_share_percent numeric(5, 2) not null default 100
+    check (my_share_percent > 0 and my_share_percent <= 100);
+
+comment on column public.fixed_commitments.ends_on is
+  'آخر دفعة — فارغ يعني متكرّر بلا نهاية';
+comment on column public.fixed_commitments.total_amount is
+  'أصل الدين للعرض؛ الحساب يقوم على amount و ends_on';
+
+-- الشريك نفسه المستعمل في الالتزامات: obligation_partners. لا جدول شركاء
+-- ثانٍ — الشريك شخصٌ واحد سواء قاسمك التأمين أو فاتورة الكهرباء.
+create table if not exists public.commitment_partner_shares (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  commitment_id uuid not null references public.fixed_commitments (id) on delete cascade,
+  partner_id uuid not null references public.obligation_partners (id) on delete cascade,
+  share_percent numeric(5, 2) not null
+    check (share_percent > 0 and share_percent <= 100),
+  unique (commitment_id, partner_id)
+);
+
+comment on table public.commitment_partner_shares is
+  'حصص الشركاء في فاتورة شهرية — نظيرة obligation_partner_shares';
+
+create index if not exists commitment_shares_commitment_idx
+  on public.commitment_partner_shares (commitment_id);
+
+alter table public.commitment_partner_shares enable row level security;
+
+create policy "commitment_partner_shares_all_own" on public.commitment_partner_shares
+  for all using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+-- قوالب البنود الشهرية. جدولٌ مستقلّ عن obligation_templates لا عمودُ نوعٍ
+-- فيه: الأعمدة تختلف فعلاً — القالب السنوي يحمل دورةً ومبلغاً مقترحاً
+-- للسنة، والشهريّ يحمل مبلغاً مقترحاً للشهر وصفةَ "هل ينتهي".
+create table if not exists public.commitment_templates (
+  id uuid primary key default gen_random_uuid(),
+  name_ar text not null,
+  name_he text,
+  name_en text,
+  category text not null,
+  icon text not null,
+  suggested_min numeric(12, 2),
+  suggested_max numeric(12, 2),
+  -- قالبُ قرضٍ يفتح حقل تاريخ النهاية عند الاختيار.
+  is_installment boolean not null default false,
+  country text not null default 'IL',
+  sort_order int not null default 100
+);
+
+create index if not exists commitment_templates_country_idx
+  on public.commitment_templates (country, sort_order);
+
+alter table public.commitment_templates enable row level security;
+
+create policy "commitment_templates_read_all" on public.commitment_templates
+  for select to authenticated using (true);
+
+insert into public.commitment_templates
+  (name_ar, name_he, name_en, category, icon, suggested_min, suggested_max, is_installment, country, sort_order)
+values
+  ('كهرباء',          'חשמל',          'Electricity',   'home',    '💡',  150, 900, false, 'IL', 10),
+  ('مي',              'מים',           'Water',         'home',    '💧',   80, 400, false, 'IL', 20),
+  ('غاز',             'גז',            'Gas',           'home',    '🔥',   50, 300, false, 'IL', 30),
+  ('إنترنت',          'אינטרנט',       'Internet',      'home',    '🌐',   80, 250, false, 'IL', 40),
+  ('تلفون',           'סלולר',         'Mobile',        'home',    '📱',   30, 200, false, 'IL', 50),
+  ('أرنونا',          'ארנונה',        'Municipal tax', 'home',    '🏛️',  200, 900, false, 'IL', 60),
+  ('إيجار',           'שכר דירה',      'Rent',          'home',    '🏠', 2000, 8000, false, 'IL', 70),
+  ('واد بيت',         'ועד בית',       'Building fee',  'home',    '🏢',   50, 400, false, 'IL', 80),
+  ('اشتراكات رقمية',  'מנויים דיגיטליים', 'Subscriptions', 'other', '📺',  20, 200, false, 'IL', 90),
+  ('نادي رياضي',      'חדר כושר',      'Gym',           'other',   '🏋️',  100, 400, false, 'IL', 100),
+  ('مساعدة الأهل',    'עזרה למשפחה',   'Family support','other',   '👨‍👩‍👦', 200, 3000, false, 'IL', 110),
+  ('قرض سيارة',       'הלוואת רכב',    'Car loan',      'debt',    '🚗',  500, 4000, true,  'IL', 120),
+  ('قرض شخصي',        'הלוואה אישית',  'Personal loan', 'debt',    '🏦',  300, 5000, true,  'IL', 130),
+  ('تقسيط جهاز',      'תשלומים למכשיר','Device instalment','debt', '📦',  100, 1500, true,  'IL', 140),
+  ('دين لحدا',        'חוב לחבר',      'Debt to a friend','debt',  '🤝',  100, 3000, true,  'IL', 150)
+on conflict do nothing;
+
+-- حصّتي بالشيكل من كل بند نشط، وكم دفعة بقيت إن كان له نهاية.
+-- الحساب في العرض لا في الواجهة: سطرٌ واحد يخدم كل شاشة تسأل السؤال نفسه.
+create or replace view public.commitment_details
+with (security_invoker = on) as
+select
+  c.id as commitment_id,
+  c.user_id,
+  c.name,
+  c.icon,
+  c.amount,
+  c.ends_on,
+  c.total_amount,
+  c.my_share_percent,
+  round(c.amount * c.my_share_percent / 100, 2) as my_amount,
+  case
+    when c.ends_on is null then null
+    -- الدفعات المتبقية تشمل شهر الاستحقاق نفسه: قسطٌ ينتهي هذا الشهر
+    -- بقيت له دفعةٌ واحدة لا صفر.
+    else greatest(
+      0,
+      (date_part('year', c.ends_on) - date_part('year', current_date)) * 12
+        + (date_part('month', c.ends_on) - date_part('month', current_date)) + 1
+    )::int
+  end as payments_left
+from public.fixed_commitments c
+where c.is_active;
+
+comment on view public.commitment_details is
+  'حصّتي بالشيكل وعدد الدفعات المتبقية لكل بند شهري نشط';
+
+
+-- 0011_goal_templates.sql
+-- أهداف الشراء: قوالب لما يُشترى مرةً واحدة.
+--
+-- الهدف ليس نوعاً جديداً في السكيما: obligations تدعم recurrence_months = 0
+-- منذ البداية بمعنى "مرة واحدة، لا يتجدّد". الناقص كان قوالبَ تقول للمستخدم
+-- إن هذا ممكن — فلا أحد يخمّن أن حقلاً اسمه "التزام" يصلح لبلايستيشن.
+--
+-- الفرق كلّه في اللغة لا في الحساب: القسط نفسه، والتقدّم نفسه، لكن "متأخر"
+-- كلمةٌ ظالمة لمن يجمّع ثمن جهاز، و"لسا بدك تجمّع" هي الصادقة.
+
+insert into public.obligation_templates
+  (name_ar, name_he, name_en, category, icon, default_recurrence_months, suggested_min, suggested_max, country, sort_order)
+values
+  ('كمبيوتر / لابتوب', 'מחשב / לפטופ',  'Computer',       'goal', '💻', 0, 2000, 12000, 'IL', 200),
+  ('بلايستيشن / جيمنغ','פלייסטיישן',     'Gaming console', 'goal', '🎮', 0, 1500,  4000, 'IL', 210),
+  ('تلفون جديد',       'טלפון חדש',      'New phone',      'goal', '📱', 0, 1000,  6000, 'IL', 220),
+  ('سيارة',            'רכב',            'Car',            'goal', '🚙', 0, 20000, 150000, 'IL', 230),
+  ('أثاث',             'ריהוט',          'Furniture',      'goal', '🛋️', 0, 2000, 20000, 'IL', 240),
+  ('دراجة / سكوتر',    'אופניים / קורקינט','Bike / scooter','goal', '🛵', 0, 1500, 10000, 'IL', 250),
+  ('كورس أو دراسة',    'קורס או לימודים','Course / studies','goal', '🎓', 0, 1000, 30000, 'IL', 260),
+  ('سفرة',             'טיול',           'A trip',         'goal', '🧳', 0, 3000, 25000, 'IL', 270),
+  ('عرس',              'חתונה',          'Wedding',        'goal', '💒', 0, 20000, 200000, 'IL', 280),
+  ('صندوق طوارئ',      'קרן חירום',      'Emergency fund', 'goal', '🛟', 0, 5000, 50000, 'IL', 290)
+on conflict do nothing;
+
+
+-- 0012_income_entries.sql
+-- الدخل الفعلي: ما وصل فعلاً لا ما يُتوقَّع.
+--
+-- income_sources تقدير: "راتبي 5,000 كل شهر". وهو يكفي من يقبض ثابتاً
+-- ولا يكفي من يشتغل حرّاً أو بساعات متغيّرة أو بإكراميات — فتصير كل حسبة
+-- في التطبيق مبنيّة على رقمٍ لم يصل.
+--
+-- الجدول نظير bill_payments تماماً: التقدير في جدولٍ والواقع في آخر،
+-- والفجوة بينهما هي ما يريد المستخدم رؤيته.
+
+create table if not exists public.income_entries (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  -- المصدر اختياري: دخلٌ مفاجئ (هدية، بيع غرض) لا مصدر ثابت له.
+  source_id uuid references public.income_sources (id) on delete set null,
+  name text,
+  amount numeric(12, 2) not null check (amount > 0),
+  received_at date not null default current_date,
+  note text,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.income_entries is
+  'دفعة دخل وصلت فعلاً — نظيرة bill_payments في جهة الدخل';
+comment on column public.income_entries.source_id is
+  'فارغ = دخل بلا مصدر ثابت';
+
+create index if not exists income_entries_user_date_idx
+  on public.income_entries (user_id, received_at desc);
+
+alter table public.income_entries enable row level security;
+
+create policy "income_entries_all_own" on public.income_entries
+  for all using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+
+-- 0013_payment_methods.sql
+-- موعد الدفع وطريقته.
+--
+-- day_of_month موجود منذ 0003 وبلا واجهة قطّ. وطريقة الدفع ناقصة، وهي
+-- ليست تفصيلاً: فاتورةٌ على هوراة كيفع لا تحتاج تذكيراً بدفعها بل تذكيراً
+-- بمراجعتها، وفاتورةٌ بالكاش تحتاج أن يكون المبلغ في الجيب يوم استحقاقها.
+
+-- جدولٌ لا عمودٌ نصّي: "فيزا" وحدها لا تكفي لمن يحمل بطاقتين، والاسم
+-- الحقيقي للبطاقة هو ما يربط السطر بكشف الحساب.
+create table if not exists public.payment_methods (
+  id uuid primary key default gen_random_uuid(),
+  -- فارغ = طريقة افتراضية يراها الجميع، كما في expense_categories.
+  user_id uuid references auth.users (id) on delete cascade,
+  name_ar text not null,
+  icon text not null,
+  -- الاقتطاع التلقائي لا يُدفع باليد، فلا يُذكَّر به كما يُذكَّر بغيره.
+  is_automatic boolean not null default false,
+  sort_order int not null default 100,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.payment_methods is
+  'طرق الدفع — الصفوف بلا user_id افتراضية للجميع';
+comment on column public.payment_methods.is_automatic is
+  'اقتطاع تلقائي: يُراجَع ولا يُدفع باليد';
+
+create index if not exists payment_methods_user_idx
+  on public.payment_methods (user_id, sort_order);
+
+alter table public.payment_methods enable row level security;
+
+create policy "payment_methods_read" on public.payment_methods
+  for select to authenticated
+  using (user_id is null or (select auth.uid()) = user_id);
+
+create policy "payment_methods_insert_own" on public.payment_methods
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+
+create policy "payment_methods_update_own" on public.payment_methods
+  for update to authenticated
+  using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create policy "payment_methods_delete_own" on public.payment_methods
+  for delete to authenticated using ((select auth.uid()) = user_id);
+
+insert into public.payment_methods (user_id, name_ar, icon, is_automatic, sort_order)
+values
+  (null, 'كاش',              '💵', false, 10),
+  (null, 'بطاقة ائتمان',      '💳', false, 20),
+  (null, 'هوراة كيفع',        '🔁', true,  30),
+  (null, 'هوراة بنكية',       '🏦', false, 40),
+  (null, 'شيك',              '🧾', false, 50),
+  (null, 'بيت / تطبيق',       '📲', false, 60)
+on conflict do nothing;
+
+-- الطريقة المعتادة للبند: تُقترح عند تسجيل كل فاتورة فلا تُختار كل شهر.
+alter table public.fixed_commitments
+  add column if not exists default_method_id uuid
+    references public.payment_methods (id) on delete set null;
+
+-- والطريقة الفعلية للفاتورة: قد تدفع الكهربا كاشاً هذا الشهر استثناءً.
+alter table public.bill_payments
+  add column if not exists method_id uuid
+    references public.payment_methods (id) on delete set null;
+
+-- وللمصاريف اليومية أيضاً: "كم صرفت بالبطاقة مقابل الكاش" سؤالٌ حقيقي.
+alter table public.expenses
+  add column if not exists method_id uuid
+    references public.payment_methods (id) on delete set null;
+
+create index if not exists bill_payments_method_idx on public.bill_payments (method_id);
+create index if not exists expenses_method_idx on public.expenses (user_id, method_id);

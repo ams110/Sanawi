@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { computeGroupCost } from '../../src/lib/budget/groupCost.js'
 import { projectSavings } from '../../src/lib/budget/calc.js'
 import { heaviestMonth } from '../../src/lib/obligations/calendar.js'
+import { dailyAllowance } from '../../src/lib/budget/month.js'
 import type {
   BillAverage,
   BillPayment,
@@ -86,20 +87,42 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
     'sanawi_month_overview',
     {
       title: 'رقم الشهر في سنوي',
-      description: `ملخّص الشهر الحالي: الدخل الشهري، الالتزامات الثابتة، مجموع أقساط الالتزامات السنوية، هدف الادخار، وما يبقى فعلاً للصرف.
+      description: `الرقم الواحد: دخلٌ وصل ناقص كل ما خرج ويخرج = ما بيدك الآن.
 
-ابدأ من هنا في أي سؤال عن الوضع المالي العام («كيف وضعي؟»، «كم بقدر أصرف هذا الشهر؟»، «هل أنا ملحّق؟»). يغني عن نداء sanawi_list_obligations حين يكون السؤال عن المجموع لا عن بندٍ بعينه.
+هذا هو نفس ما تعرضه لوحة الشهر في التطبيق، محسوباً بنفس المحرّك — لا تُعِد جمعه من أجزائه.
 
-المخرجات: monthly_income، fixed_total، obligations_total، savings_target، must_leave_account (ما يجب أن يخرج من الحساب)، available_to_spend (سالب = عجز)، is_over_budget، وعدّادات: obligations_count، overdue_count، behind_count.`,
+ابدأ من هنا في أي سؤال عن الوضع المالي العام («كيف وضعي؟»، «كم بقدر أصرف؟»، «هل أنا ملحّق؟»).
+
+المخرجات:
+  - remaining: الباقي فعلاً. سالب = تجاوز.
+  - projected_remaining: ما سيتبقّى آخر الشهر إن استمرّت وتيرة الصرف اليومي — هذا هو التحذير المبكر.
+  - daily_allowance: كم يمكن صرفه يومياً حتى آخر الشهر.
+  - income و income_is_actual و income_gap: الدخل المعتمد، وهل هو واقعٌ مسجَّل أم تقدير، وفرق الواصل عن المتوقَّع.
+  - التفصيل: obligation_installments و recurring_bills و installments و daily_expenses و savings_target.
+  - عدّادات: obligations_count و overdue_count و behind_count.
+
+ملاحظة: available_to_spend الوارد هنا هو التقدير الثابت (دخلٌ متوقَّع ناقص ما يجب أن يخرج)، بينما remaining هو الواقع. الفرق بينهما مقصود.`,
       outputSchema: {
         currency: z.string(),
-        monthly_income: z.number(),
-        fixed_total: z.number(),
-        obligations_total: z.number(),
+        month: z.string(),
+        income: z.number(),
+        income_is_actual: z.boolean(),
+        income_gap: z.number(),
+        remaining: z.number(),
+        is_overspent: z.boolean(),
+        projected_remaining: z.number(),
+        projected_is_overspent: z.boolean(),
+        daily_allowance: z.number(),
+        days_elapsed: z.number(),
+        days_in_month: z.number(),
+        obligation_installments: z.number(),
+        recurring_bills: z.number(),
+        installments: z.number(),
+        daily_expenses: z.number(),
         savings_target: z.number(),
-        must_leave_account: z.number(),
+        committed: z.number(),
+        total_out: z.number(),
         available_to_spend: z.number(),
-        is_over_budget: z.boolean(),
         obligations_count: z.number(),
         overdue_count: z.number(),
         behind_count: z.number(),
@@ -108,21 +131,35 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
     },
     guard(async () => {
       const connection = await connect()
-      const { summary, obligations } = await loadMonth(connection)
+      const picture = await loadMonth(connection)
+      const { summary, panel, obligations, expenses, load } = picture
       const currency = connection.currency
 
       const overdue = obligations.filter((o) => o.calc.isOverdue)
       const behind = obligations.filter((o) => o.calc.status === 'behind')
+      const allowance = dailyAllowance(panel.remaining, expenses.daysElapsed, expenses.daysInMonth)
 
       const structured = {
         currency,
-        monthly_income: summary.monthlyIncome,
-        fixed_total: summary.fixedTotal,
-        obligations_total: summary.obligationsTotal,
-        savings_target: summary.savingsTarget,
-        must_leave_account: summary.mustLeaveAccount,
+        month: monthKey(),
+        income: panel.income,
+        income_is_actual: panel.incomeIsActual,
+        income_gap: panel.incomeGap,
+        remaining: panel.remaining,
+        is_overspent: panel.isOverspent,
+        projected_remaining: panel.projectedRemaining,
+        projected_is_overspent: panel.projectedIsOverspent,
+        daily_allowance: allowance,
+        days_elapsed: expenses.daysElapsed,
+        days_in_month: expenses.daysInMonth,
+        obligation_installments: summary.obligationsTotal,
+        recurring_bills: load.recurring,
+        installments: load.installments,
+        daily_expenses: expenses.total,
+        savings_target: picture.savingsTarget,
+        committed: panel.committed,
+        total_out: panel.totalOut,
         available_to_spend: summary.availableToSpend,
-        is_over_budget: summary.isOverBudget,
         obligations_count: obligations.length,
         overdue_count: overdue.length,
         behind_count: behind.length,
@@ -131,15 +168,23 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       const text = [
         `## ${monthYear(new Date())}`,
         '',
-        `- الدخل الشهري: **${money(summary.monthlyIncome, currency)}**`,
-        `- الالتزامات الثابتة: ${money(summary.fixedTotal, currency)}`,
-        `- أقساط الالتزامات السنوية: ${money(summary.obligationsTotal, currency)} (${obligations.length} التزام)`,
-        `- هدف الادخار: ${money(summary.savingsTarget, currency)}`,
-        `- **يجب أن يخرج من الحساب: ${money(summary.mustLeaveAccount, currency)}**`,
+        panel.isOverspent
+          ? `⚠️ **تجاوزت بـ ${money(Math.abs(panel.remaining), currency)}**`
+          : `**الباقي معك: ${money(panel.remaining, currency)}**`,
+        panel.projectedIsOverspent
+          ? `📉 بوتيرة صرفك الحالية ستنتهي بـ ${money(Math.abs(panel.projectedRemaining), currency)} عجزاً.`
+          : `بوتيرتك الحالية ستنتهي بـ ${money(panel.projectedRemaining, currency)} · ${money(allowance, currency)} يومياً.`,
         '',
-        summary.isOverBudget
-          ? `⚠️ **عجز ${money(Math.abs(summary.availableToSpend), currency)}** — المصروف المخطَّط أكبر من الدخل.`
-          : `**الباقي للصرف: ${money(summary.availableToSpend, currency)}**`,
+        `- الدخل: ${money(panel.income, currency)} ${panel.incomeIsActual ? '(واصل فعلاً)' : '(تقدير — لم يُسجَّل دخل هذا الشهر)'}` +
+          (panel.incomeIsActual && panel.incomeGap !== 0
+            ? ` · ${panel.incomeGap < 0 ? 'أقل' : 'أعلى'} من المعتاد بـ ${money(Math.abs(panel.incomeGap), currency)}`
+            : ''),
+        `- أقساط الالتزامات: ${money(summary.obligationsTotal, currency)} (${obligations.length} التزام)`,
+        `- فواتير متكرّرة: ${money(load.recurring, currency)}`,
+        `- أقساط تنتهي: ${money(load.installments, currency)}`,
+        `- مصاريف يومية حتى الآن: ${money(expenses.total, currency)} (${expenses.daysElapsed} من ${expenses.daysInMonth} يوماً)`,
+        `- هدف الادخار: ${money(picture.savingsTarget, currency)}`,
+        `- **مجموع ما خرج ويخرج: ${money(panel.totalOut, currency)}**`,
         overdue.length > 0
           ? `\n⚠️ ${overdue.length} التزام فات موعده: ${overdue.map((o) => o.obligation.name).join('، ')}`
           : '',

@@ -7,8 +7,10 @@ import { formatMoney } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { Button } from '@/components/ui/Button'
 import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
+import { IncomeEntries } from './IncomeEntries'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
+import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import {
   addFixedCommitment,
   addIncome,
@@ -16,6 +18,8 @@ import {
   archiveIncome,
   listFixedCommitments,
   listIncomes,
+  updateFixedCommitment,
+  updateIncomeSource,
 } from './api'
 
 const FREQUENCIES = [
@@ -88,32 +92,7 @@ export function MoneyScreen() {
         ) : (
           <ul className="space-y-2">
             {incomes.map((income) => (
-              <li
-                key={income.id}
-                className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-text">{income.name}</p>
-                  {/* المكافئ الشهري صريح: الأسبوعي × 4.333 مفاجأة سارّة تستحق الإظهار. */}
-                  <p className="text-xs text-text-muted">
-                    {t('money.monthlyEquivalent', {
-                      amount: formatMoney(
-                        Number(income.amount) * FREQUENCY_TO_MONTHLY[income.frequency],
-                      ),
-                    })}
-                  </p>
-                </div>
-                <span className="num text-sm font-bold text-text">
-                  {formatMoney(Number(income.amount))}
-                </span>
-                <RemoveButton
-                  label={t('money.remove')}
-                  onClick={async () => {
-                    await archiveIncome(income.id)
-                    await load()
-                  }}
-                />
-              </li>
+              <IncomeRow key={income.id} income={income} onChanged={load} />
             ))}
           </ul>
         )}
@@ -126,6 +105,8 @@ export function MoneyScreen() {
           }}
         />
       </section>
+
+      {user && <IncomeEntries userId={user.id} sources={incomes} />}
 
       <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
         <div className="flex items-baseline justify-between">
@@ -140,24 +121,7 @@ export function MoneyScreen() {
         ) : (
           <ul className="space-y-2">
             {fixed.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5"
-              >
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
-                  {item.name}
-                </span>
-                <span className="num text-sm font-bold text-text">
-                  {formatMoney(Number(item.amount))}
-                </span>
-                <RemoveButton
-                  label={t('money.remove')}
-                  onClick={async () => {
-                    await archiveFixedCommitment(item.id)
-                    await load()
-                  }}
-                />
-              </li>
+              <FixedRow key={item.id} item={item} onChanged={load} />
             ))}
           </ul>
         )}
@@ -183,6 +147,179 @@ export function MoneyScreen() {
       <BackupSection />
       <UpdateSection />
     </div>
+  )
+}
+
+function IncomeRow({
+  income,
+  onChanged,
+}: {
+  income: IncomeSource
+  onChanged: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(income.name)
+  const [amount, setAmount] = useState(Number(income.amount))
+  const [frequency, setFrequency] = useState<IncomeFrequency>(income.frequency)
+  const [error, setError] = useState<string | null>(null)
+
+  const cancel = () => {
+    setName(income.name)
+    setAmount(Number(income.amount))
+    setFrequency(income.frequency)
+    setError(null)
+    setEditing(false)
+  }
+
+  return (
+    <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-text">{income.name}</p>
+          {/* المكافئ الشهري صريح: الأسبوعي × 4.333 مفاجأة سارّة تستحق الإظهار. */}
+          <p className="text-xs text-text-muted">
+            {t('money.monthlyEquivalent', {
+              amount: formatMoney(Number(income.amount) * FREQUENCY_TO_MONTHLY[income.frequency]),
+            })}
+          </p>
+        </div>
+        <span className="num text-sm font-bold text-text">
+          {formatMoney(Number(income.amount))}
+        </span>
+        {!editing && (
+          <>
+            <EditButton onClick={() => setEditing(true)} />
+            <RemoveButton
+              label={t('money.remove')}
+              onClick={async () => {
+                await archiveIncome(income.id)
+                await onChanged()
+              }}
+            />
+          </>
+        )}
+      </div>
+
+      <InlineEdit
+        open={editing}
+        onCancel={cancel}
+        canSave={name.trim().length > 0 && amount > 0}
+        error={error}
+        title={t('money.editSource')}
+        onSave={async () => {
+          setError(null)
+          try {
+            await updateIncomeSource(income.id, { name: name.trim(), amount, frequency })
+            setEditing(false)
+            await onChanged()
+          } catch (err) {
+            setError(err instanceof Error ? err.message : t('money.editFailed'))
+          }
+        }}
+      >
+        <div className="flex gap-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
+          <input
+            type="number"
+            inputMode="decimal"
+            value={amount || ''}
+            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            className={`num ${editInputClass}`}
+          />
+        </div>
+        <div className="flex gap-2">
+          {FREQUENCIES.map((f) => (
+            <button
+              key={f.value}
+              type="button"
+              onClick={() => setFrequency(f.value)}
+              className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${
+                frequency === f.value
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-border bg-bg text-text-muted'
+              }`}
+            >
+              {t(f.key)}
+            </button>
+          ))}
+        </div>
+      </InlineEdit>
+    </li>
+  )
+}
+
+function FixedRow({
+  item,
+  onChanged,
+}: {
+  item: FixedCommitment
+  onChanged: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(item.name)
+  const [amount, setAmount] = useState(Number(item.amount))
+  const [error, setError] = useState<string | null>(null)
+
+  const cancel = () => {
+    setName(item.name)
+    setAmount(Number(item.amount))
+    setError(null)
+    setEditing(false)
+  }
+
+  return (
+    <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
+          {item.icon && <span className="me-1" aria-hidden="true">{item.icon}</span>}
+          {item.name}
+        </span>
+        <span className="num text-sm font-bold text-text">{formatMoney(Number(item.amount))}</span>
+        {!editing && (
+          <>
+            <EditButton onClick={() => setEditing(true)} />
+            <RemoveButton
+              label={t('money.remove')}
+              onClick={async () => {
+                await archiveFixedCommitment(item.id)
+                await onChanged()
+              }}
+            />
+          </>
+        )}
+      </div>
+
+      <InlineEdit
+        open={editing}
+        onCancel={cancel}
+        canSave={name.trim().length > 0 && amount > 0}
+        error={error}
+        title={t('bills.editTitle')}
+        onSave={async () => {
+          setError(null)
+          try {
+            await updateFixedCommitment(item.id, { name: name.trim(), amount })
+            setEditing(false)
+            await onChanged()
+          } catch (err) {
+            setError(err instanceof Error ? err.message : t('money.editFailed'))
+          }
+        }}
+      >
+        <div className="flex gap-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
+          <input
+            type="number"
+            inputMode="decimal"
+            value={amount || ''}
+            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            className={`num ${editInputClass}`}
+          />
+        </div>
+      </InlineEdit>
+    </li>
   )
 }
 

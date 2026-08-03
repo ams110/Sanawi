@@ -9,10 +9,15 @@
 
 import { calculateObligation, type ObligationCalcResult } from '../src/lib/obligations/calc.js'
 import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligations/calendar.js'
-import { summarizeMonth, type MonthlySummary } from '../src/lib/budget/calc.js'
+import { monthlyIncomeFrom, summarizeMonth, type MonthlySummary } from '../src/lib/budget/calc.js'
+import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
+import { summarizeMonthlyLoad, type MonthlyLoad } from '../src/lib/commitments/calc.js'
+import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import type {
+  CommitmentDetail,
   Expense,
   FixedCommitment,
+  IncomeEntry,
   IncomeFrequency,
   IncomeSource,
   Obligation,
@@ -146,35 +151,128 @@ export async function loadMoneyItems({ db }: Connection): Promise<MoneyItems> {
 
 export interface MonthPicture {
   summary: MonthlySummary
+  panel: MonthPanel
   obligations: ObligationView[]
   money: MoneyItems
   savingsTarget: number
+  expenses: ExpenseSummary
+  receivedIncome: number
+  /** الحمل الشهري مفصولاً: متكرّر بلا نهاية، وأقساط تنتهي. */
+  load: MonthlyLoad
 }
 
-/** رقم الشهر كاملاً: الدخل والثابت والأقساط وهدف الادخار في نداء واحد. */
+/**
+ * رقم الشهر كاملاً.
+ *
+ * يبني اللوحة الموحّدة بنفس ترتيب `MonthScreen` وبنفس المحرّكات: الحملُ
+ * الشهري من `commitment_details` لا من `fixed_commitments` — الأول يحمل حصّتي
+ * بالشيكل ويعرف أيَّ بندٍ انتهى قسطه، والثاني يعطي المبلغ الكامل لكل بندٍ
+ * حيّاً كان أو ميتاً. أيُّ اختصارٍ هنا يجعل كلود يقول رقماً غير الذي على الشاشة.
+ *
+ * ويبقى `summarizeMonth` محسوباً بجانبها: هو التقدير الثابت (دخلٌ متوقَّع ناقص
+ * ما يجب أن يخرج)، واللوحة هي الواقع (دخلٌ وصل ناقص ما خرج فعلاً). الرقمان
+ * مختلفان عن قصد، والفرق بينهما هو أهمّ ما يراه من دخلُه متغيّر.
+ */
 export async function loadMonth(connection: Connection): Promise<MonthPicture> {
-  const [obligations, money, profile] = await Promise.all([
+  const month = monthKey()
+  const monthStart = new Date(`${month}T00:00:00`)
+
+  const [obligations, money, profile, details, expenseRows, entries] = await Promise.all([
     loadObligations(connection),
     loadMoneyItems(connection),
     loadProfile(connection),
+    loadCommitmentDetails(connection),
+    loadMonthExpenses(connection, month),
+    loadIncomeEntries(connection, month),
   ])
 
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
+  const incomes = money.incomes.map((i) => ({
+    amount: Number(i.amount),
+    frequency: i.frequency as IncomeFrequency,
+  }))
+  const obligationsTotal = obligations.reduce((sum, o) => sum + o.calc.monthlyInstallment, 0)
+
+  const load = summarizeMonthlyLoad(
+    details.map((d) => ({
+      amount: Number(d.amount),
+      endsOn: d.ends_on,
+      mySharePercent: Number(d.my_share_percent),
+    })),
+  )
+
+  const expenses = summarizeExpenses(
+    expenseRows.map((e) => ({
+      amount: Number(e.amount),
+      spentAt: e.spent_at,
+      categoryId: e.category_id,
+      isUnexpected: e.is_unexpected,
+    })),
+    monthStart,
+  )
+
+  const receivedIncome =
+    Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
 
   return {
     summary: summarizeMonth({
-      incomes: money.incomes.map((i) => ({
-        amount: Number(i.amount),
-        frequency: i.frequency as IncomeFrequency,
-      })),
+      incomes,
       fixedCommitments: money.fixedCommitments.map((c) => Number(c.amount)),
       obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
       monthlySavingsTarget: savingsTarget,
     }),
+    panel: buildMonthPanel({
+      expectedIncome: monthlyIncomeFrom(incomes),
+      receivedIncome,
+      obligationInstallments: Math.round(obligationsTotal * 100) / 100,
+      recurringBills: load.recurring,
+      installments: load.installments,
+      dailyExpenses: expenses.total,
+      savingsTarget,
+      daysElapsed: expenses.daysElapsed,
+      daysInMonth: expenses.daysInMonth,
+    }),
     obligations,
     money,
     savingsTarget,
+    expenses,
+    receivedIncome,
+    load,
   }
+}
+
+export async function loadCommitmentDetails({ db }: Connection): Promise<CommitmentDetail[]> {
+  const { data, error } = await db.from('commitment_details').select('*')
+  if (error) throw error
+  return (data ?? []) as CommitmentDetail[]
+}
+
+export async function loadMonthExpenses({ db }: Connection, month: string): Promise<Expense[]> {
+  const start = new Date(`${month}T00:00:00`)
+  const end = isoDate(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+
+  const { data, error } = await db
+    .from('expenses')
+    .select('*')
+    .gte('spent_at', month)
+    .lte('spent_at', end)
+    .order('spent_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Expense[]
+}
+
+export async function loadIncomeEntries({ db }: Connection, month: string): Promise<IncomeEntry[]> {
+  const start = new Date(`${month}T00:00:00`)
+  const end = isoDate(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+
+  const { data, error } = await db
+    .from('income_entries')
+    .select('*')
+    .gte('received_at', month)
+    .lte('received_at', end)
+    .order('received_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as IncomeEntry[]
 }
 
 export function calendarFrom(obligations: ObligationView[], months: number) {

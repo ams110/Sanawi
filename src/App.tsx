@@ -13,6 +13,7 @@ import { CalendarScreen } from '@/features/calendar/CalendarScreen'
 import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { BillsScreen } from '@/features/bills/BillsScreen'
+import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
@@ -84,6 +85,7 @@ function Shell() {
           <Route path="/calendar" element={<CalendarScreen />} />
           <Route path="/money" element={<MoneyScreen />} />
           <Route path="/bills" element={<BillsScreen />} />
+          <Route path="/expenses" element={<ExpensesScreen />} />
           <Route path="/insights" element={<InsightsScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
@@ -102,6 +104,7 @@ const TABS = [
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
   { to: '/calendar', key: 'nav.calendar', icon: '📅' },
   { to: '/bills', key: 'bills.tab', icon: '🧾' },
+  { to: '/expenses', key: 'expenses.tab', icon: '🛒' },
   { to: '/money', key: 'nav.money', icon: '💰' },
   { to: '/insights', key: 'insights.tab', icon: '🔍' },
 ] as const
@@ -124,7 +127,9 @@ function BottomNav() {
               <Link
                 to={tab.to}
                 aria-current={active ? 'page' : undefined}
-                className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
+                // 10px لا 11px: سبعة تبويبات تترك 55px لكل واحد على شاشة
+                // 390px، والاسم يُقصّ عند 11px.
+                className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition ${
                   active ? 'text-brand' : 'text-text-muted'
                 }`}
               >

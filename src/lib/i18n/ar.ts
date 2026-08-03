@@ -11,6 +11,9 @@ export const ar = {
   },
 
   common: {
+    edit2: 'عدّل',
+    saveEdit: 'احفظ التعديل',
+    cancelEdit: 'ألغِ',
     save: 'احفظ',
     cancel: 'إلغاء',
     edit: 'عدّل',
@@ -73,9 +76,47 @@ export const ar = {
 
   nav: {
     month: 'الشهر',
-    obligations: 'الالتزامات',
+    // «التزامات» لا «الالتزامات»: سبعة تبويبات على شاشة 390px تعني 55px
+    // لكل واحد، وأل التعريف وحدها تكفي لقصّ الكلمة.
+    obligations: 'التزامات',
     calendar: 'التقويم',
     money: 'الدخل',
+  },
+
+  expenses: {
+    tab: 'مصاريف',
+    title: 'مصاريف الشهر',
+    subtitle: 'الصغيرة اللي ما بتحسّ فيها — لحتى تتجمّع',
+    total: 'صرفت هالشهر',
+    dailyAverage: 'بمعدّل {{amount}} باليوم',
+    projected: 'بهالوتيرة رح توصل {{amount}} بآخر الشهر',
+    projectedDone: 'مجموع الشهر النهائي',
+    unexpected: 'منها مفاجئ',
+    daysElapsed: 'مرّ {{elapsed}} من {{total}} يوم',
+    addTitle: 'ضيف مصروف',
+    amountPlaceholder: 'المبلغ',
+    pickCategory: 'اختار تصنيف',
+    markUnexpected: 'كان مفاجئ',
+    unexpectedHint: 'ما كان بالحسبان — تصليح، دكتور، طوارئ',
+    notePlaceholder: 'ملاحظة (اختياري)',
+    add: 'سجّل المصروف',
+    addCategory: 'تصنيف جديد',
+    categoryName: 'اسم التصنيف',
+    categoryIcon: 'أيقونة',
+    saveCategory: 'ضيف التصنيف',
+    breakdown: 'وين راحت',
+    entries: '{{count}} مرة',
+    share: '{{percent}}%',
+    listTitle: 'كل المصاريف',
+    empty: 'ما سجّلت ولا مصروف هالشهر.',
+    emptyHint: 'سجّل أول واحد — القهوة والبنزين هنّ اللي بيوكلوا الدخل بهدوء.',
+    remove: 'احذف',
+    uncategorized: 'بلا تصنيف',
+    thisMonth: 'هذا الشهر',
+    loadFailed: 'ما قدرنا نجيب المصاريف',
+    saveFailed: 'ما قدرنا نسجّل المصروف',
+    editTitle: 'عدّل المصروف',
+    editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
   month: {
@@ -121,6 +162,8 @@ export const ar = {
     saved: 'انحفظ ✓',
     saveFailed: 'ما قدرنا نحفظ',
     loadFailed: 'ما قدرنا نجيب البيانات',
+    editSource: 'عدّل المصدر',
+    editFailed: 'ما قدرنا نحفظ التعديل',
     emptyIncome: 'ما ضفت ولا مصدر دخل',
     emptyFixed: 'ما ضفت ولا التزام ثابت',
   },
@@ -207,6 +250,65 @@ export const ar = {
     loadFailed: 'ما قدرنا نجيب الفواتير',
     saveFailed: 'ما قدرنا نحفظ الفاتورة',
     thisMonth: 'هذا الشهر',
+
+    addTitle: 'ضيف بند شهري',
+    pickTemplate: 'اختار من الجاهز',
+    customName: 'أو اكتب اسم البند',
+    monthlyAmount: 'المبلغ الشهري',
+    suggested: 'عادةً بين {{min}} و {{max}}',
+    isInstallment: 'هذا قسط أو دين — بينتهي',
+    endsOn: 'آخر دفعة',
+    totalAmount: 'أصل الدين (اختياري)',
+    add: 'ضيف البند',
+    addFailed: 'ما قدرنا نضيف البند',
+
+    paymentsLeft: 'بقي {{count}} دفعة',
+    lastPayment: 'آخر دفعة 🎉',
+    remainingForMe: 'باقي عليك {{amount}}',
+    finished: 'خلص',
+
+    loadTitle: 'الحمل الشهري',
+    recurring: 'فواتير متكرّرة',
+    installments: 'أقساط وديون',
+    nextRelief: 'بعد {{count}} شهور بينزل حملك {{amount}} بالشهر',
+    nextReliefSoon: 'الشهر الجاي بينزل حملك {{amount}} بالشهر',
+
+    sharesTitle: 'مين بيدفع شو',
+    myShare: 'حصّتك',
+    partnerShare: 'حصّة {{name}}',
+    myAmount: 'عليك {{amount}} من أصل {{total}}',
+    sharesMustBe100: 'المجموع لازم يكون 100% — ناقص {{gap}}%',
+    sharesOver100: 'المجموع أكثر من 100% بـ {{gap}}%',
+    saveShares: 'احفظ الحصص',
+    addPartner: 'ضيف شريك',
+    partnerName: 'اسم الشريك',
+    noPartners: 'ما في شركاء بعد',
+    sharesSaved: 'انحفظت 👌',
+    sharesFailed: 'ما قدرنا نحفظ الحصص',
+
+    dayOfMonth: 'موعد الدفع',
+    dayHint: 'أي يوم بالشهر بتنزل؟',
+    dayValue: '{{day}} بالشهر',
+    noDay: 'بلا موعد محدّد',
+    dueToday: 'اليوم! 🔔',
+    dueOverdue: 'متأخرة {{count}} يوم',
+    dueSoon: 'بعد {{count}} يوم',
+    dueLater: 'يوم {{day}}',
+    method: 'طريقة الدفع',
+    methodHint: 'كيف بتدفعها عادةً',
+    automatic: 'اقتطاع تلقائي',
+    automaticHint: 'بتنسحب لحالها — بس تأكّد إنها انسحبت',
+    addMethod: 'طريقة جديدة',
+    methodName: 'اسم الطريقة',
+    isAutomaticMethod: 'اقتطاع تلقائي (هوراة كيفع)',
+    saveMethod: 'ضيف الطريقة',
+    payableCount: 'لازم تدفع {{count}} فاتورة',
+    payableNone: 'ما ضل عليك ولا فاتورة تدفعها 👌',
+    editTitle: 'عدّل البند',
+    editName: 'الاسم',
+    archive: 'شيل البند',
+    archiveHint: 'بيختفي من الشاشات وبيضل تاريخ فواتيره محفوظ',
+    editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
   categories: {
@@ -215,6 +317,7 @@ export const ar = {
     events: 'مناسبات',
     home: 'البيت',
     lifestyle: 'سفر وترفيه',
+    goal: 'أهداف وشراء',
     other: 'متفرقات',
   },
 
@@ -222,6 +325,63 @@ export const ar = {
     on_track: 'ملحّق',
     slightly_behind: 'متأخر شوي',
     behind: 'متأخر',
+  },
+
+  /*
+   * الحالة نفسها بلغة الهدف.
+   *
+   * "متأخر" حكمٌ عادلٌ على تأمين سيارةٍ له موعدٌ لا يؤجَّل، وظالمٌ لمن
+   * يجمّع ثمن بلايستيشن — لا أحد يتأخّر عن رغبةٍ اختارها هو. الحساب واحد
+   * والكلمة تختلف.
+   */
+  goalStatus: {
+    on_track: 'ماشي تمام',
+    slightly_behind: 'لسا بدك تزيد شوي',
+    behind: 'بهالوتيرة رح يتأخر',
+  },
+
+  panel: {
+    title: 'اللي بيدك هالشهر',
+    incomeActual: 'دخلك اللي وصل',
+    incomeExpected: 'دخلك المتوقّع',
+    incomeNotLogged: 'ما سجّلت دخل هالشهر — بنحسب بالمتوقّع',
+    incomeBelow: 'أقل من المعتاد بـ {{amount}}',
+    incomeAbove: 'أعلى من المعتاد بـ {{amount}}',
+    committed: 'ملتزم فيه',
+    spent: 'صرفته',
+    remaining: 'بيضل معك',
+    overspent: 'تجاوزت بـ {{amount}}',
+    projection: 'بوتيرة صرفك، رح تخلّص الشهر بـ {{amount}}',
+    projectionBad: 'بوتيرة صرفك، رح تتجاوز بـ {{amount}} آخر الشهر',
+    allowance: 'يعني {{amount}} لليوم لتوصل آخر الشهر',
+    allowanceZero: 'ما ضل شي للصرف هالشهر',
+    breakdown: 'وين بيروح',
+    obligations: 'أقساط الالتزامات',
+    bills: 'فواتير متكرّرة',
+    installments: 'أقساط وديون',
+    expenses: 'مصاريف يومية',
+    savings: 'ادخار',
+    logIncome: 'سجّل دخل وصلك',
+    incomeAmount: 'المبلغ',
+    incomeName: 'من وين (اختياري)',
+    incomeDate: 'تاريخ الاستلام',
+    addIncome: 'سجّل',
+    incomeList: 'دخل هالشهر',
+    noIncomeYet: 'ما سجّلت ولا دفعة دخل هالشهر',
+    removeIncome: 'احذف',
+    incomeFailed: 'ما قدرنا نسجّل الدخل',
+    editIncome: 'عدّل الدفعة',
+    editFailed: 'ما قدرنا نحفظ التعديل',
+  },
+
+  goal: {
+    label: 'هدف',
+    category: 'أهداف وشراء',
+    ready: 'جاهز تشتريه 🎉',
+    remaining: 'باقي {{amount}}',
+    targetDate: 'بدك إياه بـ',
+    monthlyToReach: 'وفّر {{amount}} بالشهر لتوصله',
+    add: '+ ضيف هدف',
   },
 
   obligations: {
@@ -309,10 +469,9 @@ export const ar = {
     oneMonth: 'شهر',
     twoMonths: 'شهرين',
     fewMonths: 'شهور',
-    months: [
-      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
-    ],
+    // لا أسماء شهور: التواريخ بالأرقام (8/2026). أسماء الشهور العربية
+    // مذهبان — «أغسطس» و«آب» — وأيُّهما اخترتَ بدا غريباً لنصف القرّاء،
+    // والأرقام تسقط المسألة من أصلها وتطابق ما تكتبه الفواتير والبنوك.
   },
 } as const
 
