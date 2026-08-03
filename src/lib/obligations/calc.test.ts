@@ -179,6 +179,48 @@ describe('الحالات الحدّية', () => {
     expect(r.normalInstallment).toBe(1500)
   })
 
+  // هدف الشراء التزامٌ لمرة واحدة، فما يصحّ عليه يصحّ على الهدف.
+  it('هدف اكتمل: لا قسط باقٍ ولا مبلغ متبقٍّ', () => {
+    const r = calculateObligation({
+      totalAmount: 4000,
+      myFundBalance: 4000,
+      nextDueDate: '2027-01-01',
+      recurrenceMonths: 0,
+      cycleStartDate: '2026-08-02',
+      today: TODAY,
+    })
+    expect(r.remainingAmount).toBe(0)
+    expect(r.monthlyInstallment).toBe(0)
+    expect(r.progress).toBe(1)
+  })
+
+  it('هدف تجاوز مبلغه: لا يعطي متبقّياً سالباً', () => {
+    const r = calculateObligation({
+      totalAmount: 4000,
+      myFundBalance: 4500,
+      nextDueDate: '2027-01-01',
+      recurrenceMonths: 0,
+      cycleStartDate: '2026-08-02',
+      today: TODAY,
+    })
+    expect(r.remainingAmount).toBe(0)
+    expect(r.monthlyInstallment).toBe(0)
+  })
+
+  it('هدف بعيد: القسط ينقسم على الشهور المتبقية كلها', () => {
+    const r = calculateObligation({
+      totalAmount: 6000,
+      myFundBalance: 0,
+      nextDueDate: '2027-08-01',
+      recurrenceMonths: 0,
+      cycleStartDate: '2026-08-02',
+      today: TODAY,
+    })
+    expect(r.monthsRemaining).toBe(12)
+    expect(r.monthlyInstallment).toBe(500)
+    expect(r.isBridge).toBe(false)
+  })
+
   it('يقرّب القسط لأعلى فلا ينقص الصندوق شيكلاً', () => {
     const r = calculateObligation({
       totalAmount: 1000,

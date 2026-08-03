@@ -166,6 +166,18 @@ export type Expense = {
   created_at: string
 }
 
+export type IncomeEntry = {
+  id: string
+  user_id: string
+  /** فارغ = دخل بلا مصدر ثابت. */
+  source_id: string | null
+  name: string | null
+  amount: number
+  received_at: string
+  note: string | null
+  created_at: string
+}
+
 export type ExpenseCategory = {
   id: string
   /** فارغ = تصنيف افتراضي يراه الجميع ولا يملكه أحد. */
@@ -250,6 +262,7 @@ export type Database = {
       fixed_commitments: Table<FixedCommitment>
       expenses: Table<Expense>
       expense_categories: Table<ExpenseCategory>
+      income_entries: Table<IncomeEntry>
       commitment_partner_shares: Table<CommitmentPartnerShare>
       obligation_templates: Table<ObligationTemplate>
       commitment_templates: Table<CommitmentTemplate>

@@ -5,53 +5,30 @@
  * التشغيل: npm run check:commitments
  */
 import { createClient } from '@supabase/supabase-js'
-import { readFileSync, existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { summarizeMonthlyLoad, validateShares } from '../src/lib/commitments/calc.ts'
+import { allOf, createReporter, readEnv, requireTables, rowsOf, signInTestAccount } from './lib/checks.mjs'
 
-const env = Object.fromEntries(
-  readFileSync(fileURLToPath(new URL('../.env', import.meta.url)), 'utf8')
-    .split('\n')
-    .filter((l) => l.includes('='))
-    .map((l) => {
-      const i = l.indexOf('=')
-      return [l.slice(0, i).trim(), l.slice(i + 1).trim()]
-    }),
+const env = readEnv(import.meta.url)
+const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
+const { step, finish } = createReporter()
+
+await requireTables(
+  supabase,
+  ['commitment_templates', 'commitment_partner_shares', 'commitment_details'],
+  'supabase/migrations/0010_commitments_upgrade.sql',
 )
 
-const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY)
-
-let failures = 0
-const step = (label, ok, detail = '') => {
-  if (!ok) failures++
-  console.log(`${ok ? '✅' : '❌'} ${label}${detail ? ` — ${detail}` : ''}`)
-}
-
-const CRED_PATH = fileURLToPath(new URL('../.test-account.json', import.meta.url))
-if (!existsSync(CRED_PATH)) {
-  console.log('❌ لا حساب فحص محفوظ — شغّل npm run check:flow أولاً')
-  process.exit(1)
-}
-const creds = JSON.parse(readFileSync(CRED_PATH, 'utf8'))
-const { data: auth, error: authErr } = await supabase.auth.signInWithPassword(creds)
-if (authErr || !auth.session) {
-  step('دخول بحساب الفحص', false, authErr?.message ?? 'بلا جلسة')
-  process.exit(1)
-}
-step('دخول بحساب الفحص', true, creds.email)
-const userId = auth.session.user.id
+const { creds, userId } = await signInTestAccount(supabase, import.meta.url, step)
 
 // 1) القوالب.
-const { data: tpls, error: tplErr } = await supabase
-  .from('commitment_templates')
-  .select('*')
-  .order('sort_order')
-if (tplErr) {
-  step('قراءة قوالب الفواتير', false, tplErr.message)
-  process.exit(1)
-}
+const tpls = rowsOf(
+  await supabase.from('commitment_templates').select('*').order('sort_order'),
+  'قراءة قوالب الفواتير',
+  step,
+)
+if (!tpls) finish()
 step('قوالب الفواتير', tpls.length >= 15, `${tpls.length} قالب`)
-step('لكل قالب أيقونة', tpls.every((x) => x.icon?.length > 0))
+step('لكل قالب أيقونة', allOf(tpls, (x) => x.icon?.length > 0))
 const debts = tpls.filter((x) => x.is_installment)
 step('قوالب الديون معلّمة', debts.length === 4, debts.map((d) => d.name_ar).join('، '))
 
@@ -92,11 +69,12 @@ const { data: loan, error: loanErr } = await supabase
 step('قسط بتاريخ نهاية', !loanErr && loan?.ends_on === endsOn, loanErr?.message ?? endsOn)
 
 // 4) العرض يحسب الدفعات المتبقية — شاملةً شهر الانتهاء.
-const { data: details, error: detErr } = await supabase.from('commitment_details').select('*')
-if (detErr) {
-  step('قراءة commitment_details', false, detErr.message)
-  process.exit(1)
-}
+const details = rowsOf(
+  await supabase.from('commitment_details').select('*'),
+  'قراءة commitment_details',
+  step,
+)
+if (!details) finish()
 const loanDetail = details.find((d) => d.commitment_id === loan?.id)
 const billDetail = details.find((d) => d.commitment_id === bill?.id)
 step('الدفعات المتبقية للقسط', loanDetail?.payments_left === 4, `${loanDetail?.payments_left}`)
@@ -164,5 +142,4 @@ await supabase.from('fixed_commitments').delete().in('id', [bill.id, loan.id])
 await supabase.from('obligation_partners').delete().eq('id', partner.id)
 step('تنظيف', true)
 
-console.log(failures === 0 ? '\n✅ كل الفحوص نجحت' : `\n❌ ${failures} فحص فشل`)
-process.exit(failures === 0 ? 0 : 1)
+finish()

@@ -286,6 +286,7 @@ export const ar = {
     events: 'مناسبات',
     home: 'البيت',
     lifestyle: 'سفر وترفيه',
+    goal: 'أهداف وشراء',
     other: 'متفرقات',
   },
 
@@ -293,6 +294,61 @@ export const ar = {
     on_track: 'ملحّق',
     slightly_behind: 'متأخر شوي',
     behind: 'متأخر',
+  },
+
+  /*
+   * الحالة نفسها بلغة الهدف.
+   *
+   * "متأخر" حكمٌ عادلٌ على تأمين سيارةٍ له موعدٌ لا يؤجَّل، وظالمٌ لمن
+   * يجمّع ثمن بلايستيشن — لا أحد يتأخّر عن رغبةٍ اختارها هو. الحساب واحد
+   * والكلمة تختلف.
+   */
+  goalStatus: {
+    on_track: 'ماشي تمام',
+    slightly_behind: 'لسا بدك تزيد شوي',
+    behind: 'بهالوتيرة رح يتأخر',
+  },
+
+  panel: {
+    title: 'اللي بيدك هالشهر',
+    incomeActual: 'دخلك اللي وصل',
+    incomeExpected: 'دخلك المتوقّع',
+    incomeNotLogged: 'ما سجّلت دخل هالشهر — بنحسب بالمتوقّع',
+    incomeBelow: 'أقل من المعتاد بـ {{amount}}',
+    incomeAbove: 'أعلى من المعتاد بـ {{amount}}',
+    committed: 'ملتزم فيه',
+    spent: 'صرفته',
+    remaining: 'بيضل معك',
+    overspent: 'تجاوزت بـ {{amount}}',
+    projection: 'بوتيرة صرفك، رح تخلّص الشهر بـ {{amount}}',
+    projectionBad: 'بوتيرة صرفك، رح تتجاوز بـ {{amount}} آخر الشهر',
+    allowance: 'يعني {{amount}} لليوم لتوصل آخر الشهر',
+    allowanceZero: 'ما ضل شي للصرف هالشهر',
+    breakdown: 'وين بيروح',
+    obligations: 'أقساط الالتزامات',
+    bills: 'فواتير متكرّرة',
+    installments: 'أقساط وديون',
+    expenses: 'مصاريف يومية',
+    savings: 'ادخار',
+    logIncome: 'سجّل دخل وصلك',
+    incomeAmount: 'المبلغ',
+    incomeName: 'من وين (اختياري)',
+    incomeDate: 'تاريخ الاستلام',
+    addIncome: 'سجّل',
+    incomeList: 'دخل هالشهر',
+    noIncomeYet: 'ما سجّلت ولا دفعة دخل هالشهر',
+    removeIncome: 'احذف',
+    incomeFailed: 'ما قدرنا نسجّل الدخل',
+  },
+
+  goal: {
+    label: 'هدف',
+    category: 'أهداف وشراء',
+    ready: 'جاهز تشتريه 🎉',
+    remaining: 'باقي {{amount}}',
+    targetDate: 'بدك إياه بـ',
+    monthlyToReach: 'وفّر {{amount}} بالشهر لتوصله',
+    add: '+ ضيف هدف',
   },
 
   obligations: {
