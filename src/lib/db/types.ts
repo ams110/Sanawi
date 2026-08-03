@@ -114,10 +114,23 @@ export type Expense = {
   id: string
   user_id: string
   group_id: string | null
+  /** نصّ حرّ قديم سبق التصنيفات المفهرسة — يبقى للتوافق ولا يُكتب فيه. */
   category: string | null
+  category_id: string | null
+  is_unexpected: boolean
   amount: number
   spent_at: string
   note: string | null
+  created_at: string
+}
+
+export type ExpenseCategory = {
+  id: string
+  /** فارغ = تصنيف افتراضي يراه الجميع ولا يملكه أحد. */
+  user_id: string | null
+  name_ar: string
+  icon: string
+  sort_order: number
   created_at: string
 }
 
@@ -194,6 +207,7 @@ export type Database = {
       income_sources: Table<IncomeSource>
       fixed_commitments: Table<FixedCommitment>
       expenses: Table<Expense>
+      expense_categories: Table<ExpenseCategory>
       obligation_templates: Table<ObligationTemplate>
       events: Table<AppEvent>
       bill_payments: Table<BillPayment>

@@ -73,9 +73,45 @@ export const ar = {
 
   nav: {
     month: 'الشهر',
-    obligations: 'الالتزامات',
+    // «التزامات» لا «الالتزامات»: سبعة تبويبات على شاشة 390px تعني 55px
+    // لكل واحد، وأل التعريف وحدها تكفي لقصّ الكلمة.
+    obligations: 'التزامات',
     calendar: 'التقويم',
     money: 'الدخل',
+  },
+
+  expenses: {
+    tab: 'مصاريف',
+    title: 'مصاريف الشهر',
+    subtitle: 'الصغيرة اللي ما بتحسّ فيها — لحتى تتجمّع',
+    total: 'صرفت هالشهر',
+    dailyAverage: 'بمعدّل {{amount}} باليوم',
+    projected: 'بهالوتيرة رح توصل {{amount}} بآخر الشهر',
+    projectedDone: 'مجموع الشهر النهائي',
+    unexpected: 'منها مفاجئ',
+    daysElapsed: 'مرّ {{elapsed}} من {{total}} يوم',
+    addTitle: 'ضيف مصروف',
+    amountPlaceholder: 'المبلغ',
+    pickCategory: 'اختار تصنيف',
+    markUnexpected: 'كان مفاجئ',
+    unexpectedHint: 'ما كان بالحسبان — تصليح، دكتور، طوارئ',
+    notePlaceholder: 'ملاحظة (اختياري)',
+    add: 'سجّل المصروف',
+    addCategory: 'تصنيف جديد',
+    categoryName: 'اسم التصنيف',
+    categoryIcon: 'أيقونة',
+    saveCategory: 'ضيف التصنيف',
+    breakdown: 'وين راحت',
+    entries: '{{count}} مرة',
+    share: '{{percent}}%',
+    listTitle: 'كل المصاريف',
+    empty: 'ما سجّلت ولا مصروف هالشهر.',
+    emptyHint: 'سجّل أول واحد — القهوة والبنزين هنّ اللي بيوكلوا الدخل بهدوء.',
+    remove: 'احذف',
+    uncategorized: 'بلا تصنيف',
+    thisMonth: 'هذا الشهر',
+    loadFailed: 'ما قدرنا نجيب المصاريف',
+    saveFailed: 'ما قدرنا نسجّل المصروف',
   },
 
   month: {

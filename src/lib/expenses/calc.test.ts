@@ -70,7 +70,7 @@ describe('summarizeExpenses', () => {
 
   it('نسب التصنيفات صفر حين لا مصاريف بدل قسمةٍ على صفر', () => {
     const s = summarizeExpenses([row(0, { categoryId: 'food' })], AUG)
-    expect(s.byCategory[0].share).toBe(0)
+    expect(s.byCategory[0]?.share).toBe(0)
   })
 })
 
