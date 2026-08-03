@@ -137,6 +137,49 @@ export const ar = {
     failed: 'ما قدرنا نسجّل الدفعة',
   },
 
+  insights: {
+    tab: 'تحليل',
+    groupTitle: 'قديش بتكلفك فعلاً',
+    groupSubtitle: 'كل شي بتدفعه على بند واحد، مجموع ومقسوم على 12',
+    pickCategory: 'اختار بند',
+    yearly: 'بالسنة',
+    monthly: 'المعدل الشهري الحقيقي',
+    noData: 'ضيف التزامات لهاد البند عشان نحسبلك',
+    expensesLabel: 'مصاريف متفرقة',
+
+    simulatorTitle: 'لو ادّخرت بدل ما تصرف',
+    simulatorSubtitle: 'حرّك الأرقام وشوف وين بتوصل',
+    monthlyAmount: 'شهرياً',
+    years: 'لمدة',
+    yearsUnit: 'سنة',
+    annualReturn: 'عائد سنوي',
+    resultTitle: 'بعد {{years}} سنة بيصير معك',
+    deposited: 'اللي حطيته',
+    growth: 'اللي ربحته',
+    passiveTitle: 'دخل شهري بدون شغل',
+    passiveNote: 'محسوب على سحب 4% بالسنة — القاعدة اللي بتخلّي المبلغ ما يخلص.',
+  },
+
+  backup: {
+    title: 'بياناتك ملكك',
+    subtitle: 'نزّل نسخة كاملة، أو ارجّعها لأي حساب.',
+    export: '⬇ نزّل نسخة',
+    import: '⬆ ارجّع نسخة',
+    exporting: 'عم ننزّل...',
+    importing: 'عم نرجّع...',
+    imported: 'رجّعنا {{count}} صف. الصفوف الموجودة انتركت زي ما هي.',
+    failed: 'ما قدرنا نكمّل',
+  },
+
+  categories: {
+    car: 'السيارة',
+    health: 'الصحة',
+    events: 'مناسبات',
+    home: 'البيت',
+    lifestyle: 'سفر وترفيه',
+    other: 'متفرقات',
+  },
+
   status: {
     on_track: 'ملحّق',
     slightly_behind: 'متأخر شوي',
