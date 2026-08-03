@@ -48,11 +48,11 @@ jobs:
       - name: صفحة احتياطية للتوجيه
         run: cp dist/index.html dist/404.html
 
-      # enablement تُفعّل Pages عبر الـ API إن لم تكن مفعّلة، فلا يبقى إعدادٌ
-      # يدويّ في Settings يعطّل أول نشرة برسالة "Get Pages site failed".
+      # إنشاء موقع Pages من التدفّق (enablement) مجرَّب وفشل:
+      # "Resource not accessible by integration" — توكن Actions لا يملك
+      # صلاحية الإنشاء على مستودع شخصي. فالتفعيل يبقى خطوة يدوية واحدة:
+      # Settings → Pages → Source → GitHub Actions.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -87,8 +87,10 @@ cd android && ./gradlew assembleDebug
 
 يبقى بناء APK لازماً حين يتغيّر ما يمسّ النظام: إضافة أصلية، إذن، أيقونة.
 
-التدفّق يفعّل Pages بنفسه (`enablement: true`). إن رفض الحساب ذلك، فعّله يدوياً
-مرة واحدة: Settings → Pages → Source → **GitHub Actions**.
+**تفعيل يدويّ مرة واحدة:** Settings → Pages → Source → **GitHub Actions**.
+بدونه يفشل النشر بـ `Get Pages site failed`. جرّبنا تفعيله من التدفّق نفسه
+(`enablement: true`) فردّ `Resource not accessible by integration`: توكن Actions
+لا يملك صلاحية إنشاء الموقع، إنما النشر إليه بعد إنشائه.
 
 **المقابل:** التطبيق لا يفتح بلا إنترنت. وهو تنازل نظري: كل رقم فيه يأتي من
 Supabase، فبلا إنترنت هو معطّل أصلاً محزوماً كان أو لا.
