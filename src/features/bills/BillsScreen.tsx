@@ -9,8 +9,19 @@ import { deleteBill, listBills, monthKey, saveBill, shiftMonth, summarizeBills, 
 import { AddCommitmentForm } from './AddCommitmentForm'
 import { MonthlyLoadPanel } from './MonthlyLoadPanel'
 import { SharesEditor } from './SharesEditor'
-import { listCommitmentDetails, listCommitmentShares, listPartners } from './commitments'
-import type { CommitmentDetail, CommitmentPartnerShare, ObligationPartner } from '@/lib/db/types'
+import {
+  listCommitmentDetails,
+  listCommitmentShares,
+  listPartners,
+  listPaymentMethods,
+} from './commitments'
+import { dueInfo, sortBills } from '@/lib/commitments/due'
+import type {
+  CommitmentDetail,
+  CommitmentPartnerShare,
+  ObligationPartner,
+  PaymentMethod,
+} from '@/lib/db/types'
 
 /**
  * فواتير الشهر.
@@ -29,22 +40,25 @@ export function BillsScreen() {
   const [details, setDetails] = useState<CommitmentDetail[]>([])
   const [partners, setPartners] = useState<ObligationPartner[]>([])
   const [shares, setShares] = useState<CommitmentPartnerShare[]>([])
+  const [methods, setMethods] = useState<PaymentMethod[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [b, d, p, s] = await Promise.all([
+      const [b, d, p, s, m] = await Promise.all([
         listBills(month),
         listCommitmentDetails(),
         listPartners(),
         listCommitmentShares(),
+        listPaymentMethods(),
       ])
       setRows(b)
       setDetails(d)
       setPartners(p)
       setShares(s)
+      setMethods(m)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('bills.loadFailed'))
     } finally {
@@ -63,6 +77,29 @@ export function BillsScreen() {
     () => new Map(details.map((d) => [d.commitment_id, d])),
     [details],
   )
+  const methodById = useMemo(() => new Map(methods.map((m) => [m.id, m])), [methods])
+
+  /*
+   * الترتيب بالموعد لا بالإضافة: قائمةٌ بترتيب الإضافة ترتيبٌ لا يعني شيئاً،
+   * وترتيبها بالاستحقاق يحوّل الشاشة من سجلٍّ إلى قائمة عملٍ لهذا الأسبوع.
+   */
+  const ordered = useMemo(
+    () =>
+      sortBills(
+        rows,
+        (r) => ({
+          dayOfMonth: r.commitment.day_of_month,
+          isPaid: Boolean(r.payment?.paid_at),
+          isAutomatic: Boolean(
+            r.commitment.default_method_id &&
+              methodById.get(r.commitment.default_method_id)?.is_automatic,
+          ),
+        }),
+        new Date(`${month}T00:00:00`),
+      ),
+    [rows, month, methodById],
+  )
+
   const sharesByCommitment = useMemo(() => {
     const map = new Map<string, CommitmentPartnerShare[]>()
     for (const s of shares) {
@@ -163,18 +200,21 @@ export function BillsScreen() {
           </section>
 
           <ul className="space-y-3">
-            {rows.map((row) => (
+            {ordered.map((row) => (
               <BillCard
                 key={row.commitment.id}
                 row={row}
                 detail={detailById.get(row.commitment.id) ?? null}
+                month={month}
+                methods={methods}
+                methodById={methodById}
                 partners={partners}
                 shares={sharesByCommitment.get(row.commitment.id) ?? []}
                 userId={user?.id ?? null}
                 onReload={load}
-                onSave={async (amount, paid) => {
+                onSave={async (amount, paid, methodId) => {
                   if (!user) return
-                  await saveBill(user.id, row.commitment.id, month, amount, paid)
+                  await saveBill(user.id, row.commitment.id, month, amount, paid, methodId)
                   await load()
                 }}
                 onClear={async () => {
@@ -190,9 +230,19 @@ export function BillsScreen() {
   )
 }
 
+const DUE_PILL = {
+  overdue: 'bg-danger-soft text-danger',
+  today: 'bg-accent-soft text-accent',
+  soon: 'bg-brand-soft text-brand',
+  later: 'bg-surface-muted text-text-muted',
+} as const
+
 function BillCard({
   row,
   detail,
+  month,
+  methods,
+  methodById,
   partners,
   shares,
   userId,
@@ -202,11 +252,14 @@ function BillCard({
 }: {
   row: BillRow
   detail: CommitmentDetail | null
+  month: string
+  methods: PaymentMethod[]
+  methodById: Map<string, PaymentMethod>
   partners: ObligationPartner[]
   shares: CommitmentPartnerShare[]
   userId: string | null
   onReload: () => Promise<void>
-  onSave: (amount: number, paid: boolean) => Promise<void>
+  onSave: (amount: number, paid: boolean, methodId: string | null) => Promise<void>
   onClear: () => Promise<void>
 }) {
   const { t } = useTranslation()
@@ -216,6 +269,17 @@ function BillCard({
 
   const left = detail?.payments_left ?? null
   const isShared = Number(row.commitment.my_share_percent ?? 100) < 100
+
+  const day = row.commitment.day_of_month
+  const due = day != null ? dueInfo(day, new Date(`${month}T00:00:00`)) : null
+  const defaultMethod = row.commitment.default_method_id
+    ? (methodById.get(row.commitment.default_method_id) ?? null)
+    : null
+  // الطريقة الفعلية للفاتورة تسبق المعتادة: قد تدفعها كاشاً هذا الشهر استثناءً.
+  const [methodId, setMethodId] = useState<string | null>(
+    row.payment?.method_id ?? row.commitment.default_method_id ?? null,
+  )
+  const isAutomatic = Boolean(defaultMethod?.is_automatic)
 
   // المبلغ المقترح يتدرّج: الفاتورة المسجّلة، فمتوسّط السنة، فتقدير الميزانية.
   const [amount, setAmount] = useState(
@@ -268,6 +332,33 @@ function BillCard({
         {t('bills.budgeted', { amount: formatMoney(budgeted) })}
         {average > 0 && ` · ${t('bills.average', { amount: formatMoney(average) })}`}
       </p>
+
+      {/* الموعد قبل كل شيء: هو ما يحوّل السطر من معلومة إلى مهمّة. */}
+      {(due || isAutomatic) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {due && day != null && !paid && (
+            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${DUE_PILL[due.urgency]}`}>
+              {due.urgency === 'today'
+                ? t('bills.dueToday')
+                : due.urgency === 'overdue'
+                  ? t('bills.dueOverdue', { count: Math.abs(due.daysAway) })
+                  : due.urgency === 'soon'
+                    ? t('bills.dueSoon', { count: due.daysAway })
+                    : t('bills.dueLater', { day })}
+            </span>
+          )}
+          {due && day != null && paid && (
+            <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
+              {t('bills.dayValue', { day })}
+            </span>
+          )}
+          {isAutomatic && (
+            <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
+              🔁 {t('bills.automatic')}
+            </span>
+          )}
+        </div>
+      )}
 
       {/*
        * عدّاد الدفعات: القسط عبء له تاريخ انتهاء، وإظهاره يحوّل "أدفع كل
@@ -329,17 +420,37 @@ function BillCard({
         />
       </label>
 
+      {methods.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {methods.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setMethodId(methodId === m.id ? null : m.id)}
+              aria-pressed={methodId === m.id}
+              className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${
+                methodId === m.id
+                  ? 'border-brand bg-brand-soft text-brand'
+                  : 'border-border bg-bg text-text-muted'
+              }`}
+            >
+              <span aria-hidden="true">{m.icon}</span> {m.name_ar}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <Button
           className="flex-1"
           loading={busy}
           variant={paid ? 'secondary' : 'primary'}
-          onClick={() => void run(() => onSave(amount, !paid))}
+          onClick={() => void run(() => onSave(amount, !paid, methodId))}
         >
           {paid ? t('bills.markUnpaid') : t('bills.markPaid')}
         </Button>
         {!paid && (
-          <Button variant="secondary" disabled={busy} onClick={() => void run(() => onSave(amount, false))}>
+          <Button variant="secondary" disabled={busy} onClick={() => void run(() => onSave(amount, false, methodId))}>
             {t('bills.save')}
           </Button>
         )}

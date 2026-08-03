@@ -57,6 +57,8 @@ const TABLES = [
   'commitment_details',
   // 0012
   'income_entries',
+  // 0013
+  'payment_methods',
 ]
 
 console.log(`الاتصال بـ ${env.VITE_SUPABASE_URL}\n`)
