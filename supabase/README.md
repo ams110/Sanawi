@@ -8,12 +8,19 @@
 إن أردته محلياً، شغّل في مجلد المشروع:
 
 ```bash
-claude mcp add --scope local --transport http supabase \
-  "https://mcp.supabase.com/mcp?project_ref=YOUR_PROJECT_REF&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+claude mcp add --scope local --transport http supabase-sanawi \
+  "https://mcp.supabase.com/mcp?project_ref=onbdpdldeukxxulufobc&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
 ```
 
-ثم `claude` ثم `/mcp` واختر supabase للمصادقة. `--scope local` يبقيه على
-جهازك ولا يدخل المستودع.
+ثم `claude` ثم `/mcp` واختر `supabase-sanawi` واضغط `Authenticate`.
+`--scope local` يبقيه على جهازك ولا يدخل المستودع.
+
+الاسم `supabase-sanawi` لا `supabase`: مشروع سنوي (`onbdpdldeukxxulufobc`) على
+حساب Supabase ثانٍ غير الحساب الذي قد يكون مربوطاً عندك أصلاً، والاسم المميّز
+يمنع الخلط بين الحسابين في `/mcp`.
+
+المصادقة تحتاج متصفحاً على جهازك — لا تكتمل في جلسة بعيدة ولا في إضافة المحرّر،
+فشغّل الأمرين في طرفية عادية.
 
 ## التطبيق
 
