@@ -87,7 +87,8 @@ cd android && ./gradlew assembleDebug
 
 يبقى بناء APK لازماً حين يتغيّر ما يمسّ النظام: إضافة أصلية، إذن، أيقونة.
 
-**تفعيل مرة واحدة:** Settings → Pages → Source → **GitHub Actions**.
+التدفّق يفعّل Pages بنفسه (`enablement: true`). إن رفض الحساب ذلك، فعّله يدوياً
+مرة واحدة: Settings → Pages → Source → **GitHub Actions**.
 
 **المقابل:** التطبيق لا يفتح بلا إنترنت. وهو تنازل نظري: كل رقم فيه يأتي من
 Supabase، فبلا إنترنت هو معطّل أصلاً محزوماً كان أو لا.
