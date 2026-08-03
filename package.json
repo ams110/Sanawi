@@ -13,7 +13,8 @@
     "check:flow": "node scripts/check-flow.mjs",
     "check:ui": "node scripts/screenshot.mjs",
     "check:uiflow": "node scripts/check-ui-flow.mjs",
-    "check:expenses": "node --experimental-strip-types scripts/check-expenses.mjs"
+    "check:expenses": "node --experimental-strip-types scripts/check-expenses.mjs",
+    "check:commitments": "node --experimental-strip-types scripts/check-commitments.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",

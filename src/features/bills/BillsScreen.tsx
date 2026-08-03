@@ -6,6 +6,11 @@ import { useRefresh } from '@/lib/refresh'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { deleteBill, listBills, monthKey, saveBill, shiftMonth, summarizeBills, type BillRow } from './api'
+import { AddCommitmentForm } from './AddCommitmentForm'
+import { MonthlyLoadPanel } from './MonthlyLoadPanel'
+import { SharesEditor } from './SharesEditor'
+import { listCommitmentDetails, listCommitmentShares, listPartners } from './commitments'
+import type { CommitmentDetail, CommitmentPartnerShare, ObligationPartner } from '@/lib/db/types'
 
 /**
  * فواتير الشهر.
@@ -21,13 +26,25 @@ export function BillsScreen() {
 
   const [month, setMonth] = useState(() => monthKey())
   const [rows, setRows] = useState<BillRow[]>([])
+  const [details, setDetails] = useState<CommitmentDetail[]>([])
+  const [partners, setPartners] = useState<ObligationPartner[]>([])
+  const [shares, setShares] = useState<CommitmentPartnerShare[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       setError(null)
-      setRows(await listBills(month))
+      const [b, d, p, s] = await Promise.all([
+        listBills(month),
+        listCommitmentDetails(),
+        listPartners(),
+        listCommitmentShares(),
+      ])
+      setRows(b)
+      setDetails(d)
+      setPartners(p)
+      setShares(s)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('bills.loadFailed'))
     } finally {
@@ -42,6 +59,19 @@ export function BillsScreen() {
 
   const summary = useMemo(() => summarizeBills(rows), [rows])
   const isCurrentMonth = month === monthKey()
+  const detailById = useMemo(
+    () => new Map(details.map((d) => [d.commitment_id, d])),
+    [details],
+  )
+  const sharesByCommitment = useMemo(() => {
+    const map = new Map<string, CommitmentPartnerShare[]>()
+    for (const s of shares) {
+      const list = map.get(s.commitment_id)
+      if (list) list.push(s)
+      else map.set(s.commitment_id, [s])
+    }
+    return map
+  }, [shares])
 
   if (loading) {
     return (
@@ -91,6 +121,10 @@ export function BillsScreen() {
         </p>
       )}
 
+      <MonthlyLoadPanel details={details} />
+
+      {user && <AddCommitmentForm userId={user.id} onAdded={load} />}
+
       {rows.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
           <p className="text-[15px] leading-relaxed text-text-muted">{t('bills.empty')}</p>
@@ -133,6 +167,11 @@ export function BillsScreen() {
               <BillCard
                 key={row.commitment.id}
                 row={row}
+                detail={detailById.get(row.commitment.id) ?? null}
+                partners={partners}
+                shares={sharesByCommitment.get(row.commitment.id) ?? []}
+                userId={user?.id ?? null}
+                onReload={load}
                 onSave={async (amount, paid) => {
                   if (!user) return
                   await saveBill(user.id, row.commitment.id, month, amount, paid)
@@ -153,16 +192,30 @@ export function BillsScreen() {
 
 function BillCard({
   row,
+  detail,
+  partners,
+  shares,
+  userId,
+  onReload,
   onSave,
   onClear,
 }: {
   row: BillRow
+  detail: CommitmentDetail | null
+  partners: ObligationPartner[]
+  shares: CommitmentPartnerShare[]
+  userId: string | null
+  onReload: () => Promise<void>
   onSave: (amount: number, paid: boolean) => Promise<void>
   onClear: () => Promise<void>
 }) {
   const { t } = useTranslation()
   const budgeted = Number(row.commitment.amount)
   const average = Number(row.average?.average_amount ?? 0)
+  const [showShares, setShowShares] = useState(false)
+
+  const left = detail?.payments_left ?? null
+  const isShared = Number(row.commitment.my_share_percent ?? 100) < 100
 
   // المبلغ المقترح يتدرّج: الفاتورة المسجّلة، فمتوسّط السنة، فتقدير الميزانية.
   const [amount, setAmount] = useState(
@@ -190,7 +243,14 @@ function BillCard({
       }`}
     >
       <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate text-[15px] font-bold text-text">{row.commitment.name}</span>
+        <span className="truncate text-[15px] font-bold text-text">
+          {row.commitment.icon && (
+            <span className="me-1.5" aria-hidden="true">
+              {row.commitment.icon}
+            </span>
+          )}
+          {row.commitment.name}
+        </span>
         <span
           className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
             paid
@@ -208,6 +268,46 @@ function BillCard({
         {t('bills.budgeted', { amount: formatMoney(budgeted) })}
         {average > 0 && ` · ${t('bills.average', { amount: formatMoney(average) })}`}
       </p>
+
+      {/*
+       * عدّاد الدفعات: القسط عبء له تاريخ انتهاء، وإظهاره يحوّل "أدفع كل
+       * شهر" إلى "بقيت ثلاث دفعات" — وهما شعوران مختلفان تماماً.
+       */}
+      {left !== null && (
+        <div className="flex items-center gap-2">
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+              left === 0
+                ? 'bg-surface-muted text-text-muted'
+                : left === 1
+                  ? 'bg-success-soft text-success'
+                  : 'bg-brand-soft text-brand'
+            }`}
+          >
+            {left === 0
+              ? t('bills.finished')
+              : left === 1
+                ? t('bills.lastPayment')
+                : t('bills.paymentsLeft', { count: left })}
+          </span>
+          {left > 0 && detail && (
+            <span className="num text-xs text-text-muted">
+              {t('bills.remainingForMe', {
+                amount: formatMoney(Number(detail.my_amount) * left),
+              })}
+            </span>
+          )}
+        </div>
+      )}
+
+      {isShared && detail && (
+        <p className="text-xs font-semibold text-brand">
+          {t('bills.myAmount', {
+            amount: formatMoney(Number(detail.my_amount)),
+            total: formatMoney(budgeted),
+          })}
+        </p>
+      )}
 
       {/* التجاوز يُقال بصراحة: الفرق بين التقدير والواقع هو كل الفائدة هنا. */}
       {overBudget && (
@@ -249,6 +349,28 @@ function BillCard({
           </Button>
         )}
       </div>
+
+      {/* القسمة مطويّة: أكثر الفواتير لا تُقسَم، وإظهارها دائماً ضجيج. */}
+      <button
+        type="button"
+        onClick={() => setShowShares((v) => !v)}
+        className="w-full rounded-xl py-1 text-xs font-semibold text-text-muted"
+      >
+        {showShares ? '⌃' : `👥 ${t('bills.sharesTitle')}`}
+      </button>
+
+      {showShares && userId && (
+        <SharesEditor
+          userId={userId}
+          commitmentId={row.commitment.id}
+          amount={budgeted}
+          partners={partners}
+          shares={shares}
+          mySharePercent={Number(row.commitment.my_share_percent ?? 100)}
+          onSaved={onReload}
+          onPartnerAdded={onReload}
+        />
+      )}
     </li>
   )
 }
