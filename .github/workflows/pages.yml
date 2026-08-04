@@ -7,9 +7,11 @@ name: نشر الواجهة
 # مرةً تدفّقا Jekyll وStatic من زرّي «Configure» في صفحة Pages، فنشرا جذر
 # المستودع فوق هذا البناء وأسقطا الدومين المخصّص معه. أيُّ تدفّق آخر يرفع
 # artifact إلى Pages يمحو هذا، لا ينضمّ إليه.
+#
+# لا يشتغل على الدفع مباشرةً بعد اليوم: `deploy.yml` يستدعيه بعد نجاح الفحص.
+# لو بقي على `push` لنشر بلا بوّابة، وهو ما كان يحدث.
 on:
-  push:
-    branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:

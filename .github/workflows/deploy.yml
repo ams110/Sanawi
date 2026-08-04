@@ -1,0 +1,43 @@
+name: النشر
+
+# ما يصل main يصل المستخدم — بعد أن يمرّ بالبوّابة.
+#
+# التدفّق الوحيد الذي يشتغل على الدفع. يفحص مرة واحدة، ثم ينشر الواجهة والخادم
+# من نتيجة الفحص نفسها — لا فحصين متوازيين على الشيفرة ذاتها، ولا نشرَ أحدهما
+# بينما الآخر عالق على فحصٍ لم ينتهِ.
+#
+# والنشران متوازيان لا متسلسلان: لا يعتمد أحدهما على الآخر، وتسلسلهما كان
+# سيؤخّر الثاني بلا سبب.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# دفعتان متتاليتان: الثانية تنتظر الأولى ولا تُلغيها. الإلغاء في منتصف نشرٍ
+# يترك الموقع أو الخادم في حالة نصفية أسوأ من التأخّر.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: الفحص
+    uses: ./.github/workflows/ci.yml
+
+  pages:
+    name: الواجهة
+    needs: ci
+    uses: ./.github/workflows/pages.yml
+    # التدفّق المستدعى لا يرث الأسرار من تلقائه — بدونها يُبنى الموقع بمفاتيح
+    # فارغة فيُنشر تطبيقٌ لا يتصل بقاعدته.
+    secrets: inherit
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  mcp:
+    name: خادم MCP
+    needs: ci
+    uses: ./.github/workflows/mcp.yml
+    secrets: inherit
