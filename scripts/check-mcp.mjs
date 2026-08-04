@@ -5,7 +5,7 @@
  * أربع مراحل:
  * 1. الأدوات المعلنة — لكلٍّ وصف وتوصيف، وأشكالها تتحوّل إلى JSON Schema.
  * 2. وضع القراءة فقط لا يسرّب أداة كتابة.
- * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: السبع عشرة أداة كلها،
+ * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: التسع عشرة أداة كلها،
  *    بأرقام محسوبة يدوياً تُقارَن بما يردّه الخادم.
  * 4. نداء قراءة على الحساب الحقيقي إن وُجد SANAWI_EMAIL و SANAWI_PASSWORD
  *    في .env — ويُتخطّى بلا فشل إن لم يوجدا.
@@ -321,16 +321,16 @@ expect('التقدير الثابت', month?.available_to_spend, 11525)
 expect('الباقي فعلاً', month?.remaining, 11525)
 expect('لا تجاوز', month?.is_overspent, false)
 
-// دخلٌ فعليّ يقلب الرقم من تقدير إلى واقع.
-fake.db.income_entries.push({
-  id: '00000000-0000-4000-8000-0000000000cc',
-  user_id: fake.userId,
-  source_id: null,
+// دخلٌ فعليّ يقلب الرقم من تقدير إلى واقع — بالأداة لا بصفٍّ مدسوس.
+const received = await call('sanawi_record_income', {
   amount: 9000,
+  source: 'راتب',
   received_at: monthDay(3),
-  note: null,
-  created_at: '',
 })
+expect('المبلغ كما سُجّل', received?.amount, 9000)
+expect('ورُبط بالمصدر المعرَّف', received?.source_name, 'راتب')
+expect('ومجموع الشهر', received?.month_total, 9000)
+
 const actual = await call('sanawi_month_overview')
 expect('الدخل صار واقعاً', actual?.income_is_actual, true)
 expect('الدخل الواصل', actual?.income, 9000)
@@ -453,10 +453,95 @@ await expectError('sanawi_add_deposit', { obligation: 'طبيب أسنان', amo
 fake.failNext({ status: 401, code: 'PGRST301', message: 'JWT expired' })
 await expectError('sanawi_month_overview', {}, 'انتهت صلاحية الجلسة')
 
+// مصدرٌ غير معرَّف يبقى تسميةً حرّة: دخلٌ عابر لا يستحقّ مصدراً دائماً.
+const oneOff = await call('sanawi_record_income', { amount: 400, source: 'عيدية' })
+expect('التسمية الحرّة تُحفظ', oneOff?.source_name, 'عيدية')
+expect('والمجموع يضمّها', oneOff?.month_total, 9400)
+expect('ولم يُنشأ مصدر دائم', (await call('sanawi_list_reference', { kind: 'money' }))?.incomes.length, 2)
+
+/* ─── الشركاء ─── */
+
+const shared = await call('sanawi_create_obligation', {
+  name: 'تأمين مشترك',
+  total_amount: 6000,
+  next_due_date: inMonths(12),
+})
+
+// حصّة ناقصة بلا شركاء تُرفض: مجموعٌ مختلّ يحبس الالتزام عن التعديل من الشاشة.
+await expectError(
+  'sanawi_update_obligation',
+  { obligation: 'تأمين مشترك', my_share_percent: 50 },
+  'sanawi_set_partners',
+)
+
+const partners = await call('sanawi_set_partners', {
+  obligation: 'تأمين مشترك',
+  partners: [
+    { name: 'أخوي', share_percent: 40 },
+    { name: 'أبوي', share_percent: 10 },
+  ],
+})
+expect('حصّتي تُشتقّ من الباقي', partners?.my_share_percent, 50)
+expect('وحصّتي بالشيكل', partners?.my_total, 3000)
+expect('وما على الأول', partners?.partners?.[0]?.owed, 2400)
+expect('وما على الثاني', partners?.partners?.[1]?.owed, 600)
+
+// القسط يتبع حصّتي لا المبلغ الكامل — وإلا ادّخر المستخدم ضعف ما عليه.
+const sharedRow = (await call('sanawi_list_obligations'))?.obligations?.find(
+  (o) => o.name === 'تأمين مشترك',
+)
+expect('القسط على حصّتي وحدها', sharedRow?.my_total, 3000)
+
+// مجموع يتجاوز 100 يُرفض قبل أن يلمس القاعدة.
+await expectError(
+  'sanawi_set_partners',
+  { obligation: 'تأمين مشترك', partners: [{ name: 'س', share_percent: 70 }, { name: 'ص', share_percent: 40 }] },
+  '110',
+)
+await expectError(
+  'sanawi_set_partners',
+  { obligation: 'تأمين مشترك', partners: [{ name: 'أخوي', share_percent: 20 }, { name: 'أخوي', share_percent: 30 }] },
+  'مرتين',
+)
+
+/*
+ * الاستبدال كامل: من غاب عن القائمة رُفع.
+ *
+ * القراءة من القاعدة لا من ردّ الأداة: الردّ مبنيٌّ على المدخلات، فيقول ما
+ * طُلب منه لا ما حُفظ. جُرِّب بتعطيل الحذف فمرّ الفحص وهو لا يفحص شيئاً —
+ * حصص قديمة باقية والمجموع يتجاوز 100٪ بلا أن ينبس أحد.
+ */
+const rewritten = await call('sanawi_set_partners', {
+  obligation: 'تأمين مشترك',
+  partners: [{ name: 'أخوي', share_percent: 25 }],
+})
+expect('وحصّتي أُعيد اشتقاقها', rewritten?.my_share_percent, 75)
+
+const stored = await call('sanawi_get_obligation', { obligation: 'تأمين مشترك' })
+expect('المحفوظ فعلاً: شريك واحد', stored?.settlements?.length, 1)
+expect('وحصّته المحفوظة', stored?.settlements?.[0]?.share_percent, 25)
+expect('وما عليه', stored?.settlements?.[0]?.owed, 1500)
+
+// الشريك يُعاد استعماله بالاسم لا يتضاعف مع كل ضبط.
+const reference = await call('sanawi_list_reference', { kind: 'partners' })
+expect('«أخوي» واحد لا اثنان', reference?.items?.filter((p) => p.name === 'أخوي').length, 1)
+
+// وقائمة فارغة تعيد الالتزام كلّه إليّ.
+const solo = await call('sanawi_set_partners', { obligation: 'تأمين مشترك', partners: [] })
+expect('بلا شركاء: الكل عليّ', solo?.my_share_percent, 100)
+expect('وحصّتي كامل المبلغ', solo?.my_total, 6000)
+expect(
+  'ولا صفّ حصّة باقٍ',
+  (await call('sanawi_get_obligation', { obligation: 'تأمين مشترك' }))?.settlements?.length,
+  0,
+)
+
+await call('sanawi_archive_obligation', { obligation: 'تأمين مشترك' })
+
 await app.close()
 await fake.stop()
 
-if (!failed) console.log('✓ السبع عشرة أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
+if (!failed) console.log('✓ التسع عشرة أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
 
 /* ── 5. النقل البعيد: HTTP بالمفتاح ───────────────────────── */
 

@@ -20,7 +20,7 @@ import type {
   PartnerSettlement,
 } from '../../src/lib/db/types.js'
 import type { Connection } from '../session.js'
-import { findGroup, findObligation, monthKey } from '../data.js'
+import { findGroup, findObligation, loadIncomeEntries, monthKey } from '../data.js'
 import { guard, isoDate, longDate, money, monthYear, ok, recurrenceLabel } from '../format.js'
 import { obligationOut, toObligationOut } from '../schemas.js'
 
@@ -34,19 +34,22 @@ const WRITES = {
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /**
- * حصةٌ أقل من 100٪ تعني شركاء، وحصصهم صفوفٌ في `obligation_partner_shares`
- * لا تكتبها هذه الأدوات.
+ * حصّتي لا تُضبط مباشرةً — تُشتقّ من الشركاء.
  *
- * الكتابة بلا حصص تترك المجموع ناقصاً عن 100٪، وهو بالضبط ما يرفضه التطبيق
- * (`validateShares`) عند أول محاولة لتعديل الالتزام من الشاشة: يصير الالتزام
- * محبوساً في حالة لا يقبلها المكان الوحيد القادر على إصلاحها. الرفض هنا أرخص.
+ * مجموع حصّتي وحصص الشركاء يجب أن يساوي 100٪ بالضبط، وهو ما يتحقّق منه
+ * التطبيق (`validateShares`) عند أول تعديل من الشاشة. فلو قبلنا هنا حصّةً
+ * ناقصة بلا شركاء لصار الالتزام محبوساً في حالة يرفضها المكانُ الوحيد القادر
+ * على إصلاحها.
+ *
+ * والمخرج `sanawi_set_partners`: يكتب الشركاء ويشتقّ حصّتي منهم، فيستحيل أن
+ * يختلّ المجموع.
  */
 function requireFullShare(percent: number | undefined): void {
   if (percent !== undefined && percent < 100) {
     throw new Error(
-      'حصة أقل من 100٪ تعني وجود شركاء، وحصصهم لا تُكتب من هذه الأدوات — ومجموع الحصص' +
-        ' يجب أن يساوي 100٪ بالضبط وإلا رفض التطبيق تعديل الالتزام بعدها.' +
-        ' أنشئه بحصة 100٪، ثم اضبط الشركاء وحصصهم من شاشة الالتزام في التطبيق.',
+      'حصة أقل من 100٪ تعني وجود شركاء، ومجموع الحصص يجب أن يساوي 100٪ بالضبط.' +
+        ' لا تضبط حصّتك هنا — استعمل sanawi_set_partners وسمِّ الشركاء وحصصهم،' +
+        ' وتُحسَب حصّتك تلقائياً من الباقي.',
     )
   }
 }
@@ -818,6 +821,262 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           spent_at: data.spent_at,
           group_id: data.group_id,
           group_name: group?.name ?? null,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_record_income',
+    {
+      title: 'تسجيل دخل وصل',
+      description: `يسجّل دخلاً **وصل فعلاً**: «استلمت راتبي»، «إجا 500 شغل إضافي».
+
+الفرق عن sanawi_add_income جوهري: ذاك يعرّف مصدراً متكرّراً متوقَّعاً، وهذا
+يقيّد مبلغاً وصل في يوم بعينه. ولوحة الشهر تفضّل الفعلي على المتوقَّع متى وُجد،
+فالتسجيل هنا يحوّل «تقدير» إلى «واقع» — وهو ما يجعل الباقي للصرف رقماً يُعتمد
+عليه لا تخميناً.
+
+المدخلات:
+  - amount (number): المبلغ الذي وصل، أكبر من صفر
+  - source (string): اسم مصدر معرَّف مسبقاً — يُربط به إن طابق، وإلا يُستعمل كتسمية
+  - received_at (YYYY-MM-DD): يوم الاستلام، افتراضياً اليوم
+  - note (string): ملاحظة
+
+المخرجات: id و amount و received_at و source_name، مع مجموع ما وصل هذا الشهر.`,
+      inputSchema: {
+        amount: z.number().positive().describe('المبلغ الذي وصل'),
+        source: z.string().max(80).optional().describe('اسم المصدر كما ينطقه المستخدم'),
+        received_at: z.string().optional().describe('YYYY-MM-DD، افتراضياً اليوم'),
+        note: z.string().max(200).optional(),
+      },
+      outputSchema: {
+        currency: z.string(),
+        id: z.string(),
+        amount: z.number(),
+        received_at: z.string(),
+        source_name: z.string().nullable(),
+        month_total: z.number(),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const receivedAt = input.received_at ? requireDate(input.received_at, 'received_at') : isoDate()
+
+      /*
+       * ربط المصدر بالاسم لا بالمعرّف: المستخدم يقول «راتب» لا معرّفاً.
+       * وإن لم يطابق شيئاً بقي الاسم تسميةً حرّة في `name` — دخلٌ عابر لا
+       * يستحقّ مصدراً دائماً، ورفضُه كان سيجبر المستخدم على تعريف مصدرٍ لكل
+       * مبلغ يصله مرّةً واحدة.
+       */
+      let sourceId: string | null = null
+      let sourceName: string | null = input.source?.trim() || null
+
+      if (sourceName) {
+        const { data: sources } = await connection.db
+          .from('income_sources')
+          .select('id, name')
+          .eq('is_active', true)
+        const needle = sourceName.toLowerCase()
+        const matches = (sources ?? []).filter((row) => {
+          const name = String(row.name).toLowerCase()
+          return name === needle || name.includes(needle) || needle.includes(name)
+        })
+
+        // الترجيح لا التخمين: اسمان يطابقان يعني سؤالاً لا اختياراً عشوائياً.
+        if (matches.length > 1) {
+          const exact = matches.find((row) => String(row.name).toLowerCase() === needle)
+          if (!exact) {
+            throw new Error(
+              `«${sourceName}» يطابق أكثر من مصدر: ${matches.map((m) => m.name).join('، ')}.` +
+                ' سمِّ المصدر بدقّة.',
+            )
+          }
+          sourceId = exact.id
+          sourceName = exact.name
+        } else if (matches[0]) {
+          sourceId = matches[0].id
+          sourceName = matches[0].name
+        }
+      }
+
+      const { data, error } = await connection.db
+        .from('income_entries')
+        .insert({
+          user_id: connection.userId,
+          amount: input.amount,
+          source_id: sourceId,
+          name: sourceId ? null : sourceName,
+          received_at: receivedAt,
+          note: input.note ?? null,
+        })
+        .select()
+        .single()
+      if (error) throw error
+
+      const month = monthKey(receivedAt)
+      const entries = await loadIncomeEntries(connection, month)
+      const total = Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
+      const currency = connection.currency
+
+      return ok(
+        `سُجّل دخل ${money(input.amount, currency)}` +
+          (sourceName ? ` من **${sourceName}**` : '') +
+          ` بتاريخ ${longDate(receivedAt)}.\n` +
+          `مجموع ما وصل في ${monthYear(month)}: ${money(total, currency)}.`,
+        {
+          currency,
+          id: data.id,
+          amount: Number(data.amount),
+          received_at: data.received_at,
+          source_name: sourceName,
+          month_total: total,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_set_partners',
+    {
+      title: 'ضبط شركاء التزام',
+      description: `يضبط من يشارك في التزام وبأي نسبة: «التأمين نصّه على أخوي».
+
+يستبدل قائمة الشركاء بالكامل — ما لم يُذكر في القائمة يُرفع. وحصّتي تُحسَب من
+الباقي تلقائياً ولا تُضبط يدوياً، فيستحيل أن يختلّ المجموع عن 100٪.
+
+الشريك يُطابَق بالاسم: من كان معرَّفاً من قبل يُعاد استعماله، والجديد يُنشأ.
+ورفعُ شريك من التزام لا يحذفه ولا يمسّ إيداعاته — تاريخ من دفع ماذا لا يُمحى.
+
+المدخلات:
+  - obligation (string): اسم الالتزام أو معرّفه
+  - partners: قائمة { name, share_percent } — قائمة فارغة تعني «الالتزام كلّه عليّ»
+
+المخرجات: my_share_percent بعد الضبط، وقائمة الشركاء بحصصهم وما على كلٍّ منهم.`,
+      inputSchema: {
+        obligation: z.string().min(1).describe('اسم الالتزام أو معرّفه'),
+        partners: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(80),
+              share_percent: z.number().positive().max(100),
+            }),
+          )
+          .describe('قائمة فارغة ترفع كل الشركاء'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        obligation: z.string(),
+        total_amount: z.number(),
+        my_share_percent: z.number(),
+        my_total: z.number(),
+        partners: z.array(
+          z.object({
+            name: z.string(),
+            share_percent: z.number(),
+            owed: z.number(),
+          }),
+        ),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const { obligation } = await findObligation(connection, input.obligation)
+
+      const named = input.partners.filter((p) => p.name.trim())
+      const duplicate = named.find(
+        (p, i) => named.findIndex((q) => q.name.trim() === p.name.trim()) !== i,
+      )
+      if (duplicate) {
+        throw new Error(`«${duplicate.name.trim()}» مذكور مرتين — اجمع حصّته في سطر واحد.`)
+      }
+
+      const partnersTotal = Math.round(named.reduce((sum, p) => sum + p.share_percent, 0) * 100) / 100
+      if (partnersTotal > 100) {
+        throw new Error(`مجموع حصص الشركاء ${partnersTotal}٪ — لا يمكن أن يتجاوز 100٪.`)
+      }
+      const mine = Math.round((100 - partnersTotal) * 100) / 100
+
+      /*
+       * الشريك يُطابَق بالاسم كما يفعل التطبيق، فلا يتضاعف «أخوي» مع كل استعمال.
+       * والمطابقة تامّة لا جزئية: «محمد» و«محمد علي» شخصان.
+       */
+      const { data: existing } = await connection.db
+        .from('obligation_partners')
+        .select('id, name')
+
+      const rows = []
+      for (const partner of named) {
+        const name = partner.name.trim()
+        let id = (existing ?? []).find((row) => String(row.name).trim() === name)?.id
+
+        if (!id) {
+          const { data, error } = await connection.db
+            .from('obligation_partners')
+            .insert({ user_id: connection.userId, name })
+            .select()
+            .single()
+          if (error) throw error
+          id = data.id
+          existing?.push({ id: data.id, name: data.name })
+        }
+
+        rows.push({
+          user_id: connection.userId,
+          obligation_id: obligation.id,
+          partner_id: id,
+          share_percent: partner.share_percent,
+        })
+      }
+
+      /*
+       * استبدال كامل كما يفعل التطبيق: حذفٌ ثم إدراج.
+       *
+       * الحذف يطال جدول الحصص وحده — لا الشركاء أنفسهم ولا إيداعاتهم. فمن
+       * رُفع من التزام يبقى شريكاً معرَّفاً ويبقى ما أودعه مقيَّداً باسمه.
+       */
+      const { error: clearError } = await connection.db
+        .from('obligation_partner_shares')
+        .delete()
+        .eq('obligation_id', obligation.id)
+      if (clearError) throw clearError
+
+      if (rows.length > 0) {
+        const { error } = await connection.db.from('obligation_partner_shares').insert(rows)
+        if (error) throw error
+      }
+
+      // حصّتي تتبع الشركاء في الكتابة نفسها، فلا تبقى القاعدة لحظةً بمجموعٍ مختلّ.
+      const { error: shareError } = await connection.db
+        .from('obligations')
+        .update({ my_share_percent: mine })
+        .eq('id', obligation.id)
+      if (shareError) throw shareError
+
+      const total = Number(obligation.total_amount)
+      const currency = connection.currency
+      const out = named.map((p) => ({
+        name: p.name.trim(),
+        share_percent: p.share_percent,
+        owed: Math.round(((total * p.share_percent) / 100) * 100) / 100,
+      }))
+      const myTotal = Math.round(((total * mine) / 100) * 100) / 100
+
+      return ok(
+        named.length === 0
+          ? `**${obligation.name}** صار كلّه عليك: ${money(myTotal, currency)}.`
+          : `شركاء **${obligation.name}**:\n` +
+              out.map((p) => `- ${p.name}: ${p.share_percent}٪ = ${money(p.owed, currency)}`).join('\n') +
+              `\n\nحصّتك ${mine}٪ = ${money(myTotal, currency)} من أصل ${money(total, currency)}.`,
+        {
+          currency,
+          obligation: obligation.name,
+          total_amount: total,
+          my_share_percent: mine,
+          my_total: myTotal,
+          partners: out,
         },
       )
     }),

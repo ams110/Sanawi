@@ -452,6 +452,16 @@ export async function startFakeSupabase() {
         return respond(targets)
       }
 
+      /* الحذف: يستعمله ضبط الشركاء — استبدالٌ كامل لحصص التزام. */
+      if (req.method === 'DELETE') {
+        const rows = db[table]
+        if (!rows) return send(404, { message: `جدول غير معروف في الفحص: ${table}` })
+
+        const doomed = new Set(applyFilters(scoped(rows), url.searchParams))
+        db[table] = rows.filter((row) => !doomed.has(row))
+        return respond([...doomed])
+      }
+
       return send(405, { message: `طريقة غير مدعومة في الفحص: ${req.method}` })
     } catch (error) {
       return send(400, { message: error.message })
