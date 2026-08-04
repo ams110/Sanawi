@@ -578,6 +578,7 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
     },
     token: '',
     oauthSecret: SECRET,
+    loginUrl: 'https://app.example/connect.html',
   })
 
   const bridge = createServer(async (req, res) => {
@@ -677,7 +678,11 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
   ).json()
   if (!registration.client_id) fail('التسجيل بلا client_id')
 
-  /** يمرّ بدورة OAuth كاملة كما يفعل كلود، ويعيد رمز الوصول. */
+  /**
+   * يمرّ بالدورة كاملة كما تمرّ فعلاً: الدالّة تحوّل إلى صفحة الدخول على نطاق
+   * التطبيق، والصفحة تبادل كلمة السرّ بجلسة عند Supabase مباشرةً، ثم تعيد
+   * الجلسة وحدها إلى الدالّة. كلمة السرّ لا تمرّ بالخادم في أي خطوة.
+   */
   async function authorize(email, password) {
     const verifier = randomBytes(32).toString('base64url')
     const challenge = createHash('sha256').update(verifier).digest('base64url')
@@ -692,28 +697,47 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
       state: 'xyz',
     })
 
-    const page = await fetch(`${base}/authorize?${query}`)
-    if (page.status !== 200) fail(`صفحة الدخول ردّت ${page.status}`)
-    if (!(await page.text()).includes('كلمة السر')) fail('صفحة الدخول بلا حقل كلمة سر')
+    // ١. الدالّة تحوّل إلى صفحة الدخول، محمّلةً وسائط الدورة.
+    const started = await fetch(`${base}/authorize?${query}`, { redirect: 'manual' })
+    expect('البدء يحوّل إلى صفحة الدخول', started.status, 302)
 
-    const form = new URLSearchParams(query)
-    form.set('email', email)
-    form.set('password', password)
+    const login = new URL(started.headers.get('location'))
+    expect('وإلى نطاق التطبيق', login.origin + login.pathname, 'https://app.example/connect.html')
+    expect('ومعه التحدّي', login.searchParams.get('code_challenge'), challenge)
+    expect('والحالة', login.searchParams.get('state'), 'xyz')
 
-    const submitted = await fetch(`${base}/authorize`, {
+    // ٢. ما تفعله الصفحة في المتصفّح: كلمة السرّ إلى Supabase مباشرةً.
+    const auth = await fetch(`${oauthFake.url}/auth/v1/token?grant_type=password`, {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: form,
-      redirect: 'manual',
+      headers: { 'content-type': 'application/json', apikey: oauthFake.anonKey },
+      body: JSON.stringify({ email, password }),
     })
-    if (submitted.status !== 302) {
-      fail(`الدخول لم يحوّل — ردّ ${submitted.status}`)
+    const session = await auth.json()
+    if (!auth.ok || !session.access_token) return { failedLogin: true }
+
+    // ٣. الجلسة وحدها تعود إلى الدالّة فتصدر الرمز.
+    const issued = await fetch(`${base}/authorize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+        client_id: login.searchParams.get('client_id'),
+        redirect_uri: login.searchParams.get('redirect_uri'),
+        code_challenge: login.searchParams.get('code_challenge'),
+        state: login.searchParams.get('state'),
+      }),
+    })
+    const result = await issued.json()
+    if (!issued.ok || !result.redirect) {
+      fail(`إصدار الرمز فشل: ${JSON.stringify(result)}`)
       return null
     }
 
-    const location = new URL(submitted.headers.get('location'))
-    expect('الحالة تعود كما أُرسلت', location.searchParams.get('state'), 'xyz')
-    const code = location.searchParams.get('code')
+    const back = new URL(result.redirect)
+    expect('العودة إلى رابط العميل', back.origin + back.pathname, redirectUri)
+    expect('الحالة تعود كما أُرسلت', back.searchParams.get('state'), 'xyz')
+    const code = back.searchParams.get('code')
 
     const tokenResponse = await fetch(`${base}/token`, {
       method: 'POST',
@@ -731,23 +755,23 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
     return { ...tokens, verifier, code, redirectUri }
   }
 
-  // ٣. كلمة سر خاطئة لا تعطي رمزاً
-  const badForm = new URLSearchParams({
-    response_type: 'code',
-    client_id: registration.client_id,
-    redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
-    code_challenge: createHash('sha256').update('v').digest('base64url'),
-    code_challenge_method: 'S256',
-    email: oauthFake.email,
-    password: 'wrong',
-  })
-  const rejected = await fetch(`${base}/authorize`, {
+  // ٣. كلمة سر خاطئة لا توصل إلى رمز
+  const badLogin = await authorize(oauthFake.email, 'wrong')
+  if (!badLogin?.failedLogin) fail('كلمة سر خاطئة كان يجب أن تفشل قبل إصدار أي رمز')
+
+  // وجلسة ملفّقة تُرفض عند الدالّة نفسها — لا يكفي أن تُرفض في المتصفّح.
+  const forgedSession = await fetch(`${base}/authorize`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: badForm,
-    redirect: 'manual',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      access_token: 'not.a.real.token',
+      refresh_token: 'nope',
+      client_id: registration.client_id,
+      redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+      code_challenge: createHash('sha256').update('v').digest('base64url'),
+    }),
   })
-  expect('كلمة سر خاطئة تُرفض', rejected.status, 401)
+  expect('جلسة ملفّقة تُرفض', forgedSession.status, 401)
 
   // ٤. رابط عودة غير مسجّل يُرفض — وإلا سُلّم الرمز لموقع غريب
   const evil = new URLSearchParams({
@@ -757,7 +781,11 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
     code_challenge: createHash('sha256').update('v').digest('base64url'),
     code_challenge_method: 'S256',
   })
-  expect('رابط عودة غريب يُرفض', (await fetch(`${base}/authorize?${evil}`)).status, 400)
+  expect(
+    'رابط عودة غريب يُرفض',
+    (await fetch(`${base}/authorize?${evil}`, { redirect: 'manual' })).status,
+    400,
+  )
 
   const first = await authorize(oauthFake.email, oauthFake.password)
 

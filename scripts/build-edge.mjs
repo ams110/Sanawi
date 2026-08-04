@@ -36,7 +36,6 @@ const SERVER_FILES = [
   'mcp/env.ts',
   'mcp/session.ts',
   'mcp/oauth/tokens.ts',
-  'mcp/oauth/login-page.ts',
   'mcp/oauth/endpoints.ts',
   'mcp/format.ts',
   'mcp/data.ts',

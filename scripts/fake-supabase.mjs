@@ -313,6 +313,25 @@ export async function startFakeSupabase() {
     }
 
     try {
+      /* الدالّة تتحقّق من الجلسة القادمة من صفحة الدخول عبر هذا المسار. */
+      if (url.pathname === '/auth/v1/user') {
+        const jwt = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
+        let sub = null
+        try {
+          sub = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()).sub
+        } catch {
+          sub = null
+        }
+        const account = ACCOUNTS.find((a) => a.id === sub)
+        if (!account) return send(401, { message: 'invalid claim: missing sub claim' })
+        return send(200, {
+          id: account.id,
+          email: account.email,
+          aud: 'authenticated',
+          role: 'authenticated',
+        })
+      }
+
       if (url.pathname === '/auth/v1/token') {
         const grant = url.searchParams.get('grant_type')
         const expiresAt = Math.floor(Date.now() / 1000) + 3600

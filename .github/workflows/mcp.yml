@@ -104,6 +104,7 @@ jobs:
             SANAWI_SUPABASE_ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
             SANAWI_TOKEN_SECRET="${{ secrets.SANAWI_TOKEN_SECRET }}" \
             SANAWI_PUBLIC_URL="https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/sanawi-mcp" \
+            SANAWI_LOGIN_URL="${{ vars.SANAWI_LOGIN_URL || 'https://sanawi.kabblan.com/connect.html' }}" \
             SANAWI_READ_ONLY="${{ inputs.read_only && '1' || '0' }}"
 
       # ‏--no-verify-jwt ضروري: كلود ليس مستخدماً في Supabase ولا يحمل JWT منها،

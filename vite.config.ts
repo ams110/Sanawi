@@ -26,6 +26,22 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { '@': new URL('./src', import.meta.url).pathname },
     },
+
+    /*
+     * نقطتا دخول: التطبيق، وصفحة ربط كلود.
+     *
+     * `connect.html` صفحة مستقلّة بلا React، لكنها تمرّ بالبناء لا بـ `public/`
+     * لتأخذ عنوان المشروع ومفتاحه العام عند البناء. صفحةٌ تقرأ عنوان خادم
+     * المصادقة من سطر العنوان تصير أداةَ تصيّدٍ جاهزة على نطاقنا.
+     */
+    build: {
+      rollupOptions: {
+        input: {
+          main: new URL('./index.html', import.meta.url).pathname,
+          connect: new URL('./connect.html', import.meta.url).pathname,
+        },
+      },
+    },
     server: useProxy
       ? {
           proxy: {

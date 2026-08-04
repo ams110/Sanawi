@@ -28,8 +28,8 @@ import { env } from './env.js'
 import { open } from './oauth/tokens.js'
 import {
   authorizationServerMetadata,
-  authorizeForm,
-  authorizeSubmit,
+  authorizeComplete,
+  authorizeStart,
   landing,
   protectedResourceMetadata,
   register,
@@ -138,6 +138,8 @@ export interface HttpHandlerOptions {
   oauthSecret: string
   /** العنوان العام المعلن. فارغ = يُستنتج من الترويسات. */
   publicUrl?: string
+  /** صفحة الدخول على نطاق التطبيق. */
+  loginUrl?: string
   /** لحقن زمنٍ ثابت في الفحص. */
   now?: () => number
 }
@@ -177,9 +179,13 @@ function baseUrlOf(request: Request, url: URL, declared: string): string {
   return `${proto}://${host}${path}`
 }
 
+/** نطاق التطبيق المنشور. يُبدَّل بـ SANAWI_LOGIN_URL لمن ينشر على غيره. */
+const DEFAULT_LOGIN_URL = 'https://sanawi.kabblan.com/connect.html'
+
 export function createFetchHandler(options: HttpHandlerOptions) {
   const { config, connect, token, oauthSecret } = options
   const publicUrl = (options.publicUrl ?? '').trim()
+  const loginUrl = (options.loginUrl ?? '').trim() || DEFAULT_LOGIN_URL
   const clock = options.now ?? (() => Date.now())
 
   /** يحدّد بأيّ هويةٍ يعمل هذا النداء: مستخدمُ OAuth، أم الحساب الشخصي. */
@@ -242,6 +248,7 @@ export function createFetchHandler(options: HttpHandlerOptions) {
         config,
         secret: oauthSecret,
         baseUrl: baseUrlOf(request, url, publicUrl),
+        loginUrl,
         now: clock(),
       }
 
@@ -258,9 +265,10 @@ export function createFetchHandler(options: HttpHandlerOptions) {
         return withCors(await register(context, request))
       }
       if (path.endsWith('/authorize')) {
+        // GET يحوّل إلى صفحة الدخول، وPOST يأتي منها بالجلسة — ولذلك يحتاج CORS.
         return request.method === 'POST'
-          ? await authorizeSubmit(context, request)
-          : await authorizeForm(context, url.searchParams)
+          ? withCors(await authorizeComplete(context, request))
+          : await authorizeStart(context, url.searchParams)
       }
       if (path.endsWith('/token') && request.method === 'POST') {
         return withCors(await token_(context, request))
@@ -276,7 +284,13 @@ export function createFetchHandler(options: HttpHandlerOptions) {
       }
       // متصفّحٌ فتح الرابط: صفحةٌ تشرح ما هذا بدل JSON لا يعني له شيئاً.
       if ((request.headers.get('accept') ?? '').includes('text/html') && oauthSecret) {
-        return landing({ config, secret: oauthSecret, baseUrl: baseUrlOf(request, url, publicUrl), now: clock() })
+        return landing({
+          config,
+          secret: oauthSecret,
+          baseUrl: baseUrlOf(request, url, publicUrl),
+          loginUrl,
+          now: clock(),
+        })
       }
       return new Response(
         JSON.stringify({
@@ -388,6 +402,7 @@ export function createSanawiFetchHandler(): (request: Request) => Promise<Respon
       token,
       oauthSecret,
       publicUrl: (env('SANAWI_PUBLIC_URL') ?? '').trim(),
+      loginUrl: (env('SANAWI_LOGIN_URL') ?? '').trim(),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

@@ -2,13 +2,17 @@
  * خادم التفويض (OAuth 2.1) — عديم الحالة.
  *
  * كلود لا يعرف مستخدمي سنوي، وسنوي لا يعرف كلود. OAuth هو اللغة المشتركة:
- * كلود يوجّه المستخدم إلى صفحة دخولٍ **عندنا**، والمستخدم يكتب بريده وكلمة
- * سرّه في موقعنا لا في محادثة، ونحن نعيد إلى كلود رمزاً يخصّه وحده.
+ * كلود يوجّه المستخدم إلى صفحة دخولٍ على **نطاق التطبيق** (`connect.html`)،
+ * والمستخدم يسجّل دخوله هناك لا في محادثة، ثم نعيد إلى كلود رمزاً يخصّه وحده.
  *
- * والمكسب الذي دفعنا إلى هنا: نستبدل كلمة السرّ بجلسة Supabase في اللحظة
- * نفسها، فلا نخزّنها أبداً — ولا نحتاج مفتاح خدمة، لأن الجلسة تأتي من دخولٍ
- * حقيقي لا من انتحال. وهي جلسة مستقلة عن جلسة التطبيق، فتدويرُ رموزها لا
- * يُخرج المستخدم من تلفونه.
+ * ولماذا الصفحة هناك لا هنا؟ لأن Supabase يحوّل أي `text/html` تردّه دالّة إلى
+ * `text/plain` عمداً — قيدُ منصّة، جُرّب فظهرت الصفحة نصّاً خاماً. والنقل مكسبٌ
+ * لا تنازل: **كلمة السرّ لا تمرّ بهذا الخادم أصلاً**، تذهب من المتصفّح إلى
+ * Supabase مباشرةً، فلا نملك ما نخزّنه حتى لو أردنا. لا يصلنا إلا أثرُها:
+ * جلسةٌ نتحقّق منها.
+ *
+ * ولا نحتاج مفتاح خدمة، لأن الجلسة تأتي من دخولٍ حقيقي لا من انتحال. وهي
+ * جلسة مستقلة عن جلسة التطبيق، فتدويرُ رموزها لا يُخرج المستخدم من تلفونه.
  *
  * كل ما يحتاج الخادمُ تذكّره يعيش داخل الرموز مشفّراً (انظر `tokens.ts`):
  * لا جدول، ولا صفّ يُقرأ قبل معرفة صاحبه.
@@ -16,7 +20,6 @@
 
 import { createClient } from '@supabase/supabase-js'
 import type { Config } from '../session.js'
-import { loginPage, noticePage } from './login-page.js'
 import { open, seal, verifyPkce, readJwtClaims } from './tokens.js'
 
 /** رمز التفويض يعيش دقيقة: يكفي لإكمال التحويل ولا يكفي لالتقاطه واستعماله. */
@@ -26,13 +29,15 @@ const REFRESH_TTL = 30 * 24 * 60 * 60
 const CLIENT_TTL = 365 * 24 * 60 * 60
 
 const JSON_HEADERS = { 'content-type': 'application/json' }
-const HTML_HEADERS = { 'content-type': 'text/html; charset=utf-8' }
+const TEXT_HEADERS = { 'content-type': 'text/plain; charset=utf-8' }
 
 export interface OAuthContext {
   config: Config
   secret: string
   /** جذر الخادم كما يراه العميل — منه تُبنى كل الروابط المعلنة. */
   baseUrl: string
+  /** صفحة الدخول على نطاق التطبيق. */
+  loginUrl: string
   now: number
 }
 
@@ -168,62 +173,81 @@ async function readAuthorizeParams(
   }
 }
 
-export async function authorizeForm(
+/**
+ * بدء الدورة: تحقّقٌ ثم تحويلٌ إلى صفحة الدخول على نطاق التطبيق.
+ *
+ * التحقّق هنا قبل التحويل هو ما يمنع تسليم الرمز لموقع غريب: الصفحة تمرّر
+ * الوسائط كما وصلتها، فلو لم نتحقّق الآن لصارت أيُّ قيمةٍ في سطر العنوان
+ * مقبولة. ونتحقّق منها ثانيةً عند الإصدار، فلا يكفي تعديلها في المتصفّح.
+ */
+export async function authorizeStart(
   context: OAuthContext,
   params: URLSearchParams,
 ): Promise<Response> {
   const parsed = await readAuthorizeParams(context, params)
   if (parsed instanceof Response) return parsed
 
-  return new Response(loginPage({ ...parsed, error: '' }), { headers: HTML_HEADERS })
+  const target = new URL(context.loginUrl)
+  target.searchParams.set('client_id', parsed.clientId)
+  target.searchParams.set('redirect_uri', parsed.redirectUri)
+  target.searchParams.set('code_challenge', parsed.challenge)
+  if (parsed.state) target.searchParams.set('state', parsed.state)
+  if (parsed.resource) target.searchParams.set('resource', parsed.resource)
+
+  return new Response(null, { status: 302, headers: { location: target.toString() } })
 }
 
-export async function authorizeSubmit(
+/**
+ * إتمام الدورة: جلسةٌ من صفحة الدخول، فرمزُ تفويض.
+ *
+ * لا تصل كلمةُ سرٍّ إلى هنا — الصفحة بادلتها بجلسة عند Supabase مباشرةً.
+ * والجلسة تُتحقَّق قبل قبولها: رمزٌ ملفَّق يُرفض هنا بدل أن يصير رمز تفويضٍ
+ * صالحاً ينكسر لاحقاً عند أول استعلام بخطأٍ لا يفهمه أحد.
+ */
+export async function authorizeComplete(
   context: OAuthContext,
   request: Request,
 ): Promise<Response> {
-  const form = await request.formData()
-  const params = new URLSearchParams()
-  for (const [key, value] of form) if (typeof value === 'string') params.set(key, value)
+  let body: Record<string, string>
+  try {
+    body = (await request.json()) as Record<string, string>
+  } catch {
+    return oauthError('invalid_request', 'جسم الطلب ليس JSON صالحاً.')
+  }
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    code_challenge_method: 'S256',
+    client_id: body.client_id ?? '',
+    redirect_uri: body.redirect_uri ?? '',
+    code_challenge: body.code_challenge ?? '',
+    state: body.state ?? '',
+    resource: body.resource ?? '',
+  })
 
   const parsed = await readAuthorizeParams(context, params)
   if (parsed instanceof Response) return parsed
 
-  const email = (params.get('email') ?? '').trim()
-  const password = params.get('password') ?? ''
-
-  if (!email || !password) {
-    return new Response(loginPage({ ...parsed, error: 'اكتب البريد وكلمة السر.' }), {
-      status: 400,
-      headers: HTML_HEADERS,
-    })
+  const accessToken = body.access_token ?? ''
+  const refreshToken = body.refresh_token ?? ''
+  if (!accessToken || !refreshToken) {
+    return oauthError('invalid_request', 'الجلسة ناقصة.')
   }
 
-  /*
-   * هنا تُستبدل كلمة السرّ بجلسة — ولا تُخزَّن.
-   *
-   * الدخول بالمفتاح العام لا بمفتاح خدمة: من يكتب بريده وكلمة سرّه هو من
-   * يملكهما، ولا ينتحل الخادم أحداً. وهذه جلسة مستقلة عن جلسة التطبيق، فلا
-   * يخرج المستخدم من تلفونه حين تُدوَّر رموز هذه.
-   */
   const auth = createClient(context.config.url, context.config.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
-  const { data, error } = await auth.auth.signInWithPassword({ email, password })
-
-  if (error || !data.session) {
-    return new Response(
-      loginPage({ ...parsed, error: 'البريد أو كلمة السر غير صحيحة.' }),
-      { status: 401, headers: HTML_HEADERS },
-    )
+  const { data, error } = await auth.auth.getUser(accessToken)
+  if (error || !data.user) {
+    return oauthError('invalid_grant', 'الجلسة غير صالحة — أعد تسجيل الدخول.', 401)
   }
 
   const code = await seal(
     context.secret,
     'code',
     {
-      refresh_token: data.session.refresh_token,
-      access_token: data.session.access_token,
+      refresh_token: refreshToken,
+      access_token: accessToken,
       challenge: parsed.challenge,
       redirect_uri: parsed.redirectUri,
       resource: parsed.resource,
@@ -236,7 +260,7 @@ export async function authorizeSubmit(
   target.searchParams.set('code', code)
   if (parsed.state) target.searchParams.set('state', parsed.state)
 
-  return new Response(null, { status: 302, headers: { location: target.toString() } })
+  return json({ redirect: target.toString() })
 }
 
 /* ── الرموز ───────────────────────────────────────────────── */
@@ -311,7 +335,24 @@ export async function token(context: OAuthContext, request: Request): Promise<Re
   return oauthError('unsupported_grant_type', 'المدعوم: authorization_code و refresh_token.')
 }
 
-/** صفحة تُعرض حين يُفتح رابط الخادم في متصفّح بلا سياق OAuth. */
+/**
+ * ما يُعرض حين يُفتح رابط الخادم في متصفّح.
+ *
+ * نصٌّ لا HTML: المنصّة تحوّل صفحات الدوالّ إلى نصّ خام، فصفحةٌ منسّقة تصل
+ * مشوّهةً بحروفٍ محروقة. النصّ المجرّد يصل كما كُتب.
+ */
 export function landing(context: OAuthContext): Response {
-  return new Response(noticePage(context.baseUrl), { headers: HTML_HEADERS })
+  return new Response(
+    [
+      'خادم سنوي — هذا ليس موقعاً يُفتح، بل خادمٌ يُضاف إلى كلود.',
+      '',
+      'في كلود: Settings ← Connectors ← Add custom connector، وضع هذا العنوان:',
+      '',
+      `  ${context.baseUrl}`,
+      '',
+      'سيفتح لك كلود صفحة دخول سنوي، وبعدها ترى أدواتك في المحادثة.',
+      'لا يوجد رابط سرّي تنسخه ولا مفتاح تحفظه.',
+    ].join('\n'),
+    { headers: TEXT_HEADERS },
+  )
 }
