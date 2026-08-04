@@ -17,6 +17,7 @@ import type {
   PartnerSettlement,
 } from '../src/lib/db/types.js'
 import type { CalendarMonth } from '../src/lib/obligations/calendar.js'
+import { viewCommitment } from '../src/lib/commitments/calc.js'
 import { STATUS_LABEL, isoDate, recurrenceLabel } from './format.js'
 
 /* ── الالتزام ─────────────────────────────────────────────── */
@@ -134,13 +135,28 @@ export const billRowOut = {
   /** متوسّط ما دُفع فعلاً في آخر 12 شهراً. */
   average: z.number(),
   note: z.string().nullable(),
+  /* فارغة في البنود الدائمة، ومملوءة في الأقساط. الفرق بينهما هو الفرق بين
+     «هذا معك للأبد» و«بقيت ثلاث دفعات». */
+  ends_on: z.string().nullable(),
+  payments_left: z.number().nullable(),
+  remaining_total: z.number().nullable(),
 }
 
 export function toBillRowOut(
   commitment: FixedCommitment,
   payment: BillPayment | undefined,
   average: BillAverage | undefined,
+  today: Date = new Date(),
 ) {
+  const view = viewCommitment(
+    {
+      amount: Number(commitment.amount),
+      mySharePercent: Number(commitment.my_share_percent ?? 100),
+      endsOn: commitment.ends_on ?? null,
+    },
+    today,
+  )
+
   return {
     commitment_id: commitment.id,
     name: commitment.name,
@@ -150,6 +166,9 @@ export function toBillRowOut(
     paid_at: payment?.paid_at ?? null,
     average: Number(average?.average_amount ?? 0),
     note: payment?.note ?? null,
+    ends_on: commitment.ends_on ?? null,
+    payments_left: view.paymentsLeft,
+    remaining_total: view.remainingForMe,
   }
 }
 

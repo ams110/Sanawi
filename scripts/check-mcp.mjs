@@ -210,6 +210,12 @@ const monthDay = (day) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+const monthsAgo = (n) => {
+  const d = new Date()
+  const m = new Date(d.getFullYear(), d.getMonth() - n, 1)
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-01`
+}
+
 const inMonths = (n) => {
   const d = new Date()
   const m = new Date(d.getFullYear(), d.getMonth() + n, 15)
@@ -537,6 +543,62 @@ expect(
 )
 
 await call('sanawi_archive_obligation', { obligation: 'تأمين مشترك' })
+
+/* ─── الأقساط: بندٌ ينتهي ─── */
+
+// قسط ٦ دفعات بـ400: يُحمَّل على الشهر الآن، ويُرفع عنه حين ينتهي.
+const loan = await call('sanawi_add_fixed_commitment', {
+  name: 'قسط تلفون',
+  amount: 400,
+  installments: 6,
+  total_amount: 2400,
+})
+expect('الدفعات المتبقية', loan?.payments_left, 6)
+expect('ومجموع ما بقي', loan?.remaining_total, 2400)
+expect('وسعر الشراء محفوظ للسياق', loan?.total_amount, 2400)
+
+// آخر دفعة بعد خمسة شهور لا ستة: العدّ يشمل دفعة هذا الشهر.
+const fifthMonth = new Date()
+fifthMonth.setMonth(fifthMonth.getMonth() + 5)
+expect(
+  'آخر دفعة تشمل شهر البدء',
+  loan?.ends_on?.slice(0, 7),
+  `${fifthMonth.getFullYear()}-${String(fifthMonth.getMonth() + 1).padStart(2, '0')}`,
+)
+
+/*
+ * الفصل بين «متكرّر» و«ينتهي» هو ما تقوم عليه بشرى المديون.
+ * القسط لا يدخل recurring_bills، ولوحة الشهر تقول متى ينخفض الحمل وبكم.
+ */
+const withLoan = await call('sanawi_month_overview')
+expect('القسط في خانته لا في الفواتير', withLoan?.installments, 400)
+expect('والفواتير الدائمة لم تتأثّر', withLoan?.recurring_bills, 300)
+expect('وموعد الانفراج', withLoan?.next_relief?.months_away, 6)
+expect('وقيمته', withLoan?.next_relief?.amount, 400)
+
+// وقائمة الفواتير تحمل حالة القسط لا مبلغه وحده.
+const loanRow = (await call('sanawi_list_bills'))?.bills?.find((b) => b.name === 'قسط تلفون')
+expect('القائمة تعرف أنه قسط', loanRow?.payments_left, 6)
+expect('والباقي عليه', loanRow?.remaining_total, 2400)
+
+// والبند الدائم يبقى بلا نهاية — لا يُحسب قسطاً بالخطأ.
+const perpetual = (await call('sanawi_list_bills'))?.bills?.find((b) => b.name === 'كهرباء')
+expect('الدائم بلا نهاية', perpetual?.ends_on, null)
+expect('وبلا عدّ دفعات', perpetual?.payments_left, null)
+
+// قسطٌ انتهى لا يُحمَّل: بقيت له صفر دفعة، فيخرج من الحمل الشهري.
+await call('sanawi_add_fixed_commitment', {
+  name: 'قسط منتهٍ',
+  amount: 900,
+  ends_on: monthsAgo(3),
+})
+expect('المنتهي لا يُحمَّل', (await call('sanawi_month_overview'))?.installments, 400)
+
+await expectError(
+  'sanawi_add_fixed_commitment',
+  { name: 'ملتبس', amount: 100, installments: 5, ends_on: inMonths(5) },
+  'اختر أحدهما',
+)
 
 /* ─── شركاء البنود الشهرية ─── */
 

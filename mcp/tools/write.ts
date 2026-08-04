@@ -13,6 +13,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
+import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import type {
   BillPayment,
   FundDeposit,
@@ -773,13 +774,25 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 المدخلات:
   - name (string)
-  - amount (number): المبلغ الشهري المقدَّر، 0 أو أكثر
+  - amount (number): **القسط الشهري** لا سعر الشراء، 0 أو أكثر
+  - installments (number): عدد الدفعات المتبقية بما فيها دفعة هذا الشهر — يجعله قسطاً ينتهي
+  - ends_on (YYYY-MM-DD): شهر آخر دفعة، بديلٌ عن installments لمن يعرف التاريخ لا العدد
+  - total_amount (number): سعر الشراء الكامل — للسياق لا للحساب
   - day_of_month (number): يوم الاستحقاق 1..31، اختياري
 
 المخرجات: id و name و amount و day_of_month.`,
       inputSchema: {
         name: z.string().min(1).max(80),
-        amount: z.number().min(0).describe('المبلغ الشهري المقدَّر'),
+        amount: z.number().min(0).describe('القسط الشهري لا سعر الشراء'),
+        installments: z
+          .number()
+          .int()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe('عدد الدفعات المتبقية بما فيها هذا الشهر'),
+        ends_on: z.string().optional().describe('YYYY-MM-DD — شهر آخر دفعة'),
+        total_amount: z.number().min(0).optional().describe('سعر الشراء الكامل، للسياق'),
         day_of_month: z.number().int().min(1).max(31).optional(),
       },
       outputSchema: {
@@ -787,18 +800,48 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         id: z.string(),
         name: z.string(),
         amount: z.number(),
+        ends_on: z.string().nullable(),
+        payments_left: z.number().nullable(),
+        remaining_total: z.number().nullable(),
+        total_amount: z.number().nullable(),
         day_of_month: z.number().nullable(),
       },
       annotations: WRITES,
     },
     guard(async (input) => {
       const connection = await connect()
+      /*
+       * عددُ الدفعات يصير تاريخاً، ولا يُخزَّن.
+       *
+       * المستخدم ينطق «اثنا عشر قسطاً» لا «آخر دفعة في آب 2027»، لكن القاعدة
+       * تحفظ التاريخ وحده عمداً: تخزين العدد والتاريخ والمبلغ معاً يفتح باب
+       * تناقضها بعد شهر — العدد ينقص مع الزمن والتاريخ لا. فالتحويل هنا، مرّة،
+       * ثم يُشتقّ العدد من التاريخ في كل قراءة.
+       *
+       * والعدّ يشمل دفعة هذا الشهر: «قسط واحد باقٍ» يعني ادفع هذا الشهر
+       * وانتهيت، فآخر دفعة هي الشهر الحالي لا الذي يليه.
+       */
+      let endsOn: string | null = null
+
+      if (input.installments !== undefined && input.ends_on !== undefined) {
+        throw new Error('اختر أحدهما: installments أو ends_on — لا كليهما.')
+      }
+      if (input.ends_on !== undefined) {
+        endsOn = requireDate(input.ends_on, 'ends_on')
+      } else if (input.installments !== undefined) {
+        const today = new Date()
+        const last = new Date(today.getFullYear(), today.getMonth() + input.installments - 1, 1)
+        endsOn = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-01`
+      }
+
       const { data, error } = await connection.db
         .from('fixed_commitments')
         .insert({
           user_id: connection.userId,
           name: input.name.trim(),
           amount: input.amount,
+          ends_on: endsOn,
+          total_amount: input.total_amount ?? null,
           day_of_month: input.day_of_month ?? null,
           is_active: true,
         })
@@ -807,15 +850,29 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       if (error) throw error
 
       const currency = connection.currency
+      // العرض يمرّ بمحرّك التطبيق لا بحسابٍ هنا: العدّ له حدٌّ دقيق يشمل شهر
+      // الانتهاء، ونسخةٌ ثانية منه ستقول «خلصت» لمن بقيت عليه دفعة.
+      const view = viewCommitment(
+        { amount: Number(data.amount), mySharePercent: 100, endsOn: data.ends_on },
+        new Date(),
+      )
+
       return ok(
         `أُضيف بند ثابت **${input.name}**: ${money(input.amount, currency)} شهرياً` +
           (input.day_of_month ? ` (يوم ${input.day_of_month})` : '') +
-          '.',
+          (view.isInstallment
+            ? `.\nقسطٌ ينتهي: بقيت ${view.paymentsLeft} دفعة، آخرها ${monthYear(data.ends_on!)}` +
+              ` — مجموعها ${money(view.remainingForMe ?? 0, currency)}.`
+            : '.'),
         {
           currency,
           id: data.id,
           name: data.name,
           amount: Number(data.amount),
+          ends_on: data.ends_on,
+          payments_left: view.paymentsLeft,
+          remaining_total: view.remainingForMe,
+          total_amount: data.total_amount === null ? null : Number(data.total_amount),
           day_of_month: data.day_of_month,
         },
       )

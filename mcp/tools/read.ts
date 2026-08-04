@@ -99,6 +99,8 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   - daily_allowance: كم يمكن صرفه يومياً حتى آخر الشهر.
   - income و income_is_actual و income_gap: الدخل المعتمد، وهل هو واقعٌ مسجَّل أم تقدير، وفرق الواصل عن المتوقَّع.
   - التفصيل: obligation_installments و recurring_bills و installments و daily_expenses و savings_target.
+  - next_relief: متى ينخفض الحمل الشهري وبكم — بشرى المديون: العبء مؤقّت وله تاريخ.
+    فارغة حين لا قسط ينتهي. وفيها amount و ends_on و months_away.
   - عدّادات: obligations_count و overdue_count و behind_count.
 
 ملاحظة: available_to_spend الوارد هنا هو التقدير الثابت (دخلٌ متوقَّع ناقص ما يجب أن يخرج)، بينما remaining هو الواقع. الفرق بينهما مقصود.`,
@@ -118,6 +120,13 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         obligation_installments: z.number(),
         recurring_bills: z.number(),
         installments: z.number(),
+        next_relief: z
+          .object({
+            amount: z.number(),
+            ends_on: z.string(),
+            months_away: z.number(),
+          })
+          .nullable(),
         daily_expenses: z.number(),
         savings_target: z.number(),
         committed: z.number(),
@@ -155,6 +164,13 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         obligation_installments: summary.obligationsTotal,
         recurring_bills: load.recurring,
         installments: load.installments,
+        next_relief: load.nextRelief
+          ? {
+              amount: load.nextRelief.amount,
+              ends_on: load.nextRelief.endsOn,
+              months_away: load.nextRelief.monthsAway,
+            }
+          : null,
         daily_expenses: expenses.total,
         savings_target: picture.savingsTarget,
         committed: panel.committed,
@@ -181,7 +197,11 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
             : ''),
         `- أقساط الالتزامات: ${money(summary.obligationsTotal, currency)} (${obligations.length} التزام)`,
         `- فواتير متكرّرة: ${money(load.recurring, currency)}`,
-        `- أقساط تنتهي: ${money(load.installments, currency)}`,
+        `- أقساط تنتهي: ${money(load.installments, currency)}` +
+          (load.nextRelief
+            ? ` — أقربها بعد ${load.nextRelief.monthsAway} شهراً` +
+              ` فينخفض الحمل ${money(load.nextRelief.amount, currency)}`
+            : ''),
         `- مصاريف يومية حتى الآن: ${money(expenses.total, currency)} (${expenses.daysElapsed} من ${expenses.daysInMonth} يوماً)`,
         `- هدف الادخار: ${money(picture.savingsTarget, currency)}`,
         `- **مجموع ما خرج ويخرج: ${money(panel.totalOut, currency)}**`,
