@@ -19,6 +19,29 @@ const PASSWORD = 'check-password'
 const USER_ID = '00000000-0000-4000-8000-00000000f00d'
 const ANON_KEY = 'fake-anon-key'
 
+/*
+ * حسابان لا واحد.
+ *
+ * OAuth يجعل خادماً واحداً يخدم كل المستخدمين، فالسؤال الذي يجب أن يجيب عنه
+ * الفحص صار: هل يرى مستخدمٌ صفَّ غيره؟ حسابٌ واحد لا يستطيع أن يجيب. الثاني
+ * هنا موجود لهذا الغرض وحده.
+ */
+const OTHER_EMAIL = 'other@sanawi.local'
+const OTHER_PASSWORD = 'other-password'
+const OTHER_USER_ID = '00000000-0000-4000-8000-00000000beef'
+
+const ACCOUNTS = [
+  { id: USER_ID, email: EMAIL, password: PASSWORD },
+  { id: OTHER_USER_ID, email: OTHER_EMAIL, password: OTHER_PASSWORD },
+]
+
+/** JWT غير موقّع — الشكل وحده يهمّ: الخادم يقرأ `sub` منه ويمرّره كما هو. */
+const makeJwt = (sub, expiresAt) => {
+  const b64 = (o) =>
+    Buffer.from(JSON.stringify(o)).toString('base64url')
+  return `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub, exp: expiresAt, role: 'authenticated' })}.fake`
+}
+
 const round2 = (v) => Math.round(v * 100) / 100
 const today = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -36,6 +59,17 @@ function seed() {
         theme_preference: 'system',
         onboarding_completed: true,
         monthly_savings_target: 500,
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: OTHER_USER_ID,
+        display_name: 'حساب ثانٍ',
+        currency: 'USD',
+        locale: 'ar',
+        country: 'IL',
+        theme_preference: 'system',
+        onboarding_completed: true,
+        monthly_savings_target: 0,
         created_at: new Date().toISOString(),
       },
     ],
@@ -280,22 +314,65 @@ export async function startFakeSupabase() {
 
     try {
       if (url.pathname === '/auth/v1/token') {
-        if (body?.email !== EMAIL || body?.password !== PASSWORD) {
-          return send(400, { error: 'invalid_grant', error_description: 'Invalid login credentials' })
-        }
-        return send(200, {
-          access_token: 'fake-access-token',
+        const grant = url.searchParams.get('grant_type')
+        const expiresAt = Math.floor(Date.now() / 1000) + 3600
+
+        const sessionFor = (account) => ({
+          access_token: makeJwt(account.id, expiresAt),
           token_type: 'bearer',
           expires_in: 3600,
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
-          refresh_token: 'fake-refresh-token',
-          user: { id: USER_ID, email: EMAIL, aud: 'authenticated', role: 'authenticated' },
+          expires_at: expiresAt,
+          // رمز تجديد يحمل صاحبه: يكفي لمحاكاة عائلةِ جلسةٍ مستقلة لكل دخول.
+          refresh_token: `refresh.${account.id}.${randomUUID()}`,
+          user: { id: account.id, email: account.email, aud: 'authenticated', role: 'authenticated' },
         })
+
+        if (grant === 'refresh_token') {
+          const owner = String(body?.refresh_token ?? '').split('.')[1]
+          const account = ACCOUNTS.find((a) => a.id === owner)
+          if (!account) {
+            return send(400, { error: 'invalid_grant', error_description: 'Invalid Refresh Token' })
+          }
+          return send(200, sessionFor(account))
+        }
+
+        const account = ACCOUNTS.find(
+          (a) => a.email === body?.email && a.password === body?.password,
+        )
+        if (!account) {
+          return send(400, { error: 'invalid_grant', error_description: 'Invalid login credentials' })
+        }
+        return send(200, sessionFor(account))
       }
 
       if (!url.pathname.startsWith('/rest/v1/')) return send(404, { message: 'not found' })
 
       const table = url.pathname.slice('/rest/v1/'.length)
+
+      /*
+       * محاكاة RLS.
+       *
+       * بدونها يكون فحصُ العزل مسرحيةً: خادمٌ يخلط بيانات المستخدمين سيمرّ
+       * لأن القاعدة المزيّفة تعطي الجميع كلَّ شيء. هنا نستخرج صاحبَ الرمز من
+       * الترويسة ونحصر كل صفٍّ على `user_id` تبعه — كما تفعل السياسات فعلاً.
+       */
+      const jwt = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
+      const caller =
+        jwt && jwt !== ANON_KEY
+          ? (() => {
+              try {
+                return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()).sub
+              } catch {
+                return null
+              }
+            })()
+          : null
+
+      // `obligation_templates` عام للمسجّلين — لا `user_id` فيه أصلاً.
+      const scoped = (rows) =>
+        table === 'obligation_templates' || !caller
+          ? rows
+          : rows.filter((r) => r.user_id === undefined || r.user_id === caller)
       const wantsObject = (req.headers.accept ?? '').includes('vnd.pgrst.object+json')
 
       const respond = (rows) => {
@@ -312,7 +389,9 @@ export async function startFakeSupabase() {
       if (req.method === 'GET') {
         const source = VIEWS[table] ? VIEWS[table](db) : db[table]
         if (!source) return send(404, { message: `جدول غير معروف في الفحص: ${table}` })
-        return respond(applyOrderAndLimit(applyFilters(source, url.searchParams), url.searchParams))
+        return respond(
+          applyOrderAndLimit(applyFilters(scoped(source), url.searchParams), url.searchParams),
+        )
       }
 
       if (req.method === 'POST') {
@@ -349,7 +428,7 @@ export async function startFakeSupabase() {
       if (req.method === 'PATCH') {
         const rows = db[table]
         if (!rows) return send(404, { message: `جدول غير معروف في الفحص: ${table}` })
-        const targets = applyFilters(rows, url.searchParams)
+        const targets = applyFilters(scoped(rows), url.searchParams)
         for (const row of targets) Object.assign(row, body)
         return respond(targets)
       }
@@ -369,6 +448,7 @@ export async function startFakeSupabase() {
     email: EMAIL,
     password: PASSWORD,
     userId: USER_ID,
+    other: { email: OTHER_EMAIL, password: OTHER_PASSWORD, userId: OTHER_USER_ID },
     db,
     calls,
     /** يجعل نداء REST القادم يفشل بخطأ على شكل PostgREST تماماً. */
