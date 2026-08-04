@@ -680,15 +680,28 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 نادِها قبل الإنشاء حين تحتاج معرّفاً موجوداً، أو حين يسأل المستخدم «شو الالتزامات اللي ممكن أضيفها؟» (kind='templates').
 
 المدخلات:
-  - kind ('groups' | 'partners' | 'templates' | 'money'): أي قائمة
+  - kind ('groups' | 'partners' | 'templates' | 'money' | 'categories' | 'payment_methods' | 'commitment_templates'): أي قائمة
 
 المخرجات تختلف بالقائمة:
   groups → items[] من { id, name, icon, color }
   partners → items[] من { id, name }
   templates → items[] من { id, name, category, recurrence_months, suggested_min, suggested_max }
-  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency } و fixed_commitments[] من { id, name, amount, day_of_month }`,
+  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency } و fixed_commitments[] من { id, name, amount, day_of_month }
+  categories → items[] من { id, name, icon } — تصنيفات المصاريف اليومية
+  payment_methods → items[] من { id, name, icon, is_automatic }
+  commitment_templates → items[] من { id, name, category, icon, suggested_min, suggested_max, is_installment }`,
       inputSchema: {
-        kind: z.enum(['groups', 'partners', 'templates', 'money']).describe('أي قائمة تريد'),
+        kind: z
+          .enum([
+            'groups',
+            'partners',
+            'templates',
+            'money',
+            'categories',
+            'payment_methods',
+            'commitment_templates',
+          ])
+          .describe('أي قائمة تريد'),
       },
       outputSchema: {
         kind: z.string(),
@@ -743,6 +756,51 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           items.length === 0
             ? 'لا شركاء بعد. يُنشأ الشريك تلقائياً عند أول إيداع باسمه.'
             : `## الشركاء\n${items.map((p) => `- ${p.name} (${p.id})`).join('\n')}`,
+          { kind, currency, items },
+        )
+      }
+
+      /*
+       * الجداول المرجعية الثلاثة: صفوف المستخدم وصفوف النظام معاً.
+       *
+       * `user_id` فيها قابل للفراغ: الفارغ صفٌّ عام يراه الجميع، والمملوء
+       * إضافةُ المستخدم. RLS يتكفّل بالفرز، فلا مرشّح هنا — ولو رشّحنا على
+       * المستخدم لاختفت التصنيفات الجاهزة التي تعتمد عليها الشاشات.
+       */
+      const REFERENCE = {
+        categories: { table: 'expense_categories', title: 'تصنيفات المصاريف' },
+        payment_methods: { table: 'payment_methods', title: 'طرق الدفع' },
+        commitment_templates: { table: 'commitment_templates', title: 'قوالب البنود الشهرية' },
+      } as const
+
+      if (kind in REFERENCE) {
+        const { table, title } = REFERENCE[kind as keyof typeof REFERENCE]
+        const { data, error } = await connection.db
+          .from(table)
+          .select('*')
+          .order('sort_order', { ascending: true })
+        if (error) throw error
+
+        const items = ((data ?? []) as Record<string, unknown>[]).map((row) => {
+          const base: Record<string, unknown> = {
+            id: String(row.id),
+            name: String(row.name_ar),
+            icon: row.icon ?? null,
+          }
+          if (kind === 'payment_methods') base.is_automatic = Boolean(row.is_automatic)
+          if (kind === 'commitment_templates') {
+            base.category = row.category ?? null
+            base.suggested_min = row.suggested_min === null ? null : Number(row.suggested_min)
+            base.suggested_max = row.suggested_max === null ? null : Number(row.suggested_max)
+            base.is_installment = Boolean(row.is_installment)
+          }
+          return base
+        })
+
+        return ok(
+          items.length === 0
+            ? `لا ${title} بعد.`
+            : `## ${title}\n${items.map((i) => `- ${i.icon ?? ''} ${i.name}`).join('\n')}`,
           { kind, currency, items },
         )
       }

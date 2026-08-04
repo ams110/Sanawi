@@ -84,11 +84,29 @@ function seed() {
     expenses: [],
     events: [],
     bill_payments: [],
-    expense_categories: [],
-    payment_methods: [],
+    /* صفوف نظامٍ بلا `user_id`: يراها الجميع، وعليها تعتمد الشاشات. */
+    expense_categories: [
+      { id: randomUUID(), user_id: null, name_ar: 'أكل', icon: '🍽️', sort_order: 10 },
+      { id: randomUUID(), user_id: null, name_ar: 'بنزين', icon: '⛽', sort_order: 20 },
+    ],
+    payment_methods: [
+      { id: randomUUID(), user_id: null, name_ar: 'نقداً', icon: '💵', is_automatic: false, sort_order: 10 },
+      { id: randomUUID(), user_id: null, name_ar: 'أوتوماتيك', icon: '🔁', is_automatic: true, sort_order: 20 },
+    ],
     income_entries: [],
     commitment_partner_shares: [],
-    commitment_templates: [],
+    commitment_templates: [
+      {
+        id: randomUUID(),
+        name_ar: 'إنترنت',
+        category: 'home',
+        icon: '🌐',
+        suggested_min: 80,
+        suggested_max: 200,
+        is_installment: false,
+        sort_order: 10,
+      },
+    ],
     obligation_templates: [
       {
         id: randomUUID(),
@@ -387,11 +405,14 @@ export async function startFakeSupabase() {
             })()
           : null
 
-      // `obligation_templates` عام للمسجّلين — لا `user_id` فيه أصلاً.
+      /*
+       * `user_id` فارغاً يعني صفَّ نظامٍ يراه الجميع — التصنيفات وطرق الدفع
+       * والقوالب. حصرُه على المستخدم كان يُخفيها كلها، وعليها تعتمد الشاشات.
+       */
       const scoped = (rows) =>
         table === 'obligation_templates' || !caller
           ? rows
-          : rows.filter((r) => r.user_id === undefined || r.user_id === caller)
+          : rows.filter((r) => r.user_id === undefined || r.user_id === null || r.user_id === caller)
       const wantsObject = (req.headers.accept ?? '').includes('vnd.pgrst.object+json')
 
       const respond = (rows) => {

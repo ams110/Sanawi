@@ -5,7 +5,7 @@
  * أربع مراحل:
  * 1. الأدوات المعلنة — لكلٍّ وصف وتوصيف، وأشكالها تتحوّل إلى JSON Schema.
  * 2. وضع القراءة فقط لا يسرّب أداة كتابة.
- * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: التسع عشرة أداة كلها،
+ * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: الإحدى والعشرين أداة كلها،
  *    بأرقام محسوبة يدوياً تُقارَن بما يردّه الخادم.
  * 4. نداء قراءة على الحساب الحقيقي إن وُجد SANAWI_EMAIL و SANAWI_PASSWORD
  *    في .env — ويُتخطّى بلا فشل إن لم يوجدا.
@@ -538,10 +538,80 @@ expect(
 
 await call('sanawi_archive_obligation', { obligation: 'تأمين مشترك' })
 
+/* ─── شركاء البنود الشهرية ─── */
+
+// الحمل الشهري يُحسب على حصّتي — لا على المبلغ الكامل.
+const loadBefore = (await call('sanawi_month_overview'))?.recurring_bills
+const netShare = await call('sanawi_set_commitment_partners', {
+  commitment: 'كهرباء',
+  partners: [{ name: 'أخوي', share_percent: 50 }],
+})
+expect('حصّتي في البند', netShare?.my_share_percent, 50)
+expect('وبالمبلغ', netShare?.my_amount, 150)
+expect('وما على الشريك', netShare?.partners?.[0]?.owed, 150)
+
+const loadAfter = (await call('sanawi_month_overview'))?.recurring_bills
+expect('الحمل الشهري تبع حصّتي', loadAfter, loadBefore - 150)
+
+// الشريك مشترك بين الالتزامات والبنود — لا يتكرّر.
+expect(
+  '«أخوي» لم يتضاعف',
+  (await call('sanawi_list_reference', { kind: 'partners' }))?.items?.filter(
+    (p) => p.name === 'أخوي',
+  ).length,
+  1,
+)
+
+await expectError(
+  'sanawi_set_commitment_partners',
+  { commitment: 'كهرباء', partners: [{ name: 'س', share_percent: 60 }, { name: 'ص', share_percent: 50 }] },
+  '110',
+)
+await expectError('sanawi_set_commitment_partners', { commitment: 'لا يوجد', partners: [] }, 'لا بند شهري')
+
+const backToMe = await call('sanawi_set_commitment_partners', { commitment: 'كهرباء', partners: [] })
+expect('العودة إلى الكل عليّ', backToMe?.my_share_percent, 100)
+expect('والحمل يعود كاملاً', (await call('sanawi_month_overview'))?.recurring_bills, loadBefore)
+
+/* ─── البيانات المرجعية ─── */
+
+const categories = await call('sanawi_list_reference', { kind: 'categories' })
+expect('التصنيفات تصل', categories?.items?.length, 2)
+expect('باسمها', categories?.items?.[0]?.name, 'أكل')
+
+const methods = await call('sanawi_list_reference', { kind: 'payment_methods' })
+expect('طرق الدفع تصل', methods?.items?.length, 2)
+expect('ويُعرف الأوتوماتيكي منها', methods?.items?.[1]?.is_automatic, true)
+
+const commitmentTemplates = await call('sanawi_list_reference', { kind: 'commitment_templates' })
+expect('قوالب البنود تصل', commitmentTemplates?.items?.length, 1)
+expect('بحدّها الأدنى', commitmentTemplates?.items?.[0]?.suggested_min, 80)
+
+/* ─── الإعدادات ─── */
+
+// هدف الادخار يدخل حساب الباقي، فالفرق هو ما يجب أن يظهر — لا رقمٌ مطلق
+// يتغيّر مع كل تعديل سابق في الفحص.
+const remainingBefore = (await call('sanawi_month_overview'))?.remaining
+
+const profile = await call('sanawi_update_profile', { monthly_savings_target: 800 })
+expect('هدف الادخار تبدّل', profile?.monthly_savings_target, 800)
+expect(
+  'والباقي نقص بالفرق تماماً',
+  (await call('sanawi_month_overview'))?.remaining,
+  Math.round((remainingBefore - 300) * 100) / 100,
+)
+
+const renamed = await call('sanawi_update_profile', { display_name: 'أحمد' })
+expect('الاسم تبدّل', renamed?.display_name, 'أحمد')
+expect('والهدف لم يُمَسّ', renamed?.monthly_savings_target, 800)
+
+await expectError('sanawi_update_profile', {}, 'لم تُرسَل')
+await call('sanawi_update_profile', { monthly_savings_target: 500 })
+
 await app.close()
 await fake.stop()
 
-if (!failed) console.log('✓ التسع عشرة أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
+if (!failed) console.log('✓ الإحدى والعشرين أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
 
 /* ── 5. النقل البعيد: HTTP بالمفتاح ───────────────────────── */
 

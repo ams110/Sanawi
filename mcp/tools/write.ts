@@ -18,6 +18,7 @@ import type {
   FundDeposit,
   Obligation,
   PartnerSettlement,
+  Profile,
 } from '../../src/lib/db/types.js'
 import type { Connection } from '../session.js'
 import { findGroup, findObligation, loadIncomeEntries, monthKey } from '../data.js'
@@ -52,6 +53,70 @@ function requireFullShare(percent: number | undefined): void {
         ' وتُحسَب حصّتك تلقائياً من الباقي.',
     )
   }
+}
+
+/**
+ * الشركاء وحصصهم — منطقٌ واحد للالتزامات وللبنود الشهرية.
+ *
+ * الجدولان مختلفان والقاعدة واحدة: مجموع الحصص لا يتجاوز 100٪، وحصّتي هي
+ * الباقي. نسخةٌ ثانية من هذا الحساب كانت ستنحرف عن الأولى عند أول تعديل،
+ * والانحراف هنا يعني التزاماً بمجموعٍ مختلّ يرفضه التطبيق.
+ *
+ * والشريك يُطابَق بالاسم مطابقةً تامّة كما يفعل التطبيق: «محمد» و«محمد علي»
+ * شخصان، ولا يتضاعف «أخوي» مع كل ضبط.
+ */
+async function resolveShares(
+  connection: Connection,
+  partners: { name: string; share_percent: number }[],
+  total: number,
+): Promise<{
+  mine: number
+  out: { name: string; share_percent: number; owed: number }[]
+  rows: { partner_id: string; share_percent: number }[]
+}> {
+  const named = partners.filter((p) => p.name.trim())
+
+  const duplicate = named.find(
+    (p, i) => named.findIndex((q) => q.name.trim() === p.name.trim()) !== i,
+  )
+  if (duplicate) {
+    throw new Error(`«${duplicate.name.trim()}» مذكور مرتين — اجمع حصّته في سطر واحد.`)
+  }
+
+  const partnersTotal = Math.round(named.reduce((sum, p) => sum + p.share_percent, 0) * 100) / 100
+  if (partnersTotal > 100) {
+    throw new Error(`مجموع حصص الشركاء ${partnersTotal}٪ — لا يمكن أن يتجاوز 100٪.`)
+  }
+  const mine = Math.round((100 - partnersTotal) * 100) / 100
+
+  const { data: existing } = await connection.db.from('obligation_partners').select('id, name')
+
+  const rows: { partner_id: string; share_percent: number }[] = []
+  for (const partner of named) {
+    const name = partner.name.trim()
+    let id = (existing ?? []).find((row) => String(row.name).trim() === name)?.id
+
+    if (!id) {
+      const { data, error } = await connection.db
+        .from('obligation_partners')
+        .insert({ user_id: connection.userId, name })
+        .select()
+        .single()
+      if (error) throw error
+      id = data.id as string
+      existing?.push({ id: data.id, name: data.name })
+    }
+
+    rows.push({ partner_id: id, share_percent: partner.share_percent })
+  }
+
+  const out = named.map((p) => ({
+    name: p.name.trim(),
+    share_percent: p.share_percent,
+    owed: Math.round(((total * p.share_percent) / 100) * 100) / 100,
+  }))
+
+  return { mine, out, rows }
 }
 
 function requireDate(value: string, field: string): string {
@@ -985,51 +1050,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const connection = await connect()
       const { obligation } = await findObligation(connection, input.obligation)
 
-      const named = input.partners.filter((p) => p.name.trim())
-      const duplicate = named.find(
-        (p, i) => named.findIndex((q) => q.name.trim() === p.name.trim()) !== i,
+      const { mine, out, rows } = await resolveShares(
+        connection,
+        input.partners,
+        Number(obligation.total_amount),
       )
-      if (duplicate) {
-        throw new Error(`«${duplicate.name.trim()}» مذكور مرتين — اجمع حصّته في سطر واحد.`)
-      }
-
-      const partnersTotal = Math.round(named.reduce((sum, p) => sum + p.share_percent, 0) * 100) / 100
-      if (partnersTotal > 100) {
-        throw new Error(`مجموع حصص الشركاء ${partnersTotal}٪ — لا يمكن أن يتجاوز 100٪.`)
-      }
-      const mine = Math.round((100 - partnersTotal) * 100) / 100
-
-      /*
-       * الشريك يُطابَق بالاسم كما يفعل التطبيق، فلا يتضاعف «أخوي» مع كل استعمال.
-       * والمطابقة تامّة لا جزئية: «محمد» و«محمد علي» شخصان.
-       */
-      const { data: existing } = await connection.db
-        .from('obligation_partners')
-        .select('id, name')
-
-      const rows = []
-      for (const partner of named) {
-        const name = partner.name.trim()
-        let id = (existing ?? []).find((row) => String(row.name).trim() === name)?.id
-
-        if (!id) {
-          const { data, error } = await connection.db
-            .from('obligation_partners')
-            .insert({ user_id: connection.userId, name })
-            .select()
-            .single()
-          if (error) throw error
-          id = data.id
-          existing?.push({ id: data.id, name: data.name })
-        }
-
-        rows.push({
-          user_id: connection.userId,
-          obligation_id: obligation.id,
-          partner_id: id,
-          share_percent: partner.share_percent,
-        })
-      }
 
       /*
        * استبدال كامل كما يفعل التطبيق: حذفٌ ثم إدراج.
@@ -1044,7 +1069,14 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       if (clearError) throw clearError
 
       if (rows.length > 0) {
-        const { error } = await connection.db.from('obligation_partner_shares').insert(rows)
+        const { error } = await connection.db.from('obligation_partner_shares').insert(
+          rows.map((row) => ({
+            user_id: connection.userId,
+            obligation_id: obligation.id,
+            partner_id: row.partner_id,
+            share_percent: row.share_percent,
+          })),
+        )
         if (error) throw error
       }
 
@@ -1057,15 +1089,10 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
       const total = Number(obligation.total_amount)
       const currency = connection.currency
-      const out = named.map((p) => ({
-        name: p.name.trim(),
-        share_percent: p.share_percent,
-        owed: Math.round(((total * p.share_percent) / 100) * 100) / 100,
-      }))
       const myTotal = Math.round(((total * mine) / 100) * 100) / 100
 
       return ok(
-        named.length === 0
+        out.length === 0
           ? `**${obligation.name}** صار كلّه عليك: ${money(myTotal, currency)}.`
           : `شركاء **${obligation.name}**:\n` +
               out.map((p) => `- ${p.name}: ${p.share_percent}٪ = ${money(p.owed, currency)}`).join('\n') +
@@ -1077,6 +1104,208 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           my_share_percent: mine,
           my_total: myTotal,
           partners: out,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_set_commitment_partners',
+    {
+      title: 'ضبط شركاء بند شهري',
+      description: `يضبط من يشارك في بندٍ شهري ثابت وبأي نسبة: «الإنترنت منّصفينه».
+
+نظيرُ sanawi_set_partners للبنود الشهرية بدل الالتزامات، وبالقواعد نفسها:
+استبدالٌ كامل للقائمة، وحصّتي تُشتقّ من الباقي فلا يختلّ المجموع، والشركاء
+مشتركون بين الاثنين — «أخوي» في التأمين هو نفسه في الإنترنت.
+
+وأثره مباشر على لوحة الشهر: الحمل الشهري يُحسب على حصّتي لا على المبلغ الكامل.
+
+المدخلات:
+  - commitment (string): اسم البند أو معرّفه
+  - partners: قائمة { name, share_percent } — فارغة تعني «كلّه عليّ»
+
+المخرجات: my_share_percent بعد الضبط، وحصّتي بالمبلغ، وقائمة الشركاء.`,
+      inputSchema: {
+        commitment: z.string().min(1).describe('اسم البند الشهري أو معرّفه'),
+        partners: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(80),
+              share_percent: z.number().positive().max(100),
+            }),
+          )
+          .describe('قائمة فارغة ترفع كل الشركاء'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        commitment: z.string(),
+        amount: z.number(),
+        my_share_percent: z.number(),
+        my_amount: z.number(),
+        partners: z.array(
+          z.object({ name: z.string(), share_percent: z.number(), owed: z.number() }),
+        ),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+
+      const { data: rows, error: findError } = await connection.db
+        .from('fixed_commitments')
+        .select('*')
+        .eq('is_active', true)
+      if (findError) throw findError
+
+      const needle = input.commitment.trim().toLowerCase()
+      const all = (rows ?? []) as { id: string; name: string; amount: number }[]
+      const matches = all.filter(
+        (c) => c.id === input.commitment || c.name.toLowerCase().includes(needle),
+      )
+
+      if (matches.length === 0) {
+        throw new Error(
+          `لا بند شهري باسم «${input.commitment}».` +
+            (all.length > 0 ? ` الموجود: ${all.map((c) => c.name).join('، ')}.` : ''),
+        )
+      }
+      // اسمان يطابقان يعني سؤالاً لا اختياراً: ضبط الشركاء على البند الخطأ خطأ صامت.
+      if (matches.length > 1) {
+        const exact = matches.find((c) => c.name.toLowerCase() === needle)
+        if (!exact) {
+          throw new Error(
+            `«${input.commitment}» يطابق أكثر من بند: ${matches.map((c) => c.name).join('، ')}.` +
+              ' سمِّ البند بدقّة.',
+          )
+        }
+        matches.splice(0, matches.length, exact)
+      }
+      const commitment = matches[0]!
+
+      const { mine, out, rows: shareRows } = await resolveShares(
+        connection,
+        input.partners,
+        Number(commitment.amount),
+      )
+
+      const { error: clearError } = await connection.db
+        .from('commitment_partner_shares')
+        .delete()
+        .eq('commitment_id', commitment.id)
+      if (clearError) throw clearError
+
+      if (shareRows.length > 0) {
+        const { error } = await connection.db.from('commitment_partner_shares').insert(
+          shareRows.map((row) => ({
+            user_id: connection.userId,
+            commitment_id: commitment.id,
+            partner_id: row.partner_id,
+            share_percent: row.share_percent,
+          })),
+        )
+        if (error) throw error
+      }
+
+      const { error: shareError } = await connection.db
+        .from('fixed_commitments')
+        .update({ my_share_percent: mine })
+        .eq('id', commitment.id)
+      if (shareError) throw shareError
+
+      const amount = Number(commitment.amount)
+      const currency = connection.currency
+      const myAmount = Math.round(((amount * mine) / 100) * 100) / 100
+
+      return ok(
+        out.length === 0
+          ? `**${commitment.name}** صار كلّه عليك: ${money(myAmount, currency)} شهرياً.`
+          : `شركاء **${commitment.name}**:\n` +
+              out.map((p) => `- ${p.name}: ${p.share_percent}٪ = ${money(p.owed, currency)}`).join('\n') +
+              `\n\nحصّتك ${mine}٪ = ${money(myAmount, currency)} من أصل ${money(amount, currency)} شهرياً.`,
+        {
+          currency,
+          commitment: commitment.name,
+          amount,
+          my_share_percent: mine,
+          my_amount: myAmount,
+          partners: out,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_update_profile',
+    {
+      title: 'تعديل الإعدادات',
+      description: `يعدّل إعدادات الحساب: العملة، هدف الادخار الشهري، الاسم المعروض.
+
+هدف الادخار يدخل حساب الباقي للصرف: رفعُه يقلّل ما تراه متاحاً هذا الشهر.
+
+**العملة تبدّل الرمز فقط ولا تحوّل المبالغ.** الأرقام المخزَّنة تبقى كما هي،
+فتبديل ILS إلى USD يجعل 5000 شيكل تُقرأ 5000 دولاراً. لا تبدّلها إلا إن كان
+المستخدم يقصد ذلك صراحةً.
+
+المدخلات (كلها اختيارية، ما لم يُرسَل لا يُمَسّ):
+  - currency (string): رمز عملة من ثلاثة أحرف، ILS أو USD أو غيرهما
+  - monthly_savings_target (number): هدف الادخار الشهري، 0 أو أكثر
+  - display_name (string): الاسم المعروض
+
+المخرجات: الإعدادات بعد التعديل.`,
+      inputSchema: {
+        currency: z.string().length(3).optional().describe('رمز العملة، ثلاثة أحرف'),
+        monthly_savings_target: z.number().min(0).optional(),
+        display_name: z.string().min(1).max(80).optional(),
+      },
+      outputSchema: {
+        currency: z.string(),
+        monthly_savings_target: z.number(),
+        display_name: z.string().nullable(),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+
+      const patch: Partial<Profile> = {}
+      if (input.currency !== undefined) patch.currency = input.currency.toUpperCase()
+      if (input.monthly_savings_target !== undefined) {
+        patch.monthly_savings_target = input.monthly_savings_target
+      }
+      if (input.display_name !== undefined) patch.display_name = input.display_name.trim()
+
+      if (Object.keys(patch).length === 0) {
+        throw new Error('لم تُرسَل أي قيمة للتعديل.')
+      }
+
+      const { data, error } = await connection.db
+        .from('profiles')
+        .update(patch)
+        .eq('id', connection.userId)
+        .select()
+        .single()
+      if (error) throw error
+
+      const currency = String(data.currency)
+      const target = Number(data.monthly_savings_target ?? 0)
+
+      const changes = [
+        patch.currency !== undefined && `العملة صارت **${currency}**`,
+        patch.monthly_savings_target !== undefined &&
+          `هدف الادخار الشهري صار ${money(target, currency)}`,
+        patch.display_name !== undefined && `الاسم صار **${data.display_name}**`,
+      ].filter(Boolean)
+
+      return ok(
+        `${changes.join('، ')}.` +
+          (patch.currency !== undefined
+            ? '\n\n⚠️ تبديل العملة يبدّل الرمز فقط — المبالغ المخزَّنة لم تُحوَّل.'
+            : ''),
+        {
+          currency,
+          monthly_savings_target: target,
+          display_name: data.display_name ?? null,
         },
       )
     }),
