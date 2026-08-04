@@ -106,6 +106,7 @@ claude mcp add sanawi \
 | `SANAWI_EMAIL` · `SANAWI_PASSWORD` | لـ stdio | حساب واحد. لا يلزمان في وضع OAuth |
 | `SANAWI_READ_ONLY` | — | `1` يجعل أدوات الكتابة غير مسجّلة أصلاً |
 | `SANAWI_TOKEN_SECRET` | للرابط البعيد | سرّ تشفير رموز OAuth، ٣٢ حرفاً فأكثر |
+| `SANAWI_PUBLIC_URL` | — | العنوان العام المعلن. يضبطه التدفّق تلقائياً؛ اضبطه يدوياً خلف وكيلٍ آخر |
 | `SANAWI_MCP_TOKEN` | — | مفتاح ثابت لوضعٍ شخصي بحسابٍ واحد على الرابط. بديلٌ لـ OAuth لا مكمّل |
 
 ## الأدوات

@@ -90,6 +90,10 @@ jobs:
 
       # الأسرار تُضبط من هنا لا من لوحة Supabase: كتابةُ كلمة سرّ في متصفّح
       # تلفون أسهل خطأً، والقيمة الواحدة يجب أن تعيش في مكان واحد.
+      #
+      # و SANAWI_PUBLIC_URL يُبنى هنا لأن التدفّق يعرف العنوان يقيناً: وكيل
+      # Supabase يقصّ `/functions/v1` قبل أن يصل الدالّة، فلو تركناها تستنتجه
+      # أعلنت روابط ناقصة ووجد كلود 404 عند أول خطوة.
       - name: ضبط أسرار الدالّة
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -99,6 +103,7 @@ jobs:
             SANAWI_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
             SANAWI_SUPABASE_ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
             SANAWI_TOKEN_SECRET="${{ secrets.SANAWI_TOKEN_SECRET }}" \
+            SANAWI_PUBLIC_URL="https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/sanawi-mcp" \
             SANAWI_READ_ONLY="${{ inputs.read_only && '1' || '0' }}"
 
       # ‏--no-verify-jwt ضروري: كلود ليس مستخدماً في Supabase ولا يحمل JWT منها،

@@ -136,6 +136,8 @@ export interface HttpHandlerOptions {
   token: string
   /** سرّ تشفير رموز OAuth. فارغ = لا OAuth. */
   oauthSecret: string
+  /** العنوان العام المعلن. فارغ = يُستنتج من الترويسات. */
+  publicUrl?: string
   /** لحقن زمنٍ ثابت في الفحص. */
   now?: () => number
 }
@@ -143,25 +145,41 @@ export interface HttpHandlerOptions {
 /**
  * جذر الخادم كما يراه العميل.
  *
- * يُبنى من ترويسات الوكيل لا من `request.url`: الدالّة خلف وكيل Supabase ترى
- * `http://localhost` داخلياً، ورابطٌ معلَنٌ خاطئ يكسر دورة OAuth كلها لأن
- * العميل يقارن المُصدِر بما وصله.
+ * كل روابط OAuth تُبنى منه، وخطؤه يكسر الدورة كلها: العميل يقرأ عنوان خادم
+ * التفويض من هنا ويذهب إليه، فإن كان ناقصاً وجد 404 وتوقّف عند أول خطوة.
+ *
+ * ولا يكفي أن نقرأه من الطلب. Supabase يقصّ `/functions/v1` قبل أن يصل
+ * الدالّة، فترى `/sanawi-mcp` بينما العنوان العام `/functions/v1/sanawi-mcp`.
+ * حدث ذلك فعلاً في أول نشر: أُعلنت روابط ناقصة، وما كان لأي فحص محلي أن يكشفه
+ * لأن القصّ يقع في وكيلٍ لا يوجد إلا هناك.
+ *
+ * فالترتيب: إعدادٌ صريح أولاً (`SANAWI_PUBLIC_URL` — يضبطه التدفّق وهو يعرف
+ * العنوان يقيناً)، ثم استنتاجٌ من الترويسات يعوّض قصّ Supabase، ثم الطلب نفسه.
  */
-function baseUrlOf(request: Request, url: URL): string {
+function baseUrlOf(request: Request, url: URL, declared: string): string {
+  if (declared) return declared.replace(/\/+$/, '')
+
   const host = request.headers.get('x-forwarded-host') ?? url.host
-  const proto = request.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
+  const proto =
+    request.headers.get('x-forwarded-proto') ?? (host.includes('localhost') ? 'http' : 'https')
 
   // مسارات OAuth ومسار الاكتشاف ليست جزءاً من هوية المورد — تُقصّ منها.
-  const path = url.pathname
+  let path = url.pathname
     .replace(/\/(authorize|token|register)$/, '')
     .replace(/\/\.well-known\/[^/]+$/, '')
     .replace(/\/+$/, '')
+
+  // تعويض ما يقصّه وكيل Supabase حين لا يُضبط العنوان صراحةً.
+  if (host.endsWith('.supabase.co') && !path.startsWith('/functions/v1')) {
+    path = `/functions/v1${path}`
+  }
 
   return `${proto}://${host}${path}`
 }
 
 export function createFetchHandler(options: HttpHandlerOptions) {
   const { config, connect, token, oauthSecret } = options
+  const publicUrl = (options.publicUrl ?? '').trim()
   const clock = options.now ?? (() => Date.now())
 
   /** يحدّد بأيّ هويةٍ يعمل هذا النداء: مستخدمُ OAuth، أم الحساب الشخصي. */
@@ -192,7 +210,7 @@ export function createFetchHandler(options: HttpHandlerOptions) {
        * كلود أين يسأل عن خادم التفويض، فيفتح صفحة الدخول من تلقائه. حذفُها
        * يجعل الرفض جداراً مسدوداً بدل أن يكون دعوةً لتسجيل الدخول.
        */
-      const resource = `${baseUrlOf(request, url)}/.well-known/oauth-protected-resource`
+      const resource = `${baseUrlOf(request, url, publicUrl)}/.well-known/oauth-protected-resource`
       return new Response(
         JSON.stringify({ error: 'unauthorized', error_description: 'سجّل دخولك أولاً.' }),
         {
@@ -223,7 +241,7 @@ export function createFetchHandler(options: HttpHandlerOptions) {
       const context: OAuthContext = {
         config,
         secret: oauthSecret,
-        baseUrl: baseUrlOf(request, url),
+        baseUrl: baseUrlOf(request, url, publicUrl),
         now: clock(),
       }
 
@@ -258,7 +276,7 @@ export function createFetchHandler(options: HttpHandlerOptions) {
       }
       // متصفّحٌ فتح الرابط: صفحةٌ تشرح ما هذا بدل JSON لا يعني له شيئاً.
       if ((request.headers.get('accept') ?? '').includes('text/html') && oauthSecret) {
-        return landing({ config, secret: oauthSecret, baseUrl: baseUrlOf(request, url), now: clock() })
+        return landing({ config, secret: oauthSecret, baseUrl: baseUrlOf(request, url, publicUrl), now: clock() })
       }
       return new Response(
         JSON.stringify({
@@ -364,7 +382,13 @@ export function createSanawiFetchHandler(): (request: Request) => Promise<Respon
     // جلسة الحساب الواحد تُبنى فقط حين يوجد وضعٌ شخصي فعلاً.
     const personal = token && config.email && config.password ? createSession(config) : undefined
 
-    return createFetchHandler({ config, connect: personal, token, oauthSecret })
+    return createFetchHandler({
+      config,
+      connect: personal,
+      token,
+      oauthSecret,
+      publicUrl: (env('SANAWI_PUBLIC_URL') ?? '').trim(),
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     return async () =>

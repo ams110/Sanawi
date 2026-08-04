@@ -618,6 +618,52 @@ console.log('\n── OAuth متعدّد المستخدمين ──\n')
   }
   if (!asMeta.code_challenge_methods_supported?.includes('S256')) fail('S256 غير معلن')
 
+  /*
+   * الروابط المعلَنة خلف وكيل Supabase.
+   *
+   * وكيل Supabase يقصّ `/functions/v1` قبل أن يصل الدالّة، فتُعلن الدالّة
+   * روابط ناقصة ويجد كلود 404 عند أول خطوة. حدث ذلك في أول نشر حقيقي.
+   * هنا نحاكي الترويسات نفسها فيصير عطلاً يُكتشف قبل النشر لا بعده.
+   */
+  {
+    const proxied = (path, headers = {}) =>
+      handler(
+        new Request(`http://127.0.0.1${path}`, {
+          headers: {
+            'x-forwarded-host': 'demo.supabase.co',
+            'x-forwarded-proto': 'https',
+            ...headers,
+          },
+        }),
+      )
+
+    const meta = await (await proxied('/sanawi-mcp/.well-known/oauth-protected-resource')).json()
+    expect(
+      'العنوان المعلَن يعوّض ما يقصّه وكيل Supabase',
+      meta.resource,
+      'https://demo.supabase.co/functions/v1/sanawi-mcp',
+    )
+
+    const as = await (await proxied('/sanawi-mcp/.well-known/oauth-authorization-server')).json()
+    expect(
+      'وعنوان التفويض كذلك',
+      as.authorization_endpoint,
+      'https://demo.supabase.co/functions/v1/sanawi-mcp/authorize',
+    )
+
+    // وإعدادٌ صريح يغلب الاستنتاج — هو ما يضبطه التدفّق وهو يعرف العنوان يقيناً.
+    const declared = createFetchHandler({
+      config: { url: oauthFake.url, anonKey: oauthFake.anonKey, email: '', password: '', readOnly: false },
+      token: '',
+      oauthSecret: SECRET,
+      publicUrl: 'https://sanawi.example/mcp/',
+    })
+    const explicit = await (
+      await declared(new Request('http://127.0.0.1/.well-known/oauth-protected-resource'))
+    ).json()
+    expect('الإعداد الصريح يغلب', explicit.resource, 'https://sanawi.example/mcp')
+  }
+
   // ٢. تسجيل ديناميكي
   const registration = await (
     await fetch(`${base}/register`, {
