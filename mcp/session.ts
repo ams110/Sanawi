@@ -19,6 +19,7 @@ export type Db = SupabaseClient<Database>
 export interface Config {
   url: string
   anonKey: string
+  /** حساب واحد للوضع الشخصي (stdio أو مفتاح ثابت). فارغ مع OAuth. */
   email: string
   password: string
   /** يخفي أدوات الكتابة كلها — لا يعطّلها فقط. */
@@ -39,7 +40,11 @@ function readEnv(primary: string, fallback?: string): string | undefined {
 
 const TRUTHY = new Set(['1', 'true', 'yes', 'on'])
 
-export function readConfig(): Config {
+/**
+ * `requireAccount` يفرّق بين وضعين: خادم stdio يعمل بحساب واحد فيلزمه بريدٌ
+ * وكلمة سرّ، وخادم OAuth يدخل كلُّ مستخدمٍ إليه بنفسه فلا يلزمه حسابٌ في إعداده.
+ */
+export function readConfig(options: { requireAccount?: boolean } = {}): Config {
   const url = readEnv('SANAWI_SUPABASE_URL', 'VITE_SUPABASE_URL')
   const anonKey = readEnv('SANAWI_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY')
   const email = readEnv('SANAWI_EMAIL')
@@ -48,8 +53,7 @@ export function readConfig(): Config {
   const missing = [
     !url && 'SANAWI_SUPABASE_URL',
     !anonKey && 'SANAWI_SUPABASE_ANON_KEY',
-    !email && 'SANAWI_EMAIL',
-    !password && 'SANAWI_PASSWORD',
+    ...(options.requireAccount ? [!email && 'SANAWI_EMAIL', !password && 'SANAWI_PASSWORD'] : []),
   ].filter(Boolean)
 
   if (missing.length > 0) {
@@ -75,8 +79,8 @@ export function readConfig(): Config {
   return {
     url: url!,
     anonKey: anonKey!,
-    email: email!,
-    password: password!,
+    email: email ?? '',
+    password: password ?? '',
     readOnly: TRUTHY.has((env('SANAWI_READ_ONLY') ?? '').trim().toLowerCase()),
   }
 }
@@ -95,6 +99,43 @@ export interface Connection {
  * واحداً لا عشرة. وإن فشل الدخول نُفرغ الوعد ليُعاد المحاولة في النداء التالي،
  * فلا تبقى الجلسة عالقة على فشل عابر في الشبكة.
  */
+/**
+ * جلسة مستخدمٍ بعينه من رمز وصوله.
+ *
+ * الرمز يُمرَّر في ترويسة كل نداء إلى PostgREST، فتنطبق سياسات RLS على صاحبه
+ * هو — لا على حسابٍ واحدٍ مشترك. هذا ما يجعل خادماً واحداً يخدم كل مستخدمي
+ * التطبيق بلا أن يرى أحدهم صفّاً لغيره.
+ *
+ * ولا نسأل الشبكة عن هوية صاحب الرمز: `sub` مقروء من داخل JWT، والتحقّق من
+ * التوقيع تفعله Supabase عند أول استعلام. سؤالٌ إضافي هنا يضيف رحلةَ شبكةٍ
+ * على كل نداء بلا أن يضيف أماناً.
+ */
+export function createUserSession(
+  config: Config,
+  accessToken: string,
+  userId: string,
+): () => Promise<Connection> {
+  const db: Db = createClient<Database>(config.url, config.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  })
+
+  let pending: Promise<Connection> | null = null
+
+  return function connect(): Promise<Connection> {
+    if (!pending) {
+      pending = (async () => {
+        const { data } = await db.from('profiles').select('currency').eq('id', userId).maybeSingle()
+        return { db, userId, currency: data?.currency ?? 'ILS' }
+      })().catch((error: unknown) => {
+        pending = null
+        throw error
+      })
+    }
+    return pending
+  }
+}
+
 export function createSession(config: Config): () => Promise<Connection> {
   const db: Db = createClient<Database>(config.url, config.anonKey, {
     auth: {

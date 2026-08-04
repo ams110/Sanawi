@@ -555,7 +555,259 @@ console.log('\n── النقل البعيد (HTTP) ──\n')
   if (!failed) console.log('✓ النقل البعيد يعمل، والمفتاح يحرس الرابط فعلاً.')
 }
 
-/* ── 6. نداء حقيقي، إن وُجد حساب ──────────────────────────── */
+/* ── 6. OAuth: كل مستخدم بحسابه ───────────────────────────── */
+
+console.log('\n── OAuth متعدّد المستخدمين ──\n')
+{
+  const { createServer } = await import('node:http')
+  const { createFetchHandler } = await import(new URL('mcp/dist/mcp/http.js', root).href)
+  const { StreamableHTTPClientTransport } = await import(
+    '@modelcontextprotocol/sdk/client/streamableHttp.js'
+  )
+  const { createHash, randomBytes } = await import('node:crypto')
+
+  const oauthFake = await startFakeSupabase()
+  const SECRET = 'a-secret-long-enough-for-the-check-32+'
+  const handler = createFetchHandler({
+    config: {
+      url: oauthFake.url,
+      anonKey: oauthFake.anonKey,
+      email: '',
+      password: '',
+      readOnly: false,
+    },
+    token: '',
+    oauthSecret: SECRET,
+  })
+
+  const bridge = createServer(async (req, res) => {
+    const chunks = []
+    for await (const chunk of req) chunks.push(chunk)
+    const body = Buffer.concat(chunks)
+    const request = new Request(`http://127.0.0.1${req.url}`, {
+      method: req.method,
+      headers: req.headers,
+      body: body.length > 0 ? body : undefined,
+      redirect: 'manual',
+    })
+    const response = await handler(request)
+    res.writeHead(response.status, Object.fromEntries(response.headers))
+    res.end(Buffer.from(await response.arrayBuffer()))
+  })
+  await new Promise((r) => bridge.listen(0, '127.0.0.1', r))
+  const base = `http://127.0.0.1:${bridge.address().port}`
+
+  // ١. الاكتشاف: بلا رمز يجب أن يدلّ الردّ على خادم التفويض لا أن يسدّ الباب.
+  const anonymous = await fetch(`${base}/`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  })
+  expect('بلا رمز يُرفض', anonymous.status, 401)
+  const challengeHeader = anonymous.headers.get('www-authenticate') ?? ''
+  if (!challengeHeader.includes('resource_metadata=')) {
+    fail(`WWW-Authenticate بلا resource_metadata — كلود لن يعرف أين يسجّل الدخول: ${challengeHeader}`)
+  }
+
+  const rsMeta = await (await fetch(`${base}/.well-known/oauth-protected-resource`)).json()
+  const asUrl = rsMeta.authorization_servers?.[0]
+  if (!asUrl) fail('بيانات المورد بلا خادم تفويض')
+  const asMeta = await (await fetch(`${base}/.well-known/oauth-authorization-server`)).json()
+  for (const field of ['authorization_endpoint', 'token_endpoint', 'registration_endpoint']) {
+    if (!asMeta[field]) fail(`بيانات خادم التفويض بلا ${field}`)
+  }
+  if (!asMeta.code_challenge_methods_supported?.includes('S256')) fail('S256 غير معلن')
+
+  // ٢. تسجيل ديناميكي
+  const registration = await (
+    await fetch(`${base}/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+        client_name: 'check',
+      }),
+    })
+  ).json()
+  if (!registration.client_id) fail('التسجيل بلا client_id')
+
+  /** يمرّ بدورة OAuth كاملة كما يفعل كلود، ويعيد رمز الوصول. */
+  async function authorize(email, password) {
+    const verifier = randomBytes(32).toString('base64url')
+    const challenge = createHash('sha256').update(verifier).digest('base64url')
+    const redirectUri = 'https://claude.ai/api/mcp/auth_callback'
+
+    const query = new URLSearchParams({
+      response_type: 'code',
+      client_id: registration.client_id,
+      redirect_uri: redirectUri,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: 'xyz',
+    })
+
+    const page = await fetch(`${base}/authorize?${query}`)
+    if (page.status !== 200) fail(`صفحة الدخول ردّت ${page.status}`)
+    if (!(await page.text()).includes('كلمة السر')) fail('صفحة الدخول بلا حقل كلمة سر')
+
+    const form = new URLSearchParams(query)
+    form.set('email', email)
+    form.set('password', password)
+
+    const submitted = await fetch(`${base}/authorize`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form,
+      redirect: 'manual',
+    })
+    if (submitted.status !== 302) {
+      fail(`الدخول لم يحوّل — ردّ ${submitted.status}`)
+      return null
+    }
+
+    const location = new URL(submitted.headers.get('location'))
+    expect('الحالة تعود كما أُرسلت', location.searchParams.get('state'), 'xyz')
+    const code = location.searchParams.get('code')
+
+    const tokenResponse = await fetch(`${base}/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        code_verifier: verifier,
+        redirect_uri: redirectUri,
+        client_id: registration.client_id,
+      }),
+    })
+    const tokens = await tokenResponse.json()
+    if (!tokens.access_token) fail(`تبادل الرمز فشل: ${JSON.stringify(tokens)}`)
+    return { ...tokens, verifier, code, redirectUri }
+  }
+
+  // ٣. كلمة سر خاطئة لا تعطي رمزاً
+  const badForm = new URLSearchParams({
+    response_type: 'code',
+    client_id: registration.client_id,
+    redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+    code_challenge: createHash('sha256').update('v').digest('base64url'),
+    code_challenge_method: 'S256',
+    email: oauthFake.email,
+    password: 'wrong',
+  })
+  const rejected = await fetch(`${base}/authorize`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: badForm,
+    redirect: 'manual',
+  })
+  expect('كلمة سر خاطئة تُرفض', rejected.status, 401)
+
+  // ٤. رابط عودة غير مسجّل يُرفض — وإلا سُلّم الرمز لموقع غريب
+  const evil = new URLSearchParams({
+    response_type: 'code',
+    client_id: registration.client_id,
+    redirect_uri: 'https://evil.example/callback',
+    code_challenge: createHash('sha256').update('v').digest('base64url'),
+    code_challenge_method: 'S256',
+  })
+  expect('رابط عودة غريب يُرفض', (await fetch(`${base}/authorize?${evil}`)).status, 400)
+
+  const first = await authorize(oauthFake.email, oauthFake.password)
+
+  // ٥. PKCE: نفس الرمز بمُتحقّقٍ خاطئ لا يُصرَف
+  if (first) {
+    const replay = await fetch(`${base}/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: first.code,
+        code_verifier: randomBytes(32).toString('base64url'),
+        redirect_uri: first.redirectUri,
+      }),
+    })
+    expect('PKCE يرفض مُتحقّقاً خاطئاً', replay.status, 400)
+  }
+
+  // ٦. الأدوات تعمل بالرمز
+  const asUser = new Client({ name: 'sanawi-check-oauth', version: '1.0.0' })
+  await asUser.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/`), {
+      requestInit: { headers: { authorization: `Bearer ${first.access_token}` } },
+    }),
+  )
+  expect('عدد الأدوات عبر OAuth', (await asUser.listTools()).tools.length, tools.length)
+
+  await asUser.callTool({
+    name: 'sanawi_create_obligation',
+    arguments: { name: 'سرّي', total_amount: 4800, next_due_date: inMonths(12) },
+  })
+  const mine = await asUser.callTool({ name: 'sanawi_list_obligations', arguments: {} })
+  expect('الالتزام أُنشئ', mine.structuredContent?.count, 1)
+  expect('العملة من ملفي أنا', mine.structuredContent?.currency, 'ILS')
+
+  // ٧. العزل: مستخدم ثانٍ لا يرى صفّ الأول
+  const second = await authorize(oauthFake.other.email, oauthFake.other.password)
+  const asOther = new Client({ name: 'sanawi-check-oauth-2', version: '1.0.0' })
+  await asOther.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/`), {
+      requestInit: { headers: { authorization: `Bearer ${second.access_token}` } },
+    }),
+  )
+  const theirs = await asOther.callTool({ name: 'sanawi_list_obligations', arguments: {} })
+  expect('المستخدم الثاني لا يرى شيئاً', theirs.structuredContent?.count, 0)
+  expect('وعملته عملته هو', theirs.structuredContent?.currency, 'USD')
+
+  if (first.access_token === second.access_token) fail('رمزا المستخدمين متطابقان!')
+
+  // ٨. التجديد يعطي رمزاً جديداً يعمل
+  const refreshed = await (
+    await fetch(`${base}/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: first.refresh_token,
+      }),
+    })
+  ).json()
+  if (!refreshed.access_token) fail(`التجديد فشل: ${JSON.stringify(refreshed)}`)
+
+  const afterRefresh = await fetch(`${base}/`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      authorization: `Bearer ${refreshed.access_token}`,
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list' }),
+  })
+  expect('الرمز المجدَّد يعمل', afterRefresh.status, 200)
+
+  // ٩. رمزٌ مزوّر أو موقّع بسرٍّ آخر لا يمرّ
+  const forged = await createFetchHandler({
+    config: { url: oauthFake.url, anonKey: oauthFake.anonKey, email: '', password: '', readOnly: false },
+    token: '',
+    oauthSecret: 'a-different-secret-also-long-enough!!',
+  })(
+    new Request(`${base}/`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${first.access_token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    }),
+  )
+  expect('رمزٌ بسرٍّ آخر يُرفض', forged.status, 401)
+
+  await asUser.close()
+  await asOther.close()
+  await new Promise((r) => bridge.close(r))
+  await oauthFake.stop()
+
+  if (!failed) console.log('✓ OAuth كامل، وكل مستخدم محبوس في بياناته.')
+}
+
+/* ── 7. نداء حقيقي، إن وُجد حساب ──────────────────────────── */
 
 if (hasAccount) {
   console.log('\nنداء sanawi_month_overview على الحساب الحقيقي…')

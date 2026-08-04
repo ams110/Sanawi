@@ -24,15 +24,13 @@ jobs:
       # في كلود بلا سبب. الفحص هنا يسمّي السرّ الناقص بالاسم.
       - name: التحقّق من الأسرار
         env:
-          TOKEN: ${{ secrets.SANAWI_MCP_TOKEN }}
+          TOKEN: ${{ secrets.SANAWI_TOKEN_SECRET }}
           SECRETS: |
             SUPABASE_ACCESS_TOKEN=${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
             SUPABASE_PROJECT_REF=${{ secrets.SUPABASE_PROJECT_REF != '' }}
             VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL != '' }}
             VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY != '' }}
-            SANAWI_EMAIL=${{ secrets.SANAWI_EMAIL != '' }}
-            SANAWI_PASSWORD=${{ secrets.SANAWI_PASSWORD != '' }}
-            SANAWI_MCP_TOKEN=${{ secrets.SANAWI_MCP_TOKEN != '' }}
+            SANAWI_TOKEN_SECRET=${{ secrets.SANAWI_TOKEN_SECRET != '' }}
         run: |
           missing=""
           while IFS='=' read -r name present; do
@@ -47,13 +45,13 @@ jobs:
             exit 1
           fi
 
-          # المفتاح القصير ليس مفتاحاً: الرابط كلمةُ سرّ وحيدة تحرس بيانات مالية.
-          if [ ${#TOKEN} -lt 24 ]; then
-            echo "::error::SANAWI_MCP_TOKEN أقصر من 24 حرفاً — الرابط هو كلمة السر الوحيدة."
+          # بهذا السرّ تُشفَّر رموز كل المستخدمين، فقِصَره يكسر الجميع دفعةً واحدة.
+          if [ ${#TOKEN} -lt 32 ]; then
+            echo "::error::SANAWI_TOKEN_SECRET أقصر من 32 حرفاً — به تُشفَّر رموز كل المستخدمين."
             exit 1
           fi
 
-          echo "الأسرار السبعة موجودة." >> $GITHUB_STEP_SUMMARY
+          echo "الأسرار الخمسة موجودة." >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/setup-node@v4
         with:
@@ -100,13 +98,12 @@ jobs:
             --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
             SANAWI_SUPABASE_URL="${{ secrets.VITE_SUPABASE_URL }}" \
             SANAWI_SUPABASE_ANON_KEY="${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
-            SANAWI_EMAIL="${{ secrets.SANAWI_EMAIL }}" \
-            SANAWI_PASSWORD="${{ secrets.SANAWI_PASSWORD }}" \
-            SANAWI_MCP_TOKEN="${{ secrets.SANAWI_MCP_TOKEN }}" \
+            SANAWI_TOKEN_SECRET="${{ secrets.SANAWI_TOKEN_SECRET }}" \
             SANAWI_READ_ONLY="${{ inputs.read_only && '1' || '0' }}"
 
-      # ‏--no-verify-jwt ضروري: كلود ليس مستخدماً في Supabase ولا يحمل JWT منها.
-      # الحارس هو SANAWI_MCP_TOKEN داخل الدالّة، ويرفض أي نداء بلا مفتاح.
+      # ‏--no-verify-jwt ضروري: كلود ليس مستخدماً في Supabase ولا يحمل JWT منها،
+      # فبوّابتها لا تصلح حارساً. الحارس هو OAuth داخل الدالّة: نداءٌ بلا رمزٍ
+      # صالح يُردّ 401 مع عنوان خادم التفويض، فيفتح كلود صفحة الدخول.
       - name: نشر الدالّة
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -119,11 +116,13 @@ jobs:
         run: |
           echo "### خادم MCP منشور" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo 'أضِف هذا الرابط في كلود ← Settings ← Connectors ← Add custom connector:' >> $GITHUB_STEP_SUMMARY
+          echo 'الرابط — واحدٌ لكل المستخدمين، ولا سرّ فيه:' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/sanawi-mcp/<SANAWI_MCP_TOKEN>" >> $GITHUB_STEP_SUMMARY
+          echo "https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co/functions/v1/sanawi-mcp" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo 'ضع مكان `<SANAWI_MCP_TOKEN>` قيمةَ السرّ نفسها. الرابط كلمةُ سرّ — لا تشاركه.' >> $GITHUB_STEP_SUMMARY
+          echo 'في كلود: Settings ← Connectors ← Add custom connector، والصق العنوان.' >> $GITHUB_STEP_SUMMARY
+          echo 'سيفتح كلود صفحة دخول سنوي — كل مستخدم يدخل بحسابه ويرى بياناته وحده.' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
           echo "الوضع: ${{ inputs.read_only && 'قراءة فقط' || 'قراءة وكتابة' }}" >> $GITHUB_STEP_SUMMARY
