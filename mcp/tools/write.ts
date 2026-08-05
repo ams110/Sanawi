@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import type {
+  Asset,
   BillPayment,
   FundDeposit,
   Obligation,
@@ -793,6 +794,12 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           .describe('عدد الدفعات المتبقية بما فيها هذا الشهر'),
         ends_on: z.string().optional().describe('YYYY-MM-DD — شهر آخر دفعة'),
         total_amount: z.number().min(0).optional().describe('سعر الشراء الكامل، للسياق'),
+        annual_interest_percent: z
+          .number()
+          .min(0)
+          .max(100)
+          .default(0)
+          .describe('الفائدة السنوية على القرض — عليها يُرتَّب سداد الديون'),
         day_of_month: z.number().int().min(1).max(31).optional(),
       },
       outputSchema: {
@@ -842,6 +849,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           amount: input.amount,
           ends_on: endsOn,
           total_amount: input.total_amount ?? null,
+          annual_interest_percent: input.annual_interest_percent,
           day_of_month: input.day_of_month ?? null,
           is_active: true,
         })
@@ -1363,6 +1371,153 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           currency,
           monthly_savings_target: target,
           display_name: data.display_name ?? null,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_save_asset',
+    {
+      title: 'تسجيل أصل أو تحديث قيمته',
+      description: `يسجّل أصلاً جديداً، أو يحدّث قيمة أصلٍ موجود إن طابق الاسم.
+
+الأصل هو ما يملكه المستخدم: كاش، ادخار، محفظة، عقار، دَينٌ له عند غيره.
+وهو الطرف الذي يُبنى عليه صافي الثروة ورقم الحرية، فبلا أصولٍ مسجّلة يبدو
+كلاهما صفراً وليس كذلك.
+
+التحديث بالاسم لا بمعرّف: المستخدم يقول «الكاش صار 15 ألف» ولا يحمل معرّفات.
+والمطابقة تامّة لا جزئية — «كاش» لا تطابق «كاش الشغل»، فلا يُكتب فوق أصلٍ لم يُقصد.
+
+على أصلٍ موجود لا يُمَسّ إلا ما أُرسل: «الكاش صار 25 ألف» تحدّث المبلغ وحده
+وتُبقي نوعه وعلامة صندوق الطوارئ عليه. أمّا على أصلٍ جديد فللحقول الغائبة
+قيمٌ افتراضية: kind=cash و is_liquid=true والباقي صفر أو false.
+
+المدخلات:
+  - name (string): اسم الأصل
+  - amount (number): القيمة الحالية، صفر فأكثر
+  - kind: cash | savings | investment | property | receivable | other
+  - annual_return_percent (number): العائد السنوي المتوقّع
+  - is_liquid (boolean): هل يُصرف هذا الأسبوع
+  - is_emergency_fund (boolean): هل هو صندوق الطوارئ.
+    صندوق طوارئ غير سائل تناقض، فتُهمَل العلامة مع is_liquid=false.
+
+المخرجات: الأصل بعد الحفظ، وهل أُنشئ أم حُدِّث.`,
+      inputSchema: {
+        name: z.string().min(1).max(80).describe('اسم الأصل'),
+        amount: z.number().min(0).describe('القيمة الحالية'),
+        /*
+         * بلا `default()` عمداً.
+         *
+         * القيمة الافتراضية تصل إلى المعالج كأنها مُرسَلة، فيصير كل تحديثٍ
+         * لمبلغٍ محوًا صامتاً لكل ما عداه: «الكاش صار 25 ألف» كانت تُسقط عنه
+         * علامة صندوق الطوارئ. الغياب يجب أن يبقى غياباً حتى يمكن التمييز.
+         */
+        kind: z
+          .enum(['cash', 'savings', 'investment', 'property', 'receivable', 'other'])
+          .optional()
+          .describe('نوع الأصل — افتراضياً cash للأصل الجديد'),
+        annual_return_percent: z.number().min(-100).max(100).optional(),
+        is_liquid: z.boolean().optional(),
+        is_emergency_fund: z.boolean().optional(),
+      },
+      outputSchema: {
+        currency: z.string(),
+        created: z.boolean(),
+        asset: z.object({
+          id: z.string(),
+          name: z.string(),
+          kind: z.string(),
+          amount: z.number(),
+          is_liquid: z.boolean(),
+          is_emergency_fund: z.boolean(),
+          annual_return_percent: z.number(),
+        }),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const currency = connection.currency
+      const name = input.name.trim()
+
+      const { data: existing, error: findErr } = await connection.db
+        .from('assets')
+        .select('*')
+        .eq('user_id', connection.userId)
+        .eq('is_active', true)
+        .eq('name', name)
+        .maybeSingle()
+      if (findErr) throw findErr
+      const current = (existing as Asset | null) ?? null
+
+      // السيولة والعلامة يُقرَآن من المُرسَل إن وُجد، وإلا من الصفّ القائم،
+      // وإلا من الافتراضي. والتناقض يُحسم أخيراً: لا صندوق طوارئ بلا سيولة.
+      const isLiquid = input.is_liquid ?? current?.is_liquid ?? true
+      const wantsEmergency = input.is_emergency_fund ?? current?.is_emergency_fund ?? false
+      const isEmergency = wantsEmergency && isLiquid
+
+      const saved = current
+        ? await connection.db
+            .from('assets')
+            .update({
+              amount: input.amount,
+              ...(input.kind !== undefined ? { kind: input.kind } : {}),
+              ...(input.annual_return_percent !== undefined
+                ? { annual_return_percent: input.annual_return_percent }
+                : {}),
+              is_liquid: isLiquid,
+              is_emergency_fund: isEmergency,
+            })
+            .eq('id', current.id)
+            .select()
+            .single()
+        : await connection.db
+            .from('assets')
+            // `is_active` صريحٌ لا متروكٌ لقيمة العمود الافتراضية: الصفّ
+            // المُعاد من الإدراج هو ما يقرأه ما بعده، وحقلٌ غائبٌ فيه يسقط من
+            // كل مرشّحٍ لاحق.
+            .insert({
+              user_id: connection.userId,
+              name,
+              kind: input.kind ?? 'cash',
+              amount: input.amount,
+              annual_return_percent: input.annual_return_percent ?? 0,
+              is_liquid: isLiquid,
+              is_emergency_fund: isEmergency,
+              is_active: true,
+            })
+            .select()
+            .single()
+      if (saved.error) throw saved.error
+
+      const asset = saved.data as Asset
+      const created = !current
+
+      return ok(
+        [
+          created
+            ? `سُجِّل **${asset.name}** بـ ${money(Number(asset.amount), currency)}.`
+            : `**${asset.name}** صار ${money(Number(asset.amount), currency)}.`,
+          isEmergency ? 'ومعلَّمٌ صندوقَ طوارئ.' : null,
+          wantsEmergency && !isLiquid
+            ? '⚠️ لم يُعلَّم صندوقَ طوارئ: الصندوق لا يكون إلا سائلاً.'
+            : null,
+        ]
+          .filter((line) => line !== null)
+          .join(' '),
+        {
+          currency,
+          created,
+          asset: {
+            id: asset.id,
+            name: asset.name,
+            kind: asset.kind,
+            amount: Number(asset.amount),
+            is_liquid: asset.is_liquid,
+            is_emergency_fund: asset.is_emergency_fund,
+            annual_return_percent: Number(asset.annual_return_percent),
+          },
         },
       )
     }),

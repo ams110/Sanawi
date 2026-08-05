@@ -4,7 +4,7 @@
  * لماذا لا نفحص على القاعدة الحقيقية؟ نفعل، حين تتوفّر (`npm run check:mcp`
  * يلتقط بيانات .env). لكن فحصاً يشترط حساباً وشبكةً لا يُشغَّل في CI ولا على
  * جهاز مساهم جديد، فيبقى الخادم بلا شبكة أمان في أكثر الأوقات حاجةً إليها.
- * هذا الملف يجعل الفحص الكامل — سبع عشرة أداة، قراءةً وكتابةً — يعمل في أي
+ * هذا الملف يجعل الفحص الكامل — كل الأدوات، قراءةً وكتابةً — يعمل في أي
  * مكان بلا إعداد.
  *
  * يغطّي ما يستعمله الخادم من PostgREST لا أكثر: eq و gte و order و limit،
@@ -94,6 +94,8 @@ function seed() {
       { id: randomUUID(), user_id: null, name_ar: 'أوتوماتيك', icon: '🔁', is_automatic: true, sort_order: 20 },
     ],
     income_entries: [],
+    assets: [],
+    net_worth_snapshots: [],
     commitment_partner_shares: [],
     commitment_templates: [
       {
@@ -210,16 +212,38 @@ function billAverages(db) {
  * اللوحة الموحّدة تقرأ الحمل من هنا لا من `fixed_commitments`: هذا يحمل حصّتي
  * بالشيكل ويعرف أيَّ بندٍ انتهى قسطه، وذاك يعطي المبلغ الكامل لكل بندٍ حيّاً
  * كان أو ميتاً.
+ *
+ * وهو نظير العرض الحقيقي حرفاً بحرف — بما في ذلك أسماء أعمدته. العرض في
+ * القاعدة يسمّي المفتاح `commitment_id` لا `id`، ويحسب `my_amount` و
+ * `payments_left`. نسخةٌ هنا تكتفي بنشر الصف كما هو تجعل كل قارئٍ لتلك
+ * الأعمدة يقرأ `undefined` ويمرّ الفحص بأصفارٍ تبدو نجاحاً — وهي بالضبط
+ * عائلة الأخطاء التي بُنيت لأجلها scripts/lib/checks.mjs.
  */
 function commitmentDetails(db) {
+  const now = new Date()
   return db.fixed_commitments
     .filter((c) => c.is_active)
     .map((c) => {
       const shares = db.commitment_partner_shares.filter((s) => s.commitment_id === c.id)
       const partnersPercent = shares.reduce((t, s) => t + Number(s.share_percent), 0)
+      const mySharePercent = Number(c.my_share_percent ?? 100 - partnersPercent) || 100
+
+      // العدّ يشمل شهر الانتهاء نفسه، كما في العرض الحقيقي.
+      let paymentsLeft = null
+      if (c.ends_on) {
+        const end = new Date(`${c.ends_on}T00:00:00`)
+        const months =
+          (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth()) + 1
+        paymentsLeft = Math.max(0, months)
+      }
+
       return {
         ...c,
-        my_share_percent: Number(c.my_share_percent ?? 100 - partnersPercent) || 100,
+        commitment_id: c.id,
+        annual_interest_percent: Number(c.annual_interest_percent ?? 0),
+        my_share_percent: mySharePercent,
+        my_amount: round2((Number(c.amount) * mySharePercent) / 100),
+        payments_left: paymentsLeft,
         partner_count: shares.length,
       }
     })

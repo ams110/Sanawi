@@ -11,6 +11,7 @@ const commitment = (id: string) => ({
   icon: '💡',
   ends_on: null,
   total_amount: null,
+  annual_interest_percent: 0,
   my_share_percent: 100,
   is_active: true,
   created_at: '',

@@ -14,6 +14,7 @@ import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { BillsScreen } from '@/features/bills/BillsScreen'
 import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
+import { WealthScreen } from '@/features/wealth/WealthScreen'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
@@ -87,6 +88,15 @@ function Shell() {
           <Route path="/bills" element={<BillsScreen />} />
           <Route path="/expenses" element={<ExpensesScreen />} />
           <Route path="/insights" element={<InsightsScreen />} />
+          {/*
+           * الثروة مسارٌ لا تبويب.
+           *
+           * التنقّل السفلي محسوبٌ على سبعة: ثامنٌ يترك 48px لكل تبويب فتُقصّ
+           * «الفواتير». والشاشة لا تُفتح كل يوم كما تُفتح المصاريف — تُفتح
+           * حين يسأل صاحبها عن مساره، فبطاقةٌ في لوحة الشهر تكفي وتصله
+           * بالسياق الذي يجعل الرقم مفهوماً.
+           */}
+          <Route path="/wealth" element={<WealthScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
           <Route path="/obligations/:id" element={<ObligationDetail />} />

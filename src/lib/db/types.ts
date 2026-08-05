@@ -23,6 +23,46 @@ export type Profile = {
   theme_preference: ThemePreference
   onboarding_completed: boolean
   monthly_savings_target: number
+  /** كم شهراً يجب أن يغطّيه صندوق الطوارئ من المصروف الأساسي. */
+  emergency_months: number
+  /** معدّل السحب الآمن — ٤٪ يعني أن رقم الحرية = المصروف السنوي × ٢٥. */
+  withdrawal_rate_percent: number
+  /** التضخّم المفترض — به يصير الإسقاط بقيمة اليوم لا بقيمة اسمية. */
+  inflation_percent: number
+  created_at: string
+}
+
+/** نوع الأصل — يحدّد معنى الرقم لا شكله. */
+export type AssetKind = 'cash' | 'savings' | 'investment' | 'property' | 'receivable' | 'other'
+
+export type Asset = {
+  id: string
+  user_id: string
+  name: string
+  kind: AssetKind
+  amount: number
+  /** العائد السنوي المتوقّع — يدخل في الإسقاط وحده. */
+  annual_return_percent: number
+  /** هل يُصرف هذا الأسبوع؟ صندوق الطوارئ لا يكون إلا سائلاً. */
+  is_liquid: boolean
+  is_emergency_fund: boolean
+  icon: string | null
+  note: string | null
+  is_active: boolean
+  /** آخر تحديث للقيمة — قيمةٌ قديمة تجعل صافي الثروة يكذب بثقة. */
+  updated_at: string
+  created_at: string
+}
+
+export type NetWorthSnapshot = {
+  id: string
+  user_id: string
+  /** أول يوم في الشهر — مفتاح الشهر لا تاريخ اللقطة. */
+  snapshot_month: string
+  assets_total: number
+  restricted_total: number
+  debts_total: number
+  net_worth: number
   created_at: string
 }
 
@@ -112,6 +152,8 @@ export type FixedCommitment = {
   ends_on: string | null
   /** أصل الدين للعرض؛ الحساب يقوم على amount و ends_on. */
   total_amount: number | null
+  /** الفائدة السنوية — صفر للفاتورة، وغير صفر للقرض؛ عليها يُرتَّب السداد. */
+  annual_interest_percent: number
   my_share_percent: number
   is_active: boolean
   created_at: string
@@ -148,6 +190,7 @@ export type CommitmentDetail = {
   ends_on: string | null
   total_amount: number | null
   my_share_percent: number
+  annual_interest_percent: number
   my_amount: number
   /** فارغ للبنود بلا نهاية. */
   payments_left: number | null
@@ -283,6 +326,8 @@ export type Database = {
       commitment_templates: Table<CommitmentTemplate>
       events: Table<AppEvent>
       bill_payments: Table<BillPayment>
+      assets: Table<Asset>
+      net_worth_snapshots: Table<NetWorthSnapshot>
     }
     Views: {
       obligation_balances: View<ObligationBalance>
