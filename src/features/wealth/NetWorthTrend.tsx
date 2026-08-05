@@ -47,7 +47,12 @@ export function NetWorthTrend({
       {hasLine ? (
         <>
           <Sparkline values={points} />
-          <div className="flex justify-between text-[11px] text-text-muted">
+          {/*
+            * الصفّ بترتيب لاتيني رغم الواجهة العربية: محور الرسم يمضي من
+            * اليسار إلى اليمين، وصفٌّ يتبع اتجاه الصفحة يضع القديم فوق
+            * الطرف الجديد فيقرأ المستخدم الخطّ مقلوباً.
+            */}
+          <div dir="ltr" className="flex justify-between text-[11px] text-text-muted">
             <span>{formatMonthYear(first.snapshot_month)}</span>
             <span>{formatMonthYear(last.snapshot_month)}</span>
           </div>
@@ -56,6 +61,15 @@ export function NetWorthTrend({
         <p className="text-[13px] leading-relaxed text-text-muted">{t('wealth.trendEmpty')}</p>
       )}
 
+      {/* الرسم مخفيٌّ عن قارئ الشاشة، فاتجاهه — وهو كل مقصد البطاقة — يُقال نصّاً. */}
+      {hasLine && (
+        <p className="text-[12px] font-semibold text-text">
+          {t(points[points.length - 1]! >= points[0]! ? 'wealth.trendUp' : 'wealth.trendDown', {
+            amount: formatMoney(Math.abs(points[points.length - 1]! - points[0]!)),
+            count: points.length,
+          })}
+        </p>
+      )}
       <p className="text-[12px] text-text-muted">{t('wealth.trendNote')}</p>
 
       {onSave && (

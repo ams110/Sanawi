@@ -72,6 +72,9 @@ create index if not exists assets_user_idx
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
+-- مسارُ البحث مثبَّت كما في handle_new_user بـ 0001: دالّةٌ بمسارٍ متغيّر
+-- تُنفَّذ بما يجده المستدعي لا بما قصده كاتبها.
+set search_path = public
 as $$
 begin
   new.updated_at = now();

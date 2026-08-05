@@ -18,6 +18,7 @@ const SENSITIVITY_STEP = 500
 export function FreedomPanel({
   netWorth,
   annualSpending,
+  spendingIsProvisional,
   defaultContribution,
   defaultReturnPercent,
   inflationPercent,
@@ -26,6 +27,8 @@ export function FreedomPanel({
 }: {
   netWorth: number
   annualSpending: number
+  /** خطّ الأساس من شهرٍ لم ينتهِ — يُقال للمستخدم لا يُبتلع. */
+  spendingIsProvisional: boolean
   defaultContribution: number
   /** العائد المرجّح على أصوله الفعلية — أصدق من رقمٍ نفترضه له. */
   defaultReturnPercent: number
@@ -36,11 +39,18 @@ export function FreedomPanel({
   const { t } = useTranslation()
 
   const [contribution, setContribution] = useState(() => Math.round(defaultContribution))
-  // بلا أصولٍ لا يوجد عائدٌ مرجّح، وصفرٌ هنا يعني «لن تصل أبداً» وهو تشاؤم
-  // ناتج عن غياب البيانات لا عن حال المستخدم.
+  /*
+   * صفرٌ هنا يعني «لا أصول مسجّلة» لا «عائدي صفر» — المستدعي يمرّر الصفر في
+   * الحالة الأولى وحدها. أمّا صاحب الكاش فعائده صفرٌ حقيقيّ ويُمرَّر كما هو،
+   * ولا يُستبدَل بسبعةٍ تَعِده بنموٍّ لن يحدث.
+   */
   const [returnPercent, setReturnPercent] = useState(() =>
     defaultReturnPercent > 0 ? Math.round(defaultReturnPercent * 10) / 10 : 7,
   )
+
+  // القيمتان المحفوظتان تُعرضان محلياً وتُكتبان عند رفع الإصبع وحده.
+  const [inflation, setInflation] = useState(inflationPercent)
+  const [withdrawal, setWithdrawal] = useState(withdrawalRatePercent)
 
   const input: FreedomInput = useMemo(
     () => ({
@@ -48,10 +58,10 @@ export function FreedomPanel({
       currentNetWorth: netWorth,
       monthlyContribution: contribution,
       annualReturnPercent: returnPercent,
-      inflationPercent,
-      withdrawalRatePercent,
+      inflationPercent: inflation,
+      withdrawalRatePercent: withdrawal,
     }),
-    [annualSpending, netWorth, contribution, returnPercent, inflationPercent, withdrawalRatePercent],
+    [annualSpending, netWorth, contribution, returnPercent, inflation, withdrawal],
   )
 
   const result = useMemo(() => projectFreedom(input), [input])
@@ -60,7 +70,34 @@ export function FreedomPanel({
     [input],
   )
 
-  const multiple = Math.round(100 / withdrawalRatePercent)
+  /*
+   * المضاعف يُعرض بلا تقريبٍ حين يكون كسرياً.
+   * ‏«× 25» تحت رقمٍ محسوبٍ على 3.5٪ (× 28.57) تناقضٌ يقرأه المستخدم فوراً.
+   */
+  const rawMultiple = 100 / withdrawal
+  const multiple =
+    Math.abs(rawMultiple - Math.round(rawMultiple)) < 0.005
+      ? String(Math.round(rawMultiple))
+      : rawMultiple.toFixed(1)
+
+  /*
+   * بلا مصروفٍ مسجَّل لا هدف، وبلا هدفٍ لا شيء يُقال.
+   *
+   * المحرّك يُرجع target = 0 لمن لم يُدخِل مصروفه بعد، وكانت الشاشة تقرأ
+   * `freedomDate === null` وحده فتقول له «بهالوتيرة ما بتوصل، نقّص مصروفك» —
+   * مصروفاً لم يُدخله أصلاً.
+   */
+  if (result.target <= 0) {
+    return (
+      <section className="space-y-2 rounded-3xl border border-border bg-surface p-5">
+        <h2 className="text-xl font-bold text-text">{t('freedom.title')}</h2>
+        <p className="text-sm text-text-muted">{t('freedom.subtitle')}</p>
+        <p className="rounded-2xl bg-surface-muted px-4 py-3 text-[13px] leading-relaxed text-text-muted">
+          {t('freedom.noSpendingYet')}
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section className="space-y-4 rounded-3xl border border-border bg-surface p-5">
@@ -130,6 +167,11 @@ export function FreedomPanel({
           <dd className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
             {t('freedom.annualSpendingHint')}
           </dd>
+          {spendingIsProvisional && (
+            <dd className="mt-1 text-[11px] font-semibold text-warning">
+              {t('freedom.provisional')}
+            </dd>
+          )}
         </div>
       </dl>
 
@@ -190,21 +232,27 @@ export function FreedomPanel({
          */}
         <Slider
           label={t('freedom.inflation')}
-          hint={`${inflationPercent}%`}
+          hint={`${inflation}%`}
           min={0}
           max={10}
           step={0.5}
-          value={inflationPercent}
-          onChange={(v) => void onSettingsChange({ inflation_percent: v })}
+          value={inflation}
+          onChange={setInflation}
+          onCommit={(v) => {
+            if (v !== inflationPercent) void onSettingsChange({ inflation_percent: v })
+          }}
         />
         <Slider
           label={t('freedom.withdrawalRate')}
-          hint={`${withdrawalRatePercent}%`}
+          hint={`${withdrawal}%`}
           min={2}
           max={8}
           step={0.5}
-          value={withdrawalRatePercent}
-          onChange={(v) => void onSettingsChange({ withdrawal_rate_percent: v })}
+          value={withdrawal}
+          onChange={setWithdrawal}
+          onCommit={(v) => {
+            if (v !== withdrawalRatePercent) void onSettingsChange({ withdrawal_rate_percent: v })
+          }}
         />
 
         <p className="text-[12px] leading-relaxed text-text-muted">
@@ -241,6 +289,16 @@ function durationLabel(months: number, t: Translate): string {
   return t('common.durYearsMonths', { years, months: rest })
 }
 
+/**
+ * مزلاجٌ يفرّق بين التحريك والاستقرار.
+ *
+ * ‏`onChange` على مزلاج المدى يُطلَق عند كل درجةٍ تُعبَر، فسحبةُ إبهامٍ واحدة
+ * تُنتج عشرين نداءً. هذا مقبولٌ لتحديث رقمٍ على الشاشة، وكارثةٌ لكتابةٍ في
+ * قاعدة البيانات: عشرون طلباً من تلفون، تصل رودُها بغير ترتيبها فتستقرّ
+ * القيمة المحفوظة على غير ما يُظهره المزلاج.
+ *
+ * فالتحريك يبقى فورياً و`onCommit` لا يُنادى إلا عند رفع الإصبع.
+ */
 function Slider({
   label,
   hint,
@@ -249,6 +307,7 @@ function Slider({
   step = 1,
   value,
   onChange,
+  onCommit,
 }: {
   label: string
   hint: string
@@ -257,6 +316,7 @@ function Slider({
   step?: number
   value: number
   onChange: (next: number) => void
+  onCommit?: (next: number) => void
 }) {
   return (
     <label className="block space-y-1.5">
@@ -271,6 +331,9 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        onPointerUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
+        onKeyUp={(e) => onCommit?.(Number((e.target as HTMLInputElement).value))}
+        onBlur={(e) => onCommit?.(Number(e.target.value))}
         className="w-full accent-[var(--color-brand)]"
       />
     </label>

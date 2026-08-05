@@ -2,9 +2,10 @@ import { supabase } from '@/lib/supabase'
 import type { Asset, AssetKind, NetWorthSnapshot } from '@/lib/db/types'
 import { listObligations } from '@/features/obligations/api'
 import { listCommitmentDetails } from '@/features/bills/commitments'
-import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
+import { listExpenses, monthKey, shiftMonth, toCalcRows } from '@/features/expenses/api'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
+import { spendingBaseline } from '@/lib/wealth/baseline'
 import type { AssetInput, DebtInput } from '@/lib/wealth/networth'
 import { debtBalanceFrom, type PayoffDebt } from '@/lib/commitments/payoff'
 
@@ -148,12 +149,14 @@ export interface WealthSources {
    * المصروف الشهري الذي يستمرّ مدى العمر.
    *
    * ثلاثة بنود لا أربعة: الفواتير الدائمة، وأقساط الالتزامات السنوية
-   * (التأمين لا يتوقّف حين تتقاعد)، والمصروف اليومي مُسقَطاً على الشهر.
+   * (التأمين لا يتوقّف حين تتقاعد)، والمصروف اليومي من الشهور المكتملة.
    * أما أقساط الديون فمستثناة عمداً — لها تاريخ نهاية، وحسابُ حريةٍ يفترض
    * أنك ستسدّد قرض السيارة إلى الأبد يطلب منك رأس مالٍ لا تحتاجه.
    * والادخار مستثنى كذلك: هو الطريق لا الوجهة.
    */
   monthlyEssentials: number
+  /** خطّ الأساس مبنيّ على شهرٍ لم ينتهِ — الرقم مبدئيّ ويجب أن يُقال. */
+  spendingIsProvisional: boolean
   annualSpending: number
 }
 
@@ -171,12 +174,17 @@ export function toAssetInputs(assets: readonly Asset[]): AssetInput[] {
 
 export async function loadWealthSources(): Promise<WealthSources> {
   const month = monthKey()
-  const [assets, obligations, details, expenses, snapshots] = await Promise.all([
+  // ثلاثة شهورٍ مكتملة خلف الجاري: عليها يُبنى خطّ الأساس، لا على شهرٍ
+  // لم ينتهِ بعد.
+  const completedKeys = [shiftMonth(month, -1), shiftMonth(month, -2), shiftMonth(month, -3)]
+
+  const [assets, obligations, details, expenses, snapshots, ...completed] = await Promise.all([
     listAssets(),
     listObligations(),
     listCommitmentDetails(),
     listExpenses(month),
     listSnapshots(),
+    ...completedKeys.map((key) => listExpenses(key)),
   ])
 
   const restrictedFunds = obligations.map((o) => Number(o.balance?.my_fund_balance ?? 0))
@@ -230,10 +238,23 @@ export async function loadWealthSources(): Promise<WealthSources> {
   const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
   const obligationInstallments = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
 
-  // الإسقاط لا المجموع: شهرٌ في يومه الخامس مجموعُه خُمس حقيقته، وبناء
-  // رقم الحرية عليه يعِد بحريةٍ أرخص مما هي.
+  /*
+   * المصروف اليومي من الشهور المكتملة لا من إسقاط الجاري.
+   *
+   * الإسقاط صادقٌ في لوحة الشهر وكارثةٌ هنا: طلعةُ تسوّقٍ في أول الشهر
+   * تُضرب في ثلاثين فيقفز رقم الحرية بالملايين ثم يعود بعد أسبوع.
+   * التفصيل في src/lib/wealth/baseline.ts.
+   */
+  const baseline = spendingBaseline({
+    // شهرٌ بلا صفوف شهرٌ مجهول لا شهرٌ صفريّ.
+    completedMonths: completed.map((rows) =>
+      rows.length === 0 ? null : rows.reduce((total, row) => total + Number(row.amount), 0),
+    ),
+    currentMonthProjection: spending.projectedTotal,
+  })
+
   const monthlyEssentials =
-    Math.round((load.recurring + obligationInstallments + spending.projectedTotal) * 100) / 100
+    Math.round((load.recurring + obligationInstallments + baseline.monthly) * 100) / 100
 
   return {
     assets,
@@ -242,6 +263,7 @@ export async function loadWealthSources(): Promise<WealthSources> {
     payoffDebts,
     snapshots,
     monthlyEssentials,
+    spendingIsProvisional: baseline.isProvisional,
     annualSpending: Math.round(monthlyEssentials * 12 * 100) / 100,
   }
 }

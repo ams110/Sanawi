@@ -201,7 +201,6 @@ function AssetFields({
             kind: draft.kind,
             amount,
             annualReturnPercent: Number(draft.annualReturnPercent) || 0,
-            // العقار والدَّين عند غيرك لا يُصرفان هذا الأسبوع مهما قال الحقل.
             isLiquid: draft.isLiquid,
             // صندوق طوارئ غير سائل تناقض، فلا نحفظ العلامة إلا مع السيولة.
             isEmergencyFund: draft.isEmergencyFund && draft.isLiquid,

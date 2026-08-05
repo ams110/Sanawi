@@ -6,6 +6,7 @@ import { useRefresh } from '@/lib/refresh'
 import { formatMoney } from '@/lib/format'
 import { computeNetWorth } from '@/lib/wealth/networth'
 import { updateProfile } from '@/features/profile/api'
+import type { Profile } from '@/lib/db/types'
 import { AssetsSection } from './AssetsSection'
 import { FreedomPanel } from './FreedomPanel'
 import { PayoffPanel } from './PayoffPanel'
@@ -48,6 +49,30 @@ export function WealthScreen() {
   }, [load])
 
   const emergencyMonths = Number(profile?.emergency_months ?? 3)
+
+  /*
+   * كتابةٌ واحدة تُمسك خطأها.
+   *
+   * `patchLocal` يجعل الشاشة تعرض القيمة الجديدة فوراً؛ فإن فشلت الكتابة
+   * صارت الشاشة تكذب بصمت. نعيد المحلّي إلى ما كان ونقول ما جرى.
+   */
+  const saveProfilePatch = useCallback(
+    async (patch: Partial<Profile>) => {
+      if (!user || !profile) return
+      const before = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, profile[key as keyof Profile]]),
+      ) as Partial<Profile>
+
+      patchLocal(patch)
+      try {
+        await updateProfile(user.id, patch)
+      } catch (err) {
+        patchLocal(before)
+        setError(err instanceof Error ? err.message : t('wealth.saveFailed'))
+      }
+    },
+    [user, profile, patchLocal, t],
+  )
 
   const net = useMemo(() => {
     if (!sources) return null
@@ -177,11 +202,7 @@ export function WealthScreen() {
         monthsCovered={net.emergencyFund.monthsCovered}
         isFunded={net.emergencyFund.isFunded}
         months={emergencyMonths}
-        onMonthsChange={async (months) => {
-          if (!user) return
-          patchLocal({ emergency_months: months })
-          await updateProfile(user.id, { emergency_months: months })
-        }}
+        onMonthsChange={(months) => saveProfilePatch({ emergency_months: months })}
       />
 
       <NetWorthTrend
@@ -208,15 +229,12 @@ export function WealthScreen() {
       <FreedomPanel
         netWorth={net.netWorth}
         annualSpending={sources.annualSpending}
+        spendingIsProvisional={sources.spendingIsProvisional}
         defaultContribution={Number(profile?.monthly_savings_target ?? 0)}
-        defaultReturnPercent={net.weightedReturnPercent}
+        defaultReturnPercent={net.assetsTotal > 0 ? net.weightedReturnPercent : 0}
         inflationPercent={Number(profile?.inflation_percent ?? 3)}
         withdrawalRatePercent={Number(profile?.withdrawal_rate_percent ?? 4)}
-        onSettingsChange={async (patch) => {
-          if (!user) return
-          patchLocal(patch)
-          await updateProfile(user.id, patch)
-        }}
+        onSettingsChange={saveProfilePatch}
       />
 
       <PayoffPanel debts={sources.payoffDebts} />
@@ -245,15 +263,36 @@ function EmergencyFundCard({
   monthsCovered: number
   isFunded: boolean
   months: number
-  onMonthsChange: (months: number) => Promise<void>
+  onMonthsChange: (months: number) => void
 }) {
   const { t } = useTranslation()
+  const [draftMonths, setDraftMonths] = useState(months)
+
+  // المزلاج يتبع الملف حين يتغيّر من مكانٍ آخر (تحديث، أو فشل كتابة يُرجِعه).
+  useEffect(() => setDraftMonths(months), [months])
+
+  const commitMonths = () => {
+    if (draftMonths !== months) onMonthsChange(draftMonths)
+  }
 
   return (
     <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
       <h2 className="text-sm font-bold text-text">{t('wealth.emergencyTitle')}</h2>
 
-      {current === 0 ? (
+      {target === 0 ? (
+        /*
+         * المحرّك امتنع عن الحكم لأنه لا يعرف المصروف، والشاشة كانت تحكم
+         * مكانه: «مكتمل» و«من ₪ 0» لمن لم يسجّل ولا فاتورة.
+         */
+        <>
+          {current > 0 && (
+            <p className="num text-3xl font-black text-text">{formatMoney(current)}</p>
+          )}
+          <p className="text-[13px] leading-relaxed text-text-muted">
+            {current === 0 ? t('wealth.emergencyEmpty') : t('wealth.emergencyNoTarget')}
+          </p>
+        </>
+      ) : current === 0 ? (
         <p className="text-[13px] leading-relaxed text-text-muted">{t('wealth.emergencyEmpty')}</p>
       ) : (
         <>
@@ -277,17 +316,21 @@ function EmergencyFundCard({
         </>
       )}
 
+      {/* الكتابة عند رفع الإصبع لا عند كل درجة — الشرح في Slider بـ FreedomPanel. */}
       <label className="block space-y-1.5 border-t border-border pt-3">
         <span className="flex items-baseline justify-between">
           <span className="text-sm font-semibold text-text">{t('wealth.emergencyMonths')}</span>
-          <span className="num text-sm font-bold text-text">{months}</span>
+          <span className="num text-sm font-bold text-text">{draftMonths}</span>
         </span>
         <input
           type="range"
           min={1}
           max={12}
-          value={months}
-          onChange={(e) => void onMonthsChange(Number(e.target.value))}
+          value={draftMonths}
+          onChange={(e) => setDraftMonths(Number(e.target.value))}
+          onPointerUp={() => commitMonths()}
+          onKeyUp={() => commitMonths()}
+          onBlur={() => commitMonths()}
           className="w-full accent-[var(--color-brand)]"
         />
       </label>

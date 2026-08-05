@@ -119,9 +119,9 @@ export function PayoffPanel({ debts }: { debts: readonly PayoffDebt[] }) {
                     {t('payoff.balance')}{' '}
                     <span className="num">{formatMoney(debt?.balance ?? 0)}</span>
                     {' · '}
-                    <span className="num">
-                      {t('payoff.rate', { percent: debt?.annualInterestPercent ?? 0 })}
-                    </span>
+                    {/* الرقم وحده يحمل .num — السطر يخلط عربياً بأرقام. */}
+                    <span className="num">{debt?.annualInterestPercent ?? 0}</span>
+                    {t('payoff.ratePercent')}
                   </p>
                 </div>
                 <div className="shrink-0 text-end">
@@ -130,7 +130,7 @@ export function PayoffPanel({ debts }: { debts: readonly PayoffDebt[] }) {
                       ? t('payoff.notCleared')
                       : t('payoff.clearedAt', { months: monthsLabel(line.clearedAtMonth, t) })}
                   </p>
-                  <p className="num text-[11px] text-text-muted">
+                  <p className="text-[11px] text-text-muted">
                     {t('payoff.interestPaid', { amount: formatMoney(line.interestPaid) })}
                   </p>
                 </div>

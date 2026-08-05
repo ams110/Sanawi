@@ -1441,15 +1441,30 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const currency = connection.currency
       const name = input.name.trim()
 
-      const { data: existing, error: findErr } = await connection.db
+      /*
+       * `maybeSingle` ترمي على أكثر من صف، ولا قيد فريداً على الاسم.
+       *
+       * أصلان نشطان بالاسم نفسه يُنشآن من الشاشة بلا مانع، وعندها كانت هذه
+       * الأداة ترمي رسالة PostgREST الخام — إنجليزيةً في واجهةٍ عربية، ولا
+       * تقول لصاحبها ما يفعل. والاسم يصير بعدها غير قابلٍ للاستعمال إلى الأبد.
+       * فنقرأ الصفوف كلها ونقول له صراحةً أنّ عليه تمييزها أو التعديل من الشاشة.
+       */
+      const { data: matches, error: findErr } = await connection.db
         .from('assets')
         .select('*')
         .eq('user_id', connection.userId)
         .eq('is_active', true)
         .eq('name', name)
-        .maybeSingle()
       if (findErr) throw findErr
-      const current = (existing as Asset | null) ?? null
+
+      const rows = (matches ?? []) as Asset[]
+      if (rows.length > 1) {
+        throw new Error(
+          `عندك ${rows.length} أصول نشطة اسمها «${name}»، فلا أعرف أيّها تقصد. ` +
+            'غيّر أسماءها من شاشة الثروة لتتمايز، ثم أعد المحاولة.',
+        )
+      }
+      const current = rows[0] ?? null
 
       // السيولة والعلامة يُقرَآن من المُرسَل إن وُجد، وإلا من الصفّ القائم،
       // وإلا من الافتراضي. والتناقض يُحسم أخيراً: لا صندوق طوارئ بلا سيولة.

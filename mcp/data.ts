@@ -14,6 +14,7 @@ import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
+import { spendingBaseline } from '../src/lib/wealth/baseline.js'
 import { projectFreedom, type FreedomInput, type FreedomResult } from '../src/lib/wealth/freedom.js'
 import { debtBalanceFrom, type PayoffDebt } from '../src/lib/commitments/payoff.js'
 import type {
@@ -379,6 +380,15 @@ export function monthKey(input?: string): string {
 
 /* ── الثروة ────────────────────────────────────────────────── */
 
+  /*
+   * الاحتياطي لا يُطلق إلا حين لا أصول أصلاً.
+   *
+   * `weightedReturnPercent === 0` تعني شيئين مختلفين: «لا أصول فلا عائد
+   * معروف»، و«كل أصولي كاش عائده صفر». إطلاقُ ٧٪ على الثانية يَعِد صاحب
+   * الكاش بنموٍّ لن يحدث ويقرّب تاريخ حريته سنواتٍ بلا سبب.
+   */
+const DEFAULT_RETURN = 7
+
 export interface WealthPicture {
   net: NetWorthResult
   freedom: FreedomResult
@@ -387,6 +397,8 @@ export interface WealthPicture {
   assets: Asset[]
   payoffDebts: PayoffDebt[]
   monthlyEssentials: number
+  /** خطّ الأساس مبنيّ على شهرٍ لم ينتهِ — الرقم مبدئيّ. */
+  spendingIsProvisional: boolean
   annualSpending: number
   monthlyContribution: number
 }
@@ -410,11 +422,15 @@ export async function loadAssets({ db }: Connection): Promise<Asset[]> {
  * يحرس منها هذا الملف كلّه.
  */
 export async function loadWealth(connection: Connection): Promise<WealthPicture> {
-  const [assets, month, profile, details] = await Promise.all([
+  // ثلاثة شهورٍ مكتملة خلف الجاري — نفس نافذة الشاشة بالضبط.
+  const completedKeys = [1, 2, 3].map((back) => monthsBack(back))
+
+  const [assets, month, profile, details, ...completed] = await Promise.all([
     loadAssets(connection),
     loadMonth(connection),
     loadProfile(connection),
     loadCommitmentDetails(connection),
+    ...completedKeys.map((key) => loadMonthExpenses(connection, key)),
   ])
 
   /*
@@ -444,10 +460,18 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
   // نفس التعريف الموجود في src/features/wealth/api.ts: الدائم من الفواتير،
   // وأقساط الالتزامات السنوية، والمصروف اليومي مُسقَطاً — بلا أقساط الديون
   // (لها نهاية) وبلا الادخار (هو الطريق لا الوجهة).
+  // المصروف اليومي من الشهور المكتملة لا من إسقاط الجاري — الشرح في
+  // src/lib/wealth/baseline.ts.
+  const baseline = spendingBaseline({
+    // شهرٌ بلا صفوف شهرٌ مجهول لا شهرٌ صفريّ.
+    completedMonths: completed.map((rows) =>
+      rows.length === 0 ? null : rows.reduce((total, row) => total + Number(row.amount), 0),
+    ),
+    currentMonthProjection: month.expenses.projectedTotal,
+  })
+
   const monthlyEssentials =
-    Math.round(
-      (month.load.recurring + obligationInstallments + month.expenses.projectedTotal) * 100,
-    ) / 100
+    Math.round((month.load.recurring + obligationInstallments + baseline.monthly) * 100) / 100
   const annualSpending = Math.round(monthlyEssentials * 12 * 100) / 100
   const monthlyContribution = Number(profile?.monthly_savings_target ?? 0)
 
@@ -475,9 +499,7 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
     annualSpending,
     currentNetWorth: net.netWorth,
     monthlyContribution,
-    // بلا أصولٍ لا عائد مرجّح، وصفرٌ هنا يعني «لن تصل» وهو نقصُ بياناتٍ
-    // لا حالُ المستخدم.
-    annualReturnPercent: net.weightedReturnPercent > 0 ? net.weightedReturnPercent : 7,
+    annualReturnPercent: net.assetsTotal > 0 ? net.weightedReturnPercent : DEFAULT_RETURN,
     inflationPercent: Number(profile?.inflation_percent ?? 3),
     withdrawalRatePercent: Number(profile?.withdrawal_rate_percent ?? 4),
   }
@@ -500,7 +522,14 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
       }
     }),
     monthlyEssentials,
+    spendingIsProvisional: baseline.isProvisional,
     annualSpending,
     monthlyContribution,
   }
+}
+
+/** مفتاح شهرٍ مضى: أول يومٍ في الشهر الذي يسبق الجاري بـ n. */
+function monthsBack(n: number): string {
+  const now = new Date()
+  return isoDate(new Date(now.getFullYear(), now.getMonth() - n, 1))
 }

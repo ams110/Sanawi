@@ -179,8 +179,18 @@ const app = await connect({
   SANAWI_READ_ONLY: '0',
 })
 
+/*
+ * كل أداةٍ نُوديت فعلاً.
+ *
+ * ترويسة هذا الملف تَعِد بأن «كل أداة معلَنة تُستدعى»، والوعد الذي لا يُفحَص
+ * يتحلّل: أداةٌ جديدة تُضاف ولا يُنادَى عليها أحد، والعدد المقروء من الخادم
+ * لا يمكن أن يخالف نفسه فيبقى الفحص أخضر وهو لم يلمسها.
+ */
+const called = new Set()
+
 /** ينادي أداة ويفشل الفحص إن ردّت خطأً. يعيد البيانات المنظّمة. */
 async function call(name, args = {}) {
+  called.add(name)
   const result = await app.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (result.isError) {
@@ -193,6 +203,7 @@ async function call(name, args = {}) {
 
 /** ينادي أداة ويتوقّع خطأً يذكر كذا — رسائل الأخطاء جزء من الواجهة. */
 async function expectError(name, args, needle) {
+  called.add(name)
   const result = await app.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (!result.isError) return fail(`${name}: كان يجب أن يفشل على ${JSON.stringify(args)}`)
@@ -789,6 +800,11 @@ await fake.stop()
 
 // العدد يُقرأ من الخادم لا يُكتب هنا: رقمٌ ثابت في نصٍّ ينحرف عند كل أداة
 // جديدة، وقد انحرف مرّتين من قبل.
+const untouched = tools.map((t) => t.name).filter((name) => !called.has(name))
+if (untouched.length > 0) {
+  fail(`أدوات معلَنة لم تُستدعَ ولا مرة: ${untouched.join('، ')}`)
+}
+
 if (!failed) {
   console.log(`✓ الأدوات كلها (${tools.length}) تعمل، والأرقام تطابق الحساب اليدوي.`)
 }
