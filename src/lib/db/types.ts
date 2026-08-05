@@ -136,6 +136,8 @@ export type IncomeSource = {
   name: string
   amount: number
   frequency: IncomeFrequency
+  /** دخلٌ لا تقدير ثابت له — يُحتسب حين يصل، ولا يدخل الدخل المتوقَّع. */
+  is_variable: boolean
   is_active: boolean
   created_at: string
 }
@@ -148,6 +150,8 @@ export type FixedCommitment = {
   day_of_month: number | null
   default_method_id: string | null
   icon: string | null
+  /** أول دفعة — فارغ يعني أن الدفعات بدأت فعلاً. */
+  starts_on: string | null
   /** آخر دفعة — فارغ يعني متكرّر بلا نهاية. */
   ends_on: string | null
   /** أصل الدين للعرض؛ الحساب يقوم على amount و ends_on. */
@@ -177,6 +181,8 @@ export type CommitmentTemplate = {
   suggested_min: number | null
   suggested_max: number | null
   is_installment: boolean
+  /** جملة واحدة: ما هو البند ومتى يُدفع. */
+  hint: string | null
   country: string
   sort_order: number
 }
@@ -194,6 +200,10 @@ export type CommitmentDetail = {
   my_amount: number
   /** فارغ للبنود بلا نهاية. */
   payments_left: number | null
+  /** أول دفعة — فارغ يعني أن الدفعات بدأت فعلاً. */
+  starts_on: string | null
+  /** حان شهر أول دفعة؛ ما لم يبدأ لا يُحمَّل على الشهر. */
+  has_started: boolean
 }
 
 export type Expense = {
@@ -255,6 +265,8 @@ export type ObligationTemplate = {
   default_recurrence_months: number
   suggested_min: number | null
   suggested_max: number | null
+  /** جملة واحدة: ما هو البند ومتى يُدفع. */
+  hint: string | null
   country: string
   sort_order: number
 }

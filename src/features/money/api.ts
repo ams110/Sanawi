@@ -23,7 +23,7 @@ export async function listFixedCommitments(): Promise<FixedCommitment[]> {
 
 export async function addIncome(
   userId: string,
-  input: Pick<IncomeSource, 'name' | 'amount' | 'frequency'>,
+  input: Pick<IncomeSource, 'name' | 'amount' | 'frequency'> & { is_variable?: boolean },
 ): Promise<IncomeSource> {
   const { data, error } = await supabase
     .from('income_sources')
@@ -50,12 +50,18 @@ export async function addFixedCommitment(
 /** الأرشفة بدل الحذف هنا أيضاً: تاريخ الدخل يفيد لاحقاً في المقارنة. */
 export async function updateIncomeSource(
   id: string,
-  patch: { name?: string; amount?: number; frequency?: IncomeFrequency },
+  patch: {
+    name?: string
+    amount?: number
+    frequency?: IncomeFrequency
+    isVariable?: boolean
+  },
 ): Promise<void> {
   const row: Partial<IncomeSource> = {}
   if (patch.name !== undefined) row.name = patch.name
   if (patch.amount !== undefined) row.amount = patch.amount
   if (patch.frequency !== undefined) row.frequency = patch.frequency
+  if (patch.isVariable !== undefined) row.is_variable = patch.isVariable
 
   if (Object.keys(row).length === 0) return
   const { error } = await supabase.from('income_sources').update(row).eq('id', id)

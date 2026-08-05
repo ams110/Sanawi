@@ -66,6 +66,7 @@ export async function addCommitment(
     name: string
     amount: number
     icon: string | null
+    startsOn: string | null
     endsOn: string | null
     totalAmount: number | null
     mySharePercent: number
@@ -80,6 +81,7 @@ export async function addCommitment(
       name: input.name,
       amount: input.amount,
       icon: input.icon,
+      starts_on: input.startsOn,
       ends_on: input.endsOn,
       total_amount: input.totalAmount,
       my_share_percent: input.mySharePercent,
@@ -106,6 +108,7 @@ export async function updateCommitment(
     icon?: string | null
     dayOfMonth?: number | null
     defaultMethodId?: string | null
+    startsOn?: string | null
     endsOn?: string | null
     totalAmount?: number | null
   },
@@ -116,6 +119,7 @@ export async function updateCommitment(
   if (patch.icon !== undefined) row.icon = patch.icon
   if (patch.dayOfMonth !== undefined) row.day_of_month = patch.dayOfMonth
   if (patch.defaultMethodId !== undefined) row.default_method_id = patch.defaultMethodId
+  if (patch.startsOn !== undefined) row.starts_on = patch.startsOn
   if (patch.endsOn !== undefined) row.ends_on = patch.endsOn
   if (patch.totalAmount !== undefined) row.total_amount = patch.totalAmount
 

@@ -32,6 +32,7 @@ export function AddCommitmentForm({
   const [name, setName] = useState('')
   const [amount, setAmount] = useState(0)
   const [isInstallment, setIsInstallment] = useState(false)
+  const [startsOn, setStartsOn] = useState('')
   const [endsOn, setEndsOn] = useState('')
   const [totalAmount, setTotalAmount] = useState(0)
   const [open, setOpen] = useState(false)
@@ -61,6 +62,11 @@ export function AddCommitmentForm({
     e.preventDefault()
     if (!name.trim() || amount <= 0) return
     if (isInstallment && !endsOn) return
+    // أول دفعة بعد آخرها ليست خطأ إدخالٍ يُصحَّح بصمت — نمنع الحفظ ونقولها.
+    if (startsOn && endsOn && startsOn > endsOn) {
+      setError(t('bills.startsAfterEnds'))
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -68,6 +74,7 @@ export function AddCommitmentForm({
         name: name.trim(),
         amount,
         icon: picked?.icon ?? null,
+        startsOn: startsOn || null,
         endsOn: isInstallment ? endsOn : null,
         totalAmount: isInstallment && totalAmount > 0 ? totalAmount : null,
         mySharePercent: 100,
@@ -78,6 +85,7 @@ export function AddCommitmentForm({
       setName('')
       setAmount(0)
       setIsInstallment(false)
+      setStartsOn('')
       setEndsOn('')
       setTotalAmount(0)
       setDayOfMonth(null)
@@ -188,6 +196,25 @@ export function AddCommitmentForm({
             setDayOfMonth(e.target.value === '' ? null : Math.min(31, Math.max(1, v || 1)))
           }}
           placeholder={t('bills.noDay')}
+          className={`num ${inputClass}`}
+        />
+      </label>
+
+      {/*
+       * أول دفعة — حقلٌ عام لا خاصٌّ بالأقساط.
+       *
+       * «اشتريت اليوم والدفع يبدأ الشهر الجاي» أشيع ما يكون في الأقساط، لكن
+       * الإيجار الذي يبدأ الشهر الجاي مثله تماماً: بندٌ مسجَّل اليوم لا دفعة
+       * له هذا الشهر. وتركُه فارغاً يعني «بلّشت» — وهو الشائع، فلا يُطلب.
+       */}
+      <label className="block space-y-1">
+        <span className="text-xs font-semibold text-text-muted">
+          {t('bills.startsOn')} — {t('bills.startsOnHint')}
+        </span>
+        <input
+          type="date"
+          value={startsOn}
+          onChange={(e) => setStartsOn(e.target.value)}
           className={`num ${inputClass}`}
         />
       </label>

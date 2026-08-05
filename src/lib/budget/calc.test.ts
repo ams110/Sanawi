@@ -35,6 +35,29 @@ describe('تحويل الدخل إلى شهري', () => {
     ])
     expect(total).toBe(9000)
   })
+
+  /*
+   * الدخل المتغيّر خارج المتوقَّع.
+   *
+   * صاحب المصادر المتعددة — راتبٌ ثابت وشغلٌ جانبي — كان مضطراً لإعطاء
+   * الجانبي رقماً ثابتاً، فيتضخّم المتوقَّع ويصير «الباقي للصرف» وعداً لا
+   * يفي به الشهر. والصادق ألّا يُخترع له رقم: يدخل في «ما وصل» حين يصل.
+   */
+  it('يستثني المصدر المتغيّر من المتوقَّع', () => {
+    const total = monthlyIncomeFrom([
+      { amount: 9000, frequency: 'monthly' },
+      { amount: 2000, frequency: 'monthly', isVariable: true },
+    ])
+    expect(total).toBe(9000)
+  })
+
+  it('كل المصادر متغيّرة: صفر متوقَّع لا رقم مخترَع', () => {
+    expect(monthlyIncomeFrom([{ amount: 3000, frequency: 'weekly', isVariable: true }])).toBe(0)
+  })
+
+  it('وغياب العلامة يعني ثابتاً — سلوك ما قبل الحقل', () => {
+    expect(monthlyIncomeFrom([{ amount: 9000, frequency: 'monthly' }])).toBe(9000)
+  })
 })
 
 describe('ملخّص الشهر', () => {

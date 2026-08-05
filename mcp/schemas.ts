@@ -141,6 +141,10 @@ export const billRowOut = {
   ends_on: z.string().nullable(),
   payments_left: z.number().nullable(),
   remaining_total: z.number().nullable(),
+  /** أول دفعة — فارغ يعني أن الدفعات بدأت فعلاً. */
+  starts_on: z.string().nullable(),
+  /** حان شهر أول دفعة. ما لم يبدأ لا يُحمَّل على هذا الشهر. */
+  has_started: z.boolean(),
 }
 
 export function toBillRowOut(
@@ -153,6 +157,7 @@ export function toBillRowOut(
     {
       amount: Number(commitment.amount),
       mySharePercent: Number(commitment.my_share_percent ?? 100),
+      startsOn: commitment.starts_on ?? null,
       endsOn: commitment.ends_on ?? null,
     },
     today,
@@ -170,6 +175,8 @@ export function toBillRowOut(
     ends_on: commitment.ends_on ?? null,
     payments_left: view.paymentsLeft,
     remaining_total: view.remainingForMe,
+    starts_on: commitment.starts_on ?? null,
+    has_started: view.hasStarted,
   }
 }
 
@@ -195,14 +202,24 @@ export function toSettlementOut(row: PartnerSettlement) {
   }
 }
 
+/*
+ * الاسم العبري والشرح يصلان كلود، ولا يبقيان في القاعدة وحدها.
+ *
+ * كان المخرج يُسقط `name_he` و`name_en` و`hint`، فبندٌ اسمه «رسوم الترخيص»
+ * يصل بلا `אגרת רישוי` — وهي الصيغة التي يقرأها المستخدم فعلاً على إشعار
+ * משרד התחבורה. والقالبُ لا يُفهم اسمُه بندٌ لا يُسجَّل، وهو ما يهدم غرض
+ * التطبيق: ألّا يفاجئه استحقاق.
+ */
 export function toTemplateOut(template: ObligationTemplate) {
   return {
     id: template.id,
     name: template.name_ar,
+    name_he: template.name_he,
     category: template.category,
     recurrence_months: template.default_recurrence_months,
     suggested_min: template.suggested_min === null ? null : Number(template.suggested_min),
     suggested_max: template.suggested_max === null ? null : Number(template.suggested_max),
+    hint: template.hint ?? null,
   }
 }
 

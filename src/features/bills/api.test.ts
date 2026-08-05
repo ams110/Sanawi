@@ -9,6 +9,7 @@ const commitment = (id: string) => ({
   day_of_month: null,
   default_method_id: null,
   icon: '💡',
+  starts_on: null,
   ends_on: null,
   total_amount: null,
   annual_interest_percent: 0,

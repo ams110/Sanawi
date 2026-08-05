@@ -192,6 +192,7 @@ export async function loadWealthSources(): Promise<WealthSources> {
   const load = summarizeMonthlyLoad(
     details.map((d) => ({
       amount: Number(d.amount),
+      startsOn: d.starts_on,
       endsOn: d.ends_on,
       mySharePercent: Number(d.my_share_percent),
     })),
@@ -204,12 +205,16 @@ export async function loadWealthSources(): Promise<WealthSources> {
    * والحصّة والدفعات تُشتقّان من `viewCommitment` لا من عمودَي العرض: العرض
    * يحملهما، لكن خادم MCP يشتقّهما من المحرّك، ورقمان لتعريفٍ واحد يفترقان
    * يوم يتغيّر التعريف في أحد الطرفين.
+   *
+   * والقسط الذي لم تبدأ دفعاته دَينٌ رغم ذلك: هو خارج حمل هذا الشهر وداخلٌ
+   * في «ما عليّ». فالفلترة على الانتهاء وحده.
    */
   const live = details
     .map((row) => ({
       row,
       view: viewCommitment({
         amount: Number(row.amount),
+        startsOn: row.starts_on,
         endsOn: row.ends_on,
         mySharePercent: Number(row.my_share_percent),
       }),

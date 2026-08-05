@@ -14,17 +14,36 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
+import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
 import type {
   Asset,
   BillPayment,
+  FixedCommitment,
   FundDeposit,
+  IncomeSource,
   Obligation,
   PartnerSettlement,
   Profile,
 } from '../../src/lib/db/types.js'
 import type { Connection } from '../session.js'
-import { findGroup, findObligation, loadIncomeEntries, monthKey } from '../data.js'
-import { guard, isoDate, longDate, money, monthYear, ok, recurrenceLabel } from '../format.js'
+import {
+  findCommitment,
+  findGroup,
+  findIncomeSource,
+  findObligation,
+  loadIncomeEntries,
+  monthKey,
+} from '../data.js'
+import {
+  CADENCE,
+  guard,
+  isoDate,
+  longDate,
+  money,
+  monthYear,
+  ok,
+  recurrenceLabel,
+} from '../format.js'
 import { obligationOut, toObligationOut } from '../schemas.js'
 
 const WRITES = {
@@ -35,6 +54,58 @@ const WRITES = {
 } as const
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
+
+/** أول يوم في الشهر الذي يقع بعد `monthsAhead` شهراً من `from`. */
+function monthStartAfter(from: Date, monthsAhead: number): string {
+  const target = new Date(from.getFullYear(), from.getMonth() + monthsAhead, 1)
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+/**
+ * عدد شهور الخطة كاملةً من أول دفعة إلى آخرها، شاملاً الطرفين.
+ *
+ * وبلا `startsOn` يكون المبدأ **هذا الشهر** لا شهر الانتهاء: غياب تاريخ
+ * البدء يعني «الدفعات بدأت»، فالخطة كلّها هي ما بقي منها.
+ */
+function totalPayments(startsOn: string | null, endsOn: string, today: Date): number {
+  const start = startsOn
+    ? new Date(`${startsOn.slice(0, 7)}-01T00:00:00`)
+    : new Date(today.getFullYear(), today.getMonth(), 1)
+  const end = new Date(`${endsOn.slice(0, 7)}-01T00:00:00`)
+  const months =
+    (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1
+  return Math.max(0, months)
+}
+
+/**
+ * هل يتّسق `total_amount` مع القسط وعدد الدفعات؟
+ *
+ * الخطأ الذي وُلدت منه: رخصة بـ1,900 على ثلاث دفعات سُجّلت بأربع، فكان
+ * ‏633 × 4 = 2,532 والمستخدم مرّر 1,900 صراحةً — ولم يُبلَّغ. أيّ فحصٍ بسيط
+ * كان سيلتقط التناقض لحظة حدوثه.
+ *
+ * والنتيجة **تحذير لا استثناء**: قرضٌ بفائدة يجعل مجموع الأقساط أكبر من أصل
+ * الدَّين بحقّ، ورميُ خطأ يمنع حالةً مشروعة. والتفاوت المقبول يستوعب تقريب
+ * القسط الأخير (شيكل عن كل دفعة) ولا يستوعب دفعةً زائدة.
+ */
+function totalAmountWarning(
+  amount: number,
+  payments: number,
+  totalAmount: number | undefined,
+  currency: string,
+): string {
+  if (totalAmount === undefined || payments <= 0 || amount <= 0) return ''
+
+  const scheduled = Math.round(amount * payments * 100) / 100
+  const tolerance = Math.max(payments, totalAmount * 0.02)
+  if (Math.abs(scheduled - totalAmount) <= tolerance) return ''
+
+  return (
+    `\n⚠️ تحقّق: ${money(amount, currency)} × ${payments} دفعة = ${money(scheduled, currency)}` +
+    `، والمبلغ الكلّي المُمرَّر ${money(totalAmount, currency)}.` +
+    ' إن كان القرض بفائدة فالفرق طبيعي؛ وإلا فراجع القسط أو عدد الدفعات أو تاريخ البدء.'
+  )
+}
 
 /**
  * حصّتي لا تُضبط مباشرةً — تُشتقّ من الشركاء.
@@ -619,30 +690,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const key = monthKey(input.month)
       const currency = connection.currency
 
-      const { data: commitments, error: readError } = await connection.db
-        .from('fixed_commitments')
-        .select('*')
-        .eq('is_active', true)
-      if (readError) throw readError
-
-      const list = commitments ?? []
-      const needle = input.commitment.trim().toLowerCase()
-      const matches = list.filter(
-        (c) => c.id === input.commitment || c.name.toLowerCase().includes(needle),
-      )
-
-      if (matches.length === 0) {
-        throw new Error(
-          `لا بند ثابت اسمه «${input.commitment}». الموجود: ${list.map((c) => c.name).join('، ') || 'لا شيء'}.`,
-        )
-      }
-      if (matches.length > 1) {
-        throw new Error(
-          `«${input.commitment}» يطابق أكثر من بند: ${matches.map((c) => c.name).join('، ')}.`,
-        )
-      }
-
-      const commitment = matches[0]!
+      const commitment = await findCommitment(connection, input.commitment)
 
       /*
        * ندمج مع الصف القائم بدل استبداله.
@@ -706,20 +754,29 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
     'sanawi_add_income',
     {
       title: 'إضافة مصدر دخل',
-      description: `يضيف مصدر دخل يدخل في حساب رقم الشهر.
+      description: `يضيف مصدر دخل متكرّر متوقَّع. المصادر متعدّدة بطبيعتها: راتبٌ ثابت، وشغلٌ جانبي، وكلٌّ بدوريّته.
 
 الدورية تُحوَّل إلى شهري بمعامل دقيق: أسبوعي × 4.333 ونصف شهري × 2.167 — لا × 4، وإلا ضاع راتب أسبوعين في السنة.
 
-المدخلات:
-  - name (string): «راتب» مثلاً
-  - amount (number): المبلغ في الدورة الواحدة، 0 أو أكثر
-  - frequency ('monthly' | 'biweekly' | 'weekly'): افتراضياً 'monthly'
+**والدخل المتغيّر يُعلَّم متغيّراً** (is_variable): شغلٌ جانبي أو ساعاتٌ متغيّرة
+أو إكراميات لا تقدير ثابت لها، فلا تدخل «المتوقَّع» ولا يُخترع لها رقم — وتدخل
+«الواصل» عبر sanawi_record_income حين تصل فعلاً.
 
-المخرجات: id و name و amount و frequency و monthly_equivalent.`,
+المدخلات:
+  - name (string): «راتب» مثلاً. سمِّ المصادر بأسماء لا يحوي أحدها الآخر
+  - amount (number): المبلغ في الدورة الواحدة، 0 أو أكثر. صفرٌ مقبول مع is_variable
+  - frequency ('monthly' | 'biweekly' | 'weekly'): افتراضياً 'monthly'
+  - is_variable (boolean): دخلٌ لا تقدير ثابت له، افتراضياً false
+
+المخرجات: id و name و amount و frequency و is_variable و monthly_equivalent.`,
       inputSchema: {
         name: z.string().min(1).max(80),
         amount: z.number().min(0).describe('المبلغ في الدورة الواحدة'),
         frequency: z.enum(['monthly', 'biweekly', 'weekly']).default('monthly'),
+        is_variable: z
+          .boolean()
+          .default(false)
+          .describe('دخلٌ لا تقدير ثابت له — يُحتسب حين يصل فقط'),
       },
       outputSchema: {
         currency: z.string(),
@@ -727,6 +784,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         name: z.string(),
         amount: z.number(),
         frequency: z.string(),
+        is_variable: z.boolean(),
         monthly_equivalent: z.number(),
       },
       annotations: WRITES,
@@ -740,26 +798,33 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           name: input.name.trim(),
           amount: input.amount,
           frequency: input.frequency,
+          is_variable: input.is_variable,
           is_active: true,
         })
         .select()
         .single()
       if (error) throw error
 
-      const factor = input.frequency === 'weekly' ? 52 / 12 : input.frequency === 'biweekly' ? 26 / 12 : 1
-      const monthly = Math.round(input.amount * factor * 100) / 100
+      // المعامل من محرّك الميزانية لا نسخةً منه هنا: نسختان تنحرفان بعد أول
+      // تعديل، ويصير الرقم الذي يقوله كلود غير الذي على الشاشة.
+      const monthly = monthlyEquivalent(input.amount, input.frequency)
       const currency = connection.currency
 
       return ok(
-        `أُضيف مصدر دخل **${input.name}**: ${money(input.amount, currency)} ${input.frequency === 'monthly' ? 'شهرياً' : input.frequency === 'weekly' ? 'أسبوعياً' : 'كل أسبوعين'}` +
-          (input.frequency === 'monthly' ? '.' : ` = ${money(monthly, currency)} شهرياً.`),
+        `أُضيف مصدر دخل **${input.name}**: ${money(input.amount, currency)} ${CADENCE[input.frequency]}` +
+          (input.is_variable
+            ? '.\nمتغيّر — لا يدخل الدخل المتوقَّع، ويُحتسب حين تسجّله بـ sanawi_record_income.'
+            : input.frequency === 'monthly'
+              ? '.'
+              : ` = ${money(monthly, currency)} شهرياً.`),
         {
           currency,
           id: data.id,
           name: data.name,
           amount: Number(data.amount),
           frequency: data.frequency,
-          monthly_equivalent: monthly,
+          is_variable: Boolean(data.is_variable),
+          monthly_equivalent: input.is_variable ? 0 : monthly,
         },
       )
     }),
@@ -773,25 +838,34 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 المبلغ هنا تقديرٌ للميزانية؛ الفاتورة الفعلية لكل شهر تُسجَّل بـ sanawi_save_bill.
 
+**مرِّر starts_on متى كانت الدفعة الأولى في المستقبل** — «اشتريت اليوم والدفع
+يبدأ الشهر الجاي» هو النمط الشائع في الأقساط. بدونه يُفترض أن الدفعات بدأت
+هذا الشهر، فيُحسب على المستخدم قسطٌ لم يحن وتزيد الدفعات واحدة.
+
 المدخلات:
   - name (string)
   - amount (number): **القسط الشهري** لا سعر الشراء، 0 أو أكثر
-  - installments (number): عدد الدفعات المتبقية بما فيها دفعة هذا الشهر — يجعله قسطاً ينتهي
+  - starts_on (YYYY-MM-DD): شهر **أول** دفعة — اتركه فارغاً إن كانت الدفعات بدأت
+  - installments (number): عدد الدفعات كاملةً بدءاً من starts_on (أو من هذا الشهر إن غاب)
   - ends_on (YYYY-MM-DD): شهر آخر دفعة، بديلٌ عن installments لمن يعرف التاريخ لا العدد
-  - total_amount (number): سعر الشراء الكامل — للسياق لا للحساب
+  - total_amount (number): المبلغ الكلّي — للسياق لا للحساب، ويُتحقَّق من اتساقه مع القسط
   - day_of_month (number): يوم الاستحقاق 1..31، اختياري
 
-المخرجات: id و name و amount و day_of_month.`,
+المخرجات: id و name و amount و starts_on و ends_on و payments_left و day_of_month.`,
       inputSchema: {
         name: z.string().min(1).max(80),
         amount: z.number().min(0).describe('القسط الشهري لا سعر الشراء'),
+        starts_on: z
+          .string()
+          .optional()
+          .describe('YYYY-MM-DD — شهر أول دفعة، إن لم تكن بدأت بعد'),
         installments: z
           .number()
           .int()
           .min(1)
           .max(600)
           .optional()
-          .describe('عدد الدفعات المتبقية بما فيها هذا الشهر'),
+          .describe('عدد الدفعات كاملةً من أول دفعة إلى آخرها'),
         ends_on: z.string().optional().describe('YYYY-MM-DD — شهر آخر دفعة'),
         total_amount: z.number().min(0).optional().describe('سعر الشراء الكامل، للسياق'),
         annual_interest_percent: z
@@ -807,6 +881,8 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         id: z.string(),
         name: z.string(),
         amount: z.number(),
+        starts_on: z.string().nullable(),
+        has_started: z.boolean(),
         ends_on: z.string().nullable(),
         payments_left: z.number().nullable(),
         remaining_total: z.number().nullable(),
@@ -817,6 +893,9 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
     },
     guard(async (input) => {
       const connection = await connect()
+      const today = new Date()
+      const startsOn = input.starts_on ? requireDate(input.starts_on, 'starts_on') : null
+
       /*
        * عددُ الدفعات يصير تاريخاً، ولا يُخزَّن.
        *
@@ -825,8 +904,10 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
        * تناقضها بعد شهر — العدد ينقص مع الزمن والتاريخ لا. فالتحويل هنا، مرّة،
        * ثم يُشتقّ العدد من التاريخ في كل قراءة.
        *
-       * والعدّ يشمل دفعة هذا الشهر: «قسط واحد باقٍ» يعني ادفع هذا الشهر
-       * وانتهيت، فآخر دفعة هي الشهر الحالي لا الذي يليه.
+       * والعدّ يشمل الدفعة الأولى: «ثلاث دفعات تبدأ في أيلول» آخرها تشرين
+       * ثاني لا كانون أول. والانطلاق من شهر `starts_on` لا من شهر اليوم —
+       * وهذا هو أصل الخطأ الذي وُلد منه الحقل: قسطٌ يبدأ الشهر الجاي كان
+       * يُحسب من هذا الشهر فتزيد دفعةً ويزيد مجموعه قسطاً كاملاً.
        */
       let endsOn: string | null = null
 
@@ -836,9 +917,14 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       if (input.ends_on !== undefined) {
         endsOn = requireDate(input.ends_on, 'ends_on')
       } else if (input.installments !== undefined) {
-        const today = new Date()
-        const last = new Date(today.getFullYear(), today.getMonth() + input.installments - 1, 1)
-        endsOn = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-01`
+        const anchor = startsOn ? new Date(`${startsOn}T00:00:00`) : today
+        endsOn = monthStartAfter(anchor, input.installments - 1)
+      }
+
+      if (startsOn && endsOn && startsOn.slice(0, 7) > endsOn.slice(0, 7)) {
+        throw new Error(
+          `أول دفعة (${monthYear(startsOn)}) بعد آخر دفعة (${monthYear(endsOn)}) — راجع التاريخين.`,
+        )
       }
 
       const { data, error } = await connection.db
@@ -847,6 +933,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           user_id: connection.userId,
           name: input.name.trim(),
           amount: input.amount,
+          starts_on: startsOn,
           ends_on: endsOn,
           total_amount: input.total_amount ?? null,
           annual_interest_percent: input.annual_interest_percent,
@@ -861,8 +948,13 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       // العرض يمرّ بمحرّك التطبيق لا بحسابٍ هنا: العدّ له حدٌّ دقيق يشمل شهر
       // الانتهاء، ونسخةٌ ثانية منه ستقول «خلصت» لمن بقيت عليه دفعة.
       const view = viewCommitment(
-        { amount: Number(data.amount), mySharePercent: 100, endsOn: data.ends_on },
-        new Date(),
+        {
+          amount: Number(data.amount),
+          mySharePercent: 100,
+          startsOn: data.starts_on,
+          endsOn: data.ends_on,
+        },
+        today,
       )
 
       return ok(
@@ -871,18 +963,352 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           (view.isInstallment
             ? `.\nقسطٌ ينتهي: بقيت ${view.paymentsLeft} دفعة، آخرها ${monthYear(data.ends_on!)}` +
               ` — مجموعها ${money(view.remainingForMe ?? 0, currency)}.`
-            : '.'),
+            : '.') +
+          (view.hasStarted
+            ? ''
+            : `\nأول دفعة ${monthYear(data.starts_on!)} — فلا يدخل حمل هذا الشهر.`) +
+          totalAmountWarning(
+            input.amount,
+            endsOn ? totalPayments(startsOn, endsOn, today) : 0,
+            input.total_amount,
+            currency,
+          ),
         {
           currency,
           id: data.id,
           name: data.name,
           amount: Number(data.amount),
+          starts_on: data.starts_on,
+          has_started: view.hasStarted,
           ends_on: data.ends_on,
           payments_left: view.paymentsLeft,
           remaining_total: view.remainingForMe,
           total_amount: data.total_amount === null ? null : Number(data.total_amount),
           day_of_month: data.day_of_month,
         },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_update_fixed_commitment',
+    {
+      title: 'تعديل بند شهري ثابت',
+      description: `يعدّل بنداً شهرياً قائماً: المبلغ أو الاسم أو تواريخ الأقساط.
+
+نظير sanawi_update_obligation للبنود الشهرية. ما لا يُرسَل لا يُمسّ.
+
+لتحويل قسطٍ إلى بندٍ متكرّر بلا نهاية مرّر \`ends_on: null\`.
+
+المدخلات:
+  - commitment (string): المعرّف أو الاسم — مطلوب
+  - name · amount · day_of_month · starts_on · ends_on · installments · total_amount · annual_interest_percent: كلها اختيارية
+
+المخرجات: نفس مخرجات الإضافة بعد التعديل.`,
+      inputSchema: {
+        commitment: z.string().min(1).describe('معرّف البند أو اسمه'),
+        name: z.string().min(1).max(80).optional(),
+        amount: z.number().min(0).optional().describe('القسط الشهري لا سعر الشراء'),
+        starts_on: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('YYYY-MM-DD — شهر أول دفعة، أو null لمسحه'),
+        ends_on: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('YYYY-MM-DD — شهر آخر دفعة، أو null ليصير متكرّراً بلا نهاية'),
+        installments: z
+          .number()
+          .int()
+          .min(1)
+          .max(600)
+          .optional()
+          .describe('عدد الدفعات كاملةً — بديلٌ عن ends_on'),
+        total_amount: z.number().min(0).nullable().optional(),
+        annual_interest_percent: z.number().min(0).max(100).optional(),
+        day_of_month: z.number().int().min(1).max(31).optional(),
+      },
+      outputSchema: {
+        currency: z.string(),
+        id: z.string(),
+        name: z.string(),
+        amount: z.number(),
+        starts_on: z.string().nullable(),
+        has_started: z.boolean(),
+        ends_on: z.string().nullable(),
+        payments_left: z.number().nullable(),
+        remaining_total: z.number().nullable(),
+        total_amount: z.number().nullable(),
+        day_of_month: z.number().nullable(),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const today = new Date()
+      const current = await findCommitment(connection, input.commitment)
+
+      if (input.installments !== undefined && input.ends_on !== undefined) {
+        throw new Error('اختر أحدهما: installments أو ends_on — لا كليهما.')
+      }
+
+      const patch: Partial<FixedCommitment> = {}
+      if (input.name !== undefined) patch.name = input.name.trim()
+      if (input.amount !== undefined) patch.amount = input.amount
+      if (input.day_of_month !== undefined) patch.day_of_month = input.day_of_month
+      if (input.total_amount !== undefined) patch.total_amount = input.total_amount
+      if (input.annual_interest_percent !== undefined) {
+        patch.annual_interest_percent = input.annual_interest_percent
+      }
+      if (input.starts_on !== undefined) {
+        patch.starts_on = input.starts_on === null ? null : requireDate(input.starts_on, 'starts_on')
+      }
+      if (input.ends_on !== undefined) {
+        patch.ends_on = input.ends_on === null ? null : requireDate(input.ends_on, 'ends_on')
+      }
+
+      /*
+       * القيمة بعد التعديل: المُرسَلة إن أُرسلت، وإلا القائمة.
+       *
+       * و`??` لا تصلح هنا: `null` قيمةٌ مقصودة (امسح التاريخ)، وهي تسقط من
+       * ‏`??` إلى القيمة القديمة — فيصير «امسح تاريخ البدء» بلا أثر، ويُفحص
+       * الترتيب على قيمةٍ لم تعد موجودة.
+       */
+      const nextOf = <K extends 'starts_on' | 'ends_on'>(key: K): string | null =>
+        key in patch ? (patch[key] ?? null) : current[key]
+
+      if (input.installments !== undefined) {
+        // العدّ ينطلق من أول دفعة — الجديدة إن أُرسلت، وإلا القائمة، وإلا اليوم.
+        const startsOn = nextOf('starts_on')
+        const anchor = startsOn ? new Date(`${startsOn}T00:00:00`) : today
+        patch.ends_on = monthStartAfter(anchor, input.installments - 1)
+      }
+
+      if (Object.keys(patch).length === 0) {
+        throw new Error('لا حقل للتعديل — مرّر حقلاً واحداً على الأقل غير commitment.')
+      }
+
+      const nextStarts = nextOf('starts_on')
+      const nextEnds = nextOf('ends_on')
+      if (nextStarts && nextEnds && nextStarts.slice(0, 7) > nextEnds.slice(0, 7)) {
+        throw new Error(
+          `أول دفعة (${monthYear(nextStarts)}) بعد آخر دفعة (${monthYear(nextEnds)}) — راجع التاريخين.`,
+        )
+      }
+
+      const { error } = await connection.db
+        .from('fixed_commitments')
+        .update(patch)
+        .eq('id', current.id)
+      if (error) throw error
+
+      // إعادة قراءة لا تركيبٌ من المُدخَل: الرد يحمل أرقاماً محسوبةً على الصفّ
+      // كما صار فعلاً، لا كما ظننّا أنه سيصير.
+      const updated = await findCommitment(connection, current.id)
+      const currency = connection.currency
+      const view = viewCommitment(
+        {
+          amount: Number(updated.amount),
+          mySharePercent: Number(updated.my_share_percent ?? 100),
+          startsOn: updated.starts_on,
+          endsOn: updated.ends_on,
+        },
+        today,
+      )
+
+      return ok(
+        `عُدِّل **${updated.name}**: ${money(Number(updated.amount), currency)} شهرياً` +
+          (updated.day_of_month ? ` (يوم ${updated.day_of_month})` : '') +
+          (view.isInstallment
+            ? `.\nقسطٌ ينتهي: بقيت ${view.paymentsLeft} دفعة، آخرها ${monthYear(updated.ends_on!)}` +
+              ` — مجموعها ${money(view.remainingForMe ?? 0, currency)}.`
+            : '.\nبندٌ متكرّر بلا نهاية.') +
+          (view.hasStarted
+            ? ''
+            : `\nأول دفعة ${monthYear(updated.starts_on!)} — فلا يدخل حمل هذا الشهر.`) +
+          totalAmountWarning(
+            Number(updated.amount),
+            updated.ends_on ? totalPayments(updated.starts_on, updated.ends_on, today) : 0,
+            updated.total_amount === null ? undefined : Number(updated.total_amount),
+            currency,
+          ),
+        {
+          currency,
+          id: updated.id,
+          name: updated.name,
+          amount: Number(updated.amount),
+          starts_on: updated.starts_on,
+          has_started: view.hasStarted,
+          ends_on: updated.ends_on,
+          payments_left: view.paymentsLeft,
+          remaining_total: view.remainingForMe,
+          total_amount: updated.total_amount === null ? null : Number(updated.total_amount),
+          day_of_month: updated.day_of_month,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_archive_fixed_commitment',
+    {
+      title: 'أرشفة بند شهري ثابت',
+      description: `يُخرج البند الشهري من القوائم النشطة دون حذف: سجلّ الفواتير وحصص الشركاء تبقى.
+
+نظير sanawi_archive_obligation. استعمله حين يقول المستخدم «ما عاد عندي هذا البند» أو «احذفه».
+
+المدخلات:
+  - commitment (string): المعرّف أو الاسم
+
+المخرجات: id و name و archived.`,
+      inputSchema: { commitment: z.string().min(1).describe('معرّف البند أو اسمه') },
+      outputSchema: { id: z.string(), name: z.string(), archived: z.boolean() },
+      annotations: { ...WRITES, destructiveHint: true, idempotentHint: true },
+    },
+    guard(async ({ commitment }) => {
+      const connection = await connect()
+      // نبحث في المؤرشف أيضاً: الأداة معلَنة idempotent، ونداءٌ ثانٍ يجب ألّا
+      // يفشل بـ«لا بند بهذا الاسم» فيبدو وكأن البند اختفى من الحساب.
+      const target = await findCommitment(connection, commitment, { includeArchived: true })
+
+      if (!target.is_active) {
+        return ok(`**${target.name}** مؤرشف أصلاً — لم يتغيّر شيء.`, {
+          id: target.id,
+          name: target.name,
+          archived: true,
+        })
+      }
+
+      const { error } = await connection.db
+        .from('fixed_commitments')
+        .update({ is_active: false })
+        .eq('id', target.id)
+      if (error) throw error
+
+      return ok(
+        `أُرشف **${target.name}**. سجلّ الفواتير وحصص الشركاء محفوظة، ` +
+          'ويمكن إرجاعه بتعديل is_active من التطبيق.',
+        { id: target.id, name: target.name, archived: true },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_update_income',
+    {
+      title: 'تعديل مصدر دخل',
+      description: `يعدّل مصدر دخل قائم: المبلغ أو الدورية أو الاسم أو كونه متغيّراً.
+
+ما لا يُرسَل لا يُمسّ. ولتسجيل مبلغٍ **وصل** استعمل sanawi_record_income — هذه الأداة تعدّل التقدير لا الواقع.
+
+المدخلات:
+  - source (string): المعرّف أو الاسم — مطلوب
+  - name · amount · frequency · is_variable: كلها اختيارية
+
+المخرجات: id و name و amount و frequency و is_variable و monthly_equivalent.`,
+      inputSchema: {
+        source: z.string().min(1).describe('معرّف المصدر أو اسمه'),
+        name: z.string().min(1).max(80).optional(),
+        amount: z.number().min(0).optional().describe('المبلغ في الدورة الواحدة'),
+        frequency: z.enum(['monthly', 'biweekly', 'weekly']).optional(),
+        is_variable: z.boolean().optional().describe('دخلٌ لا تقدير ثابت له'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        id: z.string(),
+        name: z.string(),
+        amount: z.number(),
+        frequency: z.string(),
+        is_variable: z.boolean(),
+        monthly_equivalent: z.number(),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const current = await findIncomeSource(connection, input.source)
+
+      const patch: Partial<IncomeSource> = {}
+      if (input.name !== undefined) patch.name = input.name.trim()
+      if (input.amount !== undefined) patch.amount = input.amount
+      if (input.frequency !== undefined) patch.frequency = input.frequency
+      if (input.is_variable !== undefined) patch.is_variable = input.is_variable
+
+      if (Object.keys(patch).length === 0) {
+        throw new Error('لا حقل للتعديل — مرّر حقلاً واحداً على الأقل غير source.')
+      }
+
+      const { error } = await connection.db
+        .from('income_sources')
+        .update(patch)
+        .eq('id', current.id)
+      if (error) throw error
+
+      const updated = await findIncomeSource(connection, current.id)
+      const currency = connection.currency
+      const monthly = monthlyEquivalent(Number(updated.amount), updated.frequency)
+      const variable = Boolean(updated.is_variable)
+
+      return ok(
+        `عُدِّل مصدر الدخل **${updated.name}**: ${money(Number(updated.amount), currency)} ` +
+          CADENCE[updated.frequency] +
+          (variable
+            ? '.\nمتغيّر — لا يدخل الدخل المتوقَّع، ويُحتسب حين تسجّله بـ sanawi_record_income.'
+            : updated.frequency === 'monthly'
+              ? '.'
+              : ` = ${money(monthly, currency)} شهرياً.`),
+        {
+          currency,
+          id: updated.id,
+          name: updated.name,
+          amount: Number(updated.amount),
+          frequency: updated.frequency,
+          is_variable: variable,
+          monthly_equivalent: variable ? 0 : monthly,
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_archive_income',
+    {
+      title: 'أرشفة مصدر دخل',
+      description: `يُخرج مصدر الدخل من القوائم النشطة دون حذف: الدخل المسجَّل منه يبقى في سجلّ الشهور الماضية.
+
+استعمله حين يقول المستخدم «تركت هذا الشغل» أو «ما عاد بيجيني دخل من هون».
+
+المدخلات:
+  - source (string): المعرّف أو الاسم
+
+المخرجات: id و name و archived.`,
+      inputSchema: { source: z.string().min(1).describe('معرّف المصدر أو اسمه') },
+      outputSchema: { id: z.string(), name: z.string(), archived: z.boolean() },
+      annotations: { ...WRITES, destructiveHint: true, idempotentHint: true },
+    },
+    guard(async ({ source }) => {
+      const connection = await connect()
+      const target = await findIncomeSource(connection, source, { includeArchived: true })
+
+      if (!target.is_active) {
+        return ok(`**${target.name}** مؤرشف أصلاً — لم يتغيّر شيء.`, {
+          id: target.id,
+          name: target.name,
+          archived: true,
+        })
+      }
+
+      const { error } = await connection.db
+        .from('income_sources')
+        .update({ is_active: false })
+        .eq('id', target.id)
+      if (error) throw error
+
+      return ok(
+        `أُرشف مصدر الدخل **${target.name}**. ما سُجّل منه في الشهور الماضية محفوظ.`,
+        { id: target.id, name: target.name, archived: true },
       )
     }),
   )
@@ -1009,23 +1435,29 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           .select('id, name')
           .eq('is_active', true)
         const needle = sourceName.toLowerCase()
-        const matches = (sources ?? []).filter((row) => {
-          const name = String(row.name).toLowerCase()
-          return name === needle || name.includes(needle) || needle.includes(name)
-        })
+        /*
+         * التطابق التامّ أولاً، ثم أن يحوي اسمُ المصدر ما نطقه المستخدم.
+         *
+         * وسقط `needle.includes(name)` الذي كان هنا: كان يجعل «شغل جانبي
+         * إضافي» يُربط بمصدر اسمه «شغل»، فيقع دخل الشغل الجانبي في خانة
+         * الراتب. ومن دخلُه مصادرُ متعدّدة متشابهة الأسماء هو أوّل من يقع
+         * فيها — وهو خطأ صامت: المجموع صحيح والتوزيع خطأ.
+         */
+        const all = sources ?? []
+        const exact = all.filter((row) => String(row.name).trim().toLowerCase() === needle)
+        const matches =
+          exact.length > 0
+            ? exact
+            : all.filter((row) => String(row.name).toLowerCase().includes(needle))
 
         // الترجيح لا التخمين: اسمان يطابقان يعني سؤالاً لا اختياراً عشوائياً.
         if (matches.length > 1) {
-          const exact = matches.find((row) => String(row.name).toLowerCase() === needle)
-          if (!exact) {
-            throw new Error(
-              `«${sourceName}» يطابق أكثر من مصدر: ${matches.map((m) => m.name).join('، ')}.` +
-                ' سمِّ المصدر بدقّة.',
-            )
-          }
-          sourceId = exact.id
-          sourceName = exact.name
-        } else if (matches[0]) {
+          throw new Error(
+            `«${sourceName}» يطابق أكثر من مصدر: ${matches.map((m) => m.name).join('، ')}.` +
+              ' سمِّ المصدر بدقّة.',
+          )
+        }
+        if (matches[0]) {
           sourceId = matches[0].id
           sourceName = matches[0].name
         }
@@ -1217,36 +1649,10 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
     guard(async (input) => {
       const connection = await connect()
 
-      const { data: rows, error: findError } = await connection.db
-        .from('fixed_commitments')
-        .select('*')
-        .eq('is_active', true)
-      if (findError) throw findError
-
-      const needle = input.commitment.trim().toLowerCase()
-      const all = (rows ?? []) as { id: string; name: string; amount: number }[]
-      const matches = all.filter(
-        (c) => c.id === input.commitment || c.name.toLowerCase().includes(needle),
-      )
-
-      if (matches.length === 0) {
-        throw new Error(
-          `لا بند شهري باسم «${input.commitment}».` +
-            (all.length > 0 ? ` الموجود: ${all.map((c) => c.name).join('، ')}.` : ''),
-        )
-      }
-      // اسمان يطابقان يعني سؤالاً لا اختياراً: ضبط الشركاء على البند الخطأ خطأ صامت.
-      if (matches.length > 1) {
-        const exact = matches.find((c) => c.name.toLowerCase() === needle)
-        if (!exact) {
-          throw new Error(
-            `«${input.commitment}» يطابق أكثر من بند: ${matches.map((c) => c.name).join('، ')}.` +
-              ' سمِّ البند بدقّة.',
-          )
-        }
-        matches.splice(0, matches.length, exact)
-      }
-      const commitment = matches[0]!
+      // اسمان يطابقان يعني سؤالاً لا اختياراً: ضبط الشركاء على البند الخطأ
+      // خطأ صامت. و`findCommitment` تحكم بالتطابق التامّ أولاً ثم تردّ
+      // المرشّحين عند الالتباس.
+      const commitment = await findCommitment(connection, input.commitment)
 
       const { mine, out, rows: shareRows } = await resolveShares(
         connection,

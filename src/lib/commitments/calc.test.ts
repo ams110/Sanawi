@@ -32,6 +32,31 @@ describe('paymentsLeft', () => {
   it('لا يتأثر باليوم داخل الشهر — الشهر وحدة الحساب', () => {
     expect(paymentsLeft('2026-10-01', TODAY)).toBe(paymentsLeft('2026-10-31', TODAY))
   })
+
+  /*
+   * قسطٌ يبدأ في المستقبل.
+   *
+   * الخطأ الذي وُلدت منه هذه الحالات: رخصة سيارة بـ1,900 على ثلاث دفعات أولها
+   * 15/9/2026 وآخرها 15/11/2026، سُجّلت في 5/8/2026 فقيل «بقيت 4 دفعة —
+   * مجموعها 2,532». آب لا يحوي دفعة أصلاً.
+   */
+  it('يبدأ العدّ من شهر أول دفعة لا من هذا الشهر', () => {
+    expect(paymentsLeft('2026-11-15', TODAY, '2026-09-15')).toBe(3)
+  })
+
+  it('بدءٌ في هذا الشهر يساوي غياب البدء', () => {
+    expect(paymentsLeft('2026-11-15', TODAY, '2026-08-20')).toBe(
+      paymentsLeft('2026-11-15', TODAY),
+    )
+  })
+
+  it('بدءٌ مضى لا يعيد الدفعات التي دُفعت', () => {
+    expect(paymentsLeft('2026-11-15', TODAY, '2026-03-01')).toBe(4)
+  })
+
+  it('بدءٌ بعد النهاية: صفر لا عدد سالب', () => {
+    expect(paymentsLeft('2026-09-01', TODAY, '2026-12-01')).toBe(0)
+  })
 })
 
 describe('viewCommitment', () => {
@@ -69,6 +94,31 @@ describe('viewCommitment', () => {
     const v = viewCommitment(bill({ amount: 100, mySharePercent: 33.33 }), TODAY)
     expect(v.myAmount).toBe(33.33)
     expect(v.partnersAmount).toBe(66.67)
+  })
+
+  it('بلا تاريخ بدء يكون البند قد بدأ — سلوك ما قبل الحقل', () => {
+    expect(viewCommitment(bill(), TODAY).hasStarted).toBe(true)
+    expect(viewCommitment(bill({ endsOn: '2026-12-01' }), TODAY).hasStarted).toBe(true)
+  })
+
+  it('بندٌ لم يبدأ: معلَّم، ومع ذلك يعرف دفعاته', () => {
+    const v = viewCommitment(
+      bill({ amount: 633, startsOn: '2026-09-15', endsOn: '2026-11-15' }),
+      TODAY,
+    )
+    expect(v.hasStarted).toBe(false)
+    expect(v.paymentsLeft).toBe(3)
+    expect(v.isFinished).toBe(false)
+  })
+
+  /** معيار القبول من تقرير الأخطاء، حرفياً. */
+  it('رخصة السيارة: 3 دفعات بمجموع ₪1,899 لا 4 بـ₪2,532', () => {
+    const v = viewCommitment(
+      { amount: 633, startsOn: '2026-09-15', endsOn: '2026-11-15', mySharePercent: 100 },
+      new Date(2026, 7, 5), // 5 آب 2026 — يوم البلاغ
+    )
+    expect(v.paymentsLeft).toBe(3)
+    expect(v.remainingForMe).toBe(1899)
   })
 })
 
@@ -113,6 +163,37 @@ describe('summarizeMonthlyLoad', () => {
   it('يحسب الحمل بحصّتي لا بالمبلغ الكامل', () => {
     const s = summarizeMonthlyLoad([bill({ amount: 1000, mySharePercent: 40 })], TODAY)
     expect(s.recurring).toBe(400)
+  })
+
+  it('لا يحمّل قسطاً لم تبدأ دفعاته على هذا الشهر', () => {
+    const s = summarizeMonthlyLoad(
+      [...items, bill({ amount: 633, startsOn: '2026-09-15', endsOn: '2026-11-15' })],
+      TODAY,
+    )
+    expect(s.installments).toBe(1400)
+    expect(s.total).toBe(1820)
+  })
+
+  it('ويحمّله حين يحين شهره', () => {
+    const s = summarizeMonthlyLoad(
+      [bill({ amount: 633, startsOn: '2026-09-15', endsOn: '2026-11-15' })],
+      new Date(2026, 8, 1), // أيلول
+    )
+    expect(s.installments).toBe(633)
+  })
+
+  it('ولا فرَجَ يُنسب إلى قسط لم يبدأ', () => {
+    const s = summarizeMonthlyLoad(
+      [bill({ amount: 633, startsOn: '2026-09-15', endsOn: '2026-10-15' })],
+      TODAY,
+    )
+    expect(s.nextRelief).toBeNull()
+  })
+
+  it('والبند المتكرّر المؤجَّل كذلك — إيجارٌ يبدأ الشهر الجاي', () => {
+    const s = summarizeMonthlyLoad([bill({ amount: 2500, startsOn: '2026-09-01' })], TODAY)
+    expect(s.recurring).toBe(0)
+    expect(s.total).toBe(0)
   })
 })
 
