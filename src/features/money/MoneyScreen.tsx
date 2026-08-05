@@ -57,8 +57,14 @@ export function MoneyScreen() {
     void load()
   }, [load])
 
+  // المتوقَّع من المصادر الثابتة وحدها — المتغيّر لا تقدير له، واختراعُ رقمٍ
+  // له يضخّم الدخل ويجعل كل حسبةٍ بعده مبنيّةً على ما لم يصل.
   const monthlyIncome = monthlyIncomeFrom(
-    incomes.map((i) => ({ amount: Number(i.amount), frequency: i.frequency })),
+    incomes.map((i) => ({
+      amount: Number(i.amount),
+      frequency: i.frequency,
+      isVariable: Boolean(i.is_variable),
+    })),
   )
 
   if (loading) {
@@ -98,9 +104,9 @@ export function MoneyScreen() {
         )}
 
         <AddIncomeForm
-          onAdd={async (name, amount, frequency) => {
+          onAdd={async (name, amount, frequency, isVariable) => {
             if (!user) return
-            await addIncome(user.id, { name, amount, frequency })
+            await addIncome(user.id, { name, amount, frequency, is_variable: isVariable })
             await load()
           }}
         />
@@ -177,11 +183,18 @@ function IncomeRow({
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-text">{income.name}</p>
-          {/* المكافئ الشهري صريح: الأسبوعي × 4.333 مفاجأة سارّة تستحق الإظهار. */}
+          {/*
+           * المكافئ الشهري صريح: الأسبوعي × 4.333 مفاجأة سارّة تستحق الإظهار.
+           * والمتغيّر لا مكافئ له — قولُ رقمٍ له يوهم بتقديرٍ لا وجود له.
+           */}
           <p className="text-xs text-text-muted">
-            {t('money.monthlyEquivalent', {
-              amount: formatMoney(Number(income.amount) * FREQUENCY_TO_MONTHLY[income.frequency]),
-            })}
+            {income.is_variable
+              ? t('money.variableHint')
+              : t('money.monthlyEquivalent', {
+                  amount: formatMoney(
+                    Number(income.amount) * FREQUENCY_TO_MONTHLY[income.frequency],
+                  ),
+                })}
           </p>
         </div>
         <span className="num text-sm font-bold text-text">
@@ -351,22 +364,30 @@ const inputClass =
 function AddIncomeForm({
   onAdd,
 }: {
-  onAdd: (name: string, amount: number, frequency: IncomeFrequency) => Promise<void>
+  onAdd: (
+    name: string,
+    amount: number,
+    frequency: IncomeFrequency,
+    isVariable: boolean,
+  ) => Promise<void>
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
   const [amount, setAmount] = useState(0)
+  const [isVariable, setIsVariable] = useState(false)
   const [frequency, setFrequency] = useState<IncomeFrequency>('weekly')
   const [busy, setBusy] = useState(false)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!name.trim() || amount <= 0) return
+    // المتغيّر يُقبل بلا مبلغ: هو تحديداً ما لا رقم ثابت له.
+    if (!name.trim() || (amount <= 0 && !isVariable)) return
     setBusy(true)
     try {
-      await onAdd(name.trim(), amount, frequency)
+      await onAdd(name.trim(), amount, frequency, isVariable)
       setName('')
       setAmount(0)
+      setIsVariable(false)
     } finally {
       setBusy(false)
     }
@@ -406,6 +427,23 @@ function AddIncomeForm({
           </button>
         ))}
       </div>
+
+      {/*
+       * الدخل المتغيّر: الشغل الجانبي والساعات المتغيّرة والإكراميات.
+       *
+       * بلا هذه الخانة كان صاحبه مضطراً لاختراع رقمٍ ثابت، فيتضخّم الدخل
+       * المتوقَّع ويصير «الباقي للصرف» وعداً لا يفي به الشهر.
+       */}
+      <label className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5">
+        <input
+          type="checkbox"
+          checked={isVariable}
+          onChange={(e) => setIsVariable(e.target.checked)}
+          className="size-5 accent-brand"
+        />
+        <span className="text-sm font-semibold text-text">{t('money.isVariable')}</span>
+      </label>
+
       <Button type="submit" variant="secondary" loading={busy} className="w-full">
         {t('money.addIncome')}
       </Button>

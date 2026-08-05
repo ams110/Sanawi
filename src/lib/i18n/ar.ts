@@ -84,17 +84,28 @@ export const ar = {
     createFailed: 'ما قدرنا نضيف الالتزام',
   },
 
+  /*
+   * أسماء التبويبات السبعة — كلّها هنا.
+   *
+   * كانت موزّعة على أربعة أماكن: أربعةٌ في `nav` وثلاثةٌ مبعثرة في
+   * `bills.tab` و`expenses.tab` و`insights.tab`. فمن أراد قراءة أسماء
+   * التنقّل قرأها من أربع نقاط، ومن أراد تغيير واحدٍ منها بحث عنه. والترتيب
+   * في `App.tsx` مصفوفةٌ واحدة، فليكن الاسم كذلك.
+   *
+   * والنصوص قصيرة عمداً: سبعة تبويبات على شاشة 390px تعني 55px لكل واحد،
+   * و«التزامات» بلا أل التعريف لأن أل وحدها تكفي لقصّ الكلمة.
+   */
   nav: {
     month: 'الشهر',
-    // «التزامات» لا «الالتزامات»: سبعة تبويبات على شاشة 390px تعني 55px
-    // لكل واحد، وأل التعريف وحدها تكفي لقصّ الكلمة.
+    bills: 'الفواتير',
+    expenses: 'مصاريف',
+    money: 'الدخل',
     obligations: 'التزامات',
     calendar: 'التقويم',
-    money: 'الدخل',
+    insights: 'تحليل',
   },
 
   expenses: {
-    tab: 'مصاريف',
     title: 'مصاريف الشهر',
     subtitle: 'الصغيرة اللي ما بتحسّ فيها — لحتى تتجمّع',
     total: 'صرفت هالشهر',
@@ -168,6 +179,8 @@ export const ar = {
     biweekly: 'كل أسبوعين',
     monthly: 'شهري',
     monthlyEquivalent: 'يعني {{amount}} بالشهر',
+    isVariable: 'دخل متغيّر — ما بعرف قديش بيجي',
+    variableHint: 'متغيّر — بينحسب لما يوصل',
     remove: 'احذف',
     saved: 'انحفظ ✓',
     saveFailed: 'ما قدرنا نحفظ',
@@ -192,7 +205,6 @@ export const ar = {
   },
 
   insights: {
-    tab: 'تحليل',
     groupTitle: 'قديش بتكلفك فعلاً',
     groupSubtitle: 'كل شي بتدفعه على بند واحد، مجموع ومقسوم على 12',
     pickCategory: 'اختار بند',
@@ -238,7 +250,6 @@ export const ar = {
   },
 
   bills: {
-    tab: 'الفواتير',
     title: 'فواتير الشهر',
     subtitle: 'سجّل قديش إجت فعلاً، وشو دفعت',
     recorded: 'مسجّل',
@@ -267,6 +278,9 @@ export const ar = {
     monthlyAmount: 'المبلغ الشهري',
     suggested: 'عادةً بين {{min}} و {{max}}',
     isInstallment: 'هذا قسط أو دين — بينتهي',
+    startsOn: 'أول دفعة',
+    startsOnHint: 'اتركه فاضي إذا بلّشت تدفع',
+    startsAfterEnds: 'أول دفعة بعد آخر دفعة — راجع التاريخين',
     endsOn: 'آخر دفعة',
     totalAmount: 'أصل الدين (اختياري)',
     add: 'ضيف البند',
@@ -276,6 +290,7 @@ export const ar = {
     lastPayment: 'آخر دفعة 🎉',
     remainingForMe: 'باقي عليك {{amount}}',
     finished: 'خلص',
+    notStarted: 'بتبلّش {{date}}',
 
     loadTitle: 'الحمل الشهري',
     recurring: 'فواتير متكرّرة',

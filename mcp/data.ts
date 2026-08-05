@@ -9,7 +9,12 @@
 
 import { calculateObligation, type ObligationCalcResult } from '../src/lib/obligations/calc.js'
 import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligations/calendar.js'
-import { monthlyIncomeFrom, summarizeMonth, type MonthlySummary } from '../src/lib/budget/calc.js'
+import {
+  monthlyEquivalent,
+  monthlyIncomeFrom,
+  summarizeMonth,
+  type MonthlySummary,
+} from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
@@ -121,6 +126,93 @@ export async function findObligation(
   throw new Error(`«${reference}» يطابق أكثر من التزام. مرّر المعرّف:\n- ${candidates}`)
 }
 
+/**
+ * صفٌّ بمعرّفه أو باسمه — نواة `findObligation` معمَّمة.
+ *
+ * كان منطق المطابقة هذا مكتوباً ثلاث مرات: للبنود في `save_bill` وفي
+ * `set_commitment_partners`، ولمصادر الدخل في `record_income`. ونسخة
+ * `record_income` كانت أوسعها: تطابق `needle.includes(name)` أيضاً، فمصدرٌ
+ * اسمه «شغل» يبتلع «شغل جانبي» ويصير اختيار المصدر قرعة. ومن دخلُه مصادرُ
+ * متعدّدة متشابهة الأسماء هو أوّل من يقع فيها.
+ *
+ * القاعدة واحدة هنا: المعرّف أولاً، ثم التطابق التامّ، ثم الجزئي — وعند
+ * الالتباس تُردّ قائمة المرشّحين ولا يُخمَّن.
+ */
+export function pickByReference<T>(
+  rows: readonly T[],
+  reference: string,
+  nameOf: (row: T) => string,
+  idOf: (row: T) => string,
+  labels: { singular: string; empty: string },
+): T {
+  if (UUID.test(reference)) {
+    const byId = rows.find((row) => idOf(row) === reference)
+    if (byId) return byId
+    throw new Error(`لا يوجد ${labels.singular} بالمعرّف ${reference} في هذا الحساب.`)
+  }
+
+  const needle = reference.trim().toLowerCase()
+  const exact = rows.filter((row) => nameOf(row).trim().toLowerCase() === needle)
+  const matches =
+    exact.length > 0 ? exact : rows.filter((row) => nameOf(row).toLowerCase().includes(needle))
+
+  if (matches.length === 1) return matches[0]!
+  if (matches.length === 0) {
+    const names = rows.map(nameOf).join('، ')
+    throw new Error(
+      `لا يوجد ${labels.singular} اسمه «${reference}».` +
+        (names ? ` الموجود: ${names}.` : ` ${labels.empty}`),
+    )
+  }
+
+  const candidates = matches.map((row) => `${nameOf(row)} (${idOf(row)})`).join('\n- ')
+  throw new Error(
+    `«${reference}» يطابق أكثر من ${labels.singular}. مرّر المعرّف:\n- ${candidates}`,
+  )
+}
+
+/** بندٌ ثابت بمعرّفه أو باسمه. */
+export async function findCommitment(
+  { db, userId }: Connection,
+  reference: string,
+  options: { includeArchived?: boolean } = {},
+): Promise<FixedCommitment> {
+  let query = db.from('fixed_commitments').select('*').eq('user_id', userId)
+  if (!options.includeArchived) query = query.eq('is_active', true)
+
+  const { data, error } = await query.order('created_at', { ascending: true })
+  if (error) throw error
+
+  return pickByReference(
+    (data ?? []) as FixedCommitment[],
+    reference,
+    (row) => row.name,
+    (row) => row.id,
+    { singular: 'بند ثابت', empty: 'لا بنود ثابتة بعد.' },
+  )
+}
+
+/** مصدر دخل بمعرّفه أو باسمه. */
+export async function findIncomeSource(
+  { db, userId }: Connection,
+  reference: string,
+  options: { includeArchived?: boolean } = {},
+): Promise<IncomeSource> {
+  let query = db.from('income_sources').select('*').eq('user_id', userId)
+  if (!options.includeArchived) query = query.eq('is_active', true)
+
+  const { data, error } = await query.order('created_at', { ascending: true })
+  if (error) throw error
+
+  return pickByReference(
+    (data ?? []) as IncomeSource[],
+    reference,
+    (row) => row.name,
+    (row) => row.id,
+    { singular: 'مصدر دخل', empty: 'لا مصادر دخل بعد.' },
+  )
+}
+
 export async function loadProfile({ db, userId }: Connection): Promise<Profile | null> {
   const { data, error } = await db.from('profiles').select('*').eq('id', userId).maybeSingle()
   if (error) throw error
@@ -162,6 +254,16 @@ export interface MonthPicture {
   savingsTarget: number
   expenses: ExpenseSummary
   receivedIncome: number
+  /** الدخل المتوقَّع من المصادر الثابتة — بلا المتغيّرة. */
+  expectedIncome: number
+  /**
+   * ما وصل هذا الشهر موزَّعاً على مصادره.
+   *
+   * الفرق بين المجموع والتفصيل هو ما يحتاجه صاحب المصادر المتعدّدة: «وصل
+   * 4,000» لا تقول إن الراتب وصل والشغل الجانبي لم يصل بعد، وهما حالتان
+   * مختلفتان تماماً في آخر الشهر.
+   */
+  incomeBySource: { name: string; amount: number; expected: number | null }[]
   /** الحمل الشهري مفصولاً: متكرّر بلا نهاية، وأقساط تنتهي. */
   load: MonthlyLoad
 }
@@ -181,6 +283,9 @@ export interface MonthPicture {
 export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   const month = monthKey()
   const monthStart = new Date(`${month}T00:00:00`)
+  // يومٌ واحد لكل حسابات هذه اللوحة: نداءان لـ`new Date()` عند منتصف ليلة
+  // آخر الشهر يقعان في شهرين مختلفين، فتختلف أرقام اللوحة عن بعضها.
+  const today = new Date()
 
   const [obligations, money, profile, details, expenseRows, entries] = await Promise.all([
     loadObligations(connection),
@@ -195,15 +300,18 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   const incomes = money.incomes.map((i) => ({
     amount: Number(i.amount),
     frequency: i.frequency as IncomeFrequency,
+    isVariable: Boolean(i.is_variable),
   }))
   const obligationsTotal = obligations.reduce((sum, o) => sum + o.calc.monthlyInstallment, 0)
 
   const load = summarizeMonthlyLoad(
     details.map((d) => ({
       amount: Number(d.amount),
+      startsOn: d.starts_on,
       endsOn: d.ends_on,
       mySharePercent: Number(d.my_share_percent),
     })),
+    today,
   )
 
   const expenses = summarizeExpenses(
@@ -218,16 +326,64 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
 
   const receivedIncome =
     Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
+  const expectedIncome = monthlyIncomeFrom(incomes)
+
+  // ما وصل لكل مصدر: المعرَّف بـ`source_id`، والحرّ باسمه كما كُتب.
+  const receivedBySourceId = new Map<string, number>()
+  const receivedLoose = new Map<string, number>()
+  for (const entry of entries) {
+    const amount = Number(entry.amount)
+    if (entry.source_id) {
+      receivedBySourceId.set(entry.source_id, (receivedBySourceId.get(entry.source_id) ?? 0) + amount)
+    } else {
+      const label = entry.name?.trim() || 'دخل بلا مصدر'
+      receivedLoose.set(label, (receivedLoose.get(label) ?? 0) + amount)
+    }
+  }
+
+  const incomeBySource = [
+    ...money.incomes.map((source) => ({
+      name: source.name,
+      amount: Math.round((receivedBySourceId.get(source.id) ?? 0) * 100) / 100,
+      // المتغيّر بلا توقُّع — و`null` تقول ذلك، بينما صفرٌ يقول «توقّعنا لا شيء».
+      expected: source.is_variable
+        ? null
+        : monthlyEquivalent(Number(source.amount), source.frequency as IncomeFrequency),
+    })),
+    ...[...receivedLoose].map(([name, amount]) => ({
+      name,
+      amount: Math.round(amount * 100) / 100,
+      expected: null,
+    })),
+  ]
+
+  /*
+   * التقدير يرى ما تراه اللوحة من بنود.
+   *
+   * كان يجمع مبالغ `fixed_commitments` الخام، فيحمّل الشهرَ قسطاً انتهى
+   * وقسطاً لم يبدأ — وهما بالضبط ما تستثنيه `summarizeMonthlyLoad` من اللوحة.
+   * فيخرج الرقمان مختلفين لا لأنهما يقيسان شيئين مختلفين (وهو الفرق المقصود
+   * بين التقدير والواقع) بل لأن أحدهما يعدّ بنوداً لا دفعة لها هذا الشهر.
+   *
+   * والمبلغ هنا كامل لا حصّتي: هذا عقد `summarizeMonth` منذ البداية.
+   */
+  const activeThisMonth = details.filter((d) => {
+    const view = viewCommitment(
+      { amount: Number(d.amount), startsOn: d.starts_on, endsOn: d.ends_on, mySharePercent: 100 },
+      today,
+    )
+    return view.hasStarted && !view.isFinished
+  })
 
   return {
     summary: summarizeMonth({
       incomes,
-      fixedCommitments: money.fixedCommitments.map((c) => Number(c.amount)),
+      fixedCommitments: activeThisMonth.map((c) => Number(c.amount)),
       obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
       monthlySavingsTarget: savingsTarget,
     }),
     panel: buildMonthPanel({
-      expectedIncome: monthlyIncomeFrom(incomes),
+      expectedIncome,
       receivedIncome,
       obligationInstallments: Math.round(obligationsTotal * 100) / 100,
       recurringBills: load.recurring,
@@ -242,6 +398,8 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     savingsTarget,
     expenses,
     receivedIncome,
+    expectedIncome,
+    incomeBySource,
     load,
   }
 }
@@ -441,11 +599,20 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
    * فحصاً حقيقياً بدل أن يقرأ أعمدةً غير موجودة فيها فيخرج بأصفارٍ تبدو
    * نجاحاً.
    */
+  /*
+   * والقسط الذي لم تبدأ دفعاته دَينٌ قائم رغم ذلك.
+   *
+   * هو مستثنًى من **حمل هذا الشهر** — لا دفعة فيه — وليس مستثنًى من **ما
+   * عليّ**: من اشترى اليوم ويبدأ الدفع الشهر الجاي مدينٌ بالمبلغ كلّه من
+   * اليوم. فالفلترة هنا على الانتهاء وحده، و`startsOn` يصحّح عدد الدفعات
+   * فيصحّ الرصيد معه.
+   */
   const live = details
     .map((d) => ({
       row: d,
       view: viewCommitment({
         amount: Number(d.amount),
+        startsOn: d.starts_on,
         endsOn: d.ends_on,
         mySharePercent: Number(d.my_share_percent),
       }),

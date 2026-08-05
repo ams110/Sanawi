@@ -109,14 +109,26 @@ function Shell() {
   )
 }
 
+/*
+ * ترتيب التبويبات: الأقرب إلى اليوم أقربُ إلى الإبهام.
+ *
+ * الترتيب السابق كان بترتيب بناء الميزات لا بترتيب استعمالها، فوقعت
+ * «الفواتير» و«مصاريف» — وهما ما يُفتح كل يوم — في الوسط، وجاء «التقويم»
+ * وهو شاشةُ نظرةٍ شهرية في المرتبة الثالثة.
+ *
+ * والترتيب الآن رحلةُ الشهر نفسها: الشهر ثم ما يخرج (فواتير، مصاريف) ثم ما
+ * يدخل، ثم ما هو أبعد من الشهر (التزامات، تقويم، تحليل).
+ *
+ * وأسماؤها كلها في `nav.*` — مفتاحٌ واحد لكل تبويب، لا ثلاثة فضاءات.
+ */
 const TABS = [
   { to: '/month', key: 'nav.month', icon: '📊' },
+  { to: '/bills', key: 'nav.bills', icon: '🧾' },
+  { to: '/expenses', key: 'nav.expenses', icon: '🛒' },
+  { to: '/money', key: 'nav.money', icon: '💰' },
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
   { to: '/calendar', key: 'nav.calendar', icon: '📅' },
-  { to: '/bills', key: 'bills.tab', icon: '🧾' },
-  { to: '/expenses', key: 'expenses.tab', icon: '🛒' },
-  { to: '/money', key: 'nav.money', icon: '💰' },
-  { to: '/insights', key: 'insights.tab', icon: '🔍' },
+  { to: '/insights', key: 'nav.insights', icon: '🔍' },
 ] as const
 
 /**

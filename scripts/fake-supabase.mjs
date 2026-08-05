@@ -106,6 +106,7 @@ function seed() {
         suggested_min: 80,
         suggested_max: 200,
         is_installment: false,
+        hint: 'خط الإنترنت ومعه التلفزيون إن كانا بحزمة واحدة.',
         sort_order: 10,
       },
     ],
@@ -120,6 +121,7 @@ function seed() {
         default_recurrence_months: 12,
         suggested_min: 2500,
         suggested_max: 9000,
+        hint: 'إجباري وطرف ثالث أو شامل — يُدفع عند تجديد البوليصة مرة بالسنة.',
         country: 'IL',
         sort_order: 10,
       },
@@ -228,12 +230,20 @@ function commitmentDetails(db) {
       const partnersPercent = shares.reduce((t, s) => t + Number(s.share_percent), 0)
       const mySharePercent = Number(c.my_share_percent ?? 100 - partnersPercent) || 100
 
-      // العدّ يشمل شهر الانتهاء نفسه، كما في العرض الحقيقي.
+      // شهر أول دفعة: البند الذي لم يبدأ يظهر ولا يُحمَّل، كما في العرض الحقيقي.
+      const startsOn = c.starts_on ?? null
+      const startMonth = startsOn ? new Date(`${startsOn.slice(0, 7)}-01T00:00:00`) : null
+      const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      const hasStarted = startMonth === null || startMonth <= thisMonth
+
+      // العدّ يشمل شهر الانتهاء نفسه، ويبدأ من الأكبر بين شهر أول دفعة
+      // وهذا الشهر — كما في العرض الحقيقي.
       let paymentsLeft = null
       if (c.ends_on) {
         const end = new Date(`${c.ends_on}T00:00:00`)
+        const from = startMonth && startMonth > thisMonth ? startMonth : thisMonth
         const months =
-          (end.getFullYear() - now.getFullYear()) * 12 + (end.getMonth() - now.getMonth()) + 1
+          (end.getFullYear() - from.getFullYear()) * 12 + (end.getMonth() - from.getMonth()) + 1
         paymentsLeft = Math.max(0, months)
       }
 
@@ -244,6 +254,8 @@ function commitmentDetails(db) {
         my_share_percent: mySharePercent,
         my_amount: round2((Number(c.amount) * mySharePercent) / 100),
         payments_left: paymentsLeft,
+        starts_on: startsOn,
+        has_started: hasStarted,
         partner_count: shares.length,
       }
     })
@@ -545,11 +557,12 @@ function defaultsFor(table) {
     case 'bill_payments':
       return { paid_at: null, note: null }
     case 'income_sources':
-      return { is_active: true }
+      return { is_active: true, is_variable: false }
     case 'fixed_commitments':
       return {
         is_active: true,
         day_of_month: null,
+        starts_on: null,
         ends_on: null,
         total_amount: null,
         my_share_percent: 100,

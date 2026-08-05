@@ -273,6 +273,9 @@ function BillCard({
 
   const left = detail?.payments_left ?? null
   const isShared = Number(row.commitment.my_share_percent ?? 100) < 100
+  // البند المسجَّل الذي لم تبدأ دفعاته يظهر في القائمة ولا يُحمَّل على الشهر،
+  // فلا بدّ من قول ذلك: صفٌّ بلا شارة يُقرأ «مستحقّ الآن».
+  const notStarted = row.commitment.starts_on !== null && detail?.has_started === false
 
   const day = row.commitment.day_of_month
   const due = day != null ? dueInfo(day, new Date(`${month}T00:00:00`)) : null
@@ -491,6 +494,12 @@ function BillCard({
        * عدّاد الدفعات: القسط عبء له تاريخ انتهاء، وإظهاره يحوّل "أدفع كل
        * شهر" إلى "بقيت ثلاث دفعات" — وهما شعوران مختلفان تماماً.
        */}
+      {notStarted && (
+        <span className="w-fit rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
+          {t('bills.notStarted', { date: formatMonthYear(row.commitment.starts_on!) })}
+        </span>
+      )}
+
       {left !== null && (
         <div className="flex items-center gap-2">
           <span

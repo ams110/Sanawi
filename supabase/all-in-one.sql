@@ -3,8 +3,10 @@
 -- الصق هذا الملف كله في Supabase → SQL Editor واضغط Run.
 -- آمن للتكرار: تشغيله مرتين لا يفقد بياناتك.
 -- لا يحتوي أي DELETE ولا TRUNCATE ولا DROP TABLE.
--- فيه drop واحد فقط: drop trigger if exists (سطر ~48) يُعاد إنشاؤه فوراً
--- بعده، وهو ضروري لتشغيل الملف أكثر من مرة. لا يمسّ أي صف بيانات.
+-- فيه drop واحد فقط: drop trigger if exists، يُعاد إنشاؤه فوراً بعده،
+-- وهو ضروري لتشغيل الملف أكثر من مرة. لا يمسّ أي صف بيانات.
+--
+-- مولَّد: node scripts/build-schema.mjs — لا تعدّله يدوياً، عدّل الهجرة.
 -- ============================================================
 
 -- ─────────────────────────────────────────────
@@ -308,14 +310,17 @@ values
   ('טסט (فحص سنوي)',    'טסט שנתי',        'Annual test',       'car',       '🔧', 12,  400,  900,  'IL', 20),
   ('טיפול (صيانة)',      'טיפול תקופתי',    'Service',           'car',       '🛠️',  6,  600, 2500,  'IL', 30),
   ('إطارات',             'צמיגים',          'Tires',             'car',       '⚙️', 24, 1200, 3500,  'IL', 40),
-  ('رسائل الترخيص',      'אגרת רישוי',      'Vehicle licence',   'car',       '📄', 12,  500, 1500,  'IL', 50),
+  -- «رسوم» لا «رسائل»: אגרת = رسم، والخطأ أسقط التزاماً سنوياً كاملاً من
+  -- ميزانية أول مستخدم لأنه لم يفهم البند فتجاوزه. صُحّح في 0015 للقواعد
+  -- القائمة، وهنا للقواعد الجديدة.
+  ('رسوم الترخيص',       'אגרת רישוי',      'Vehicle licence',   'car',       '📄', 12,  500, 1500,  'IL', 50),
   ('تأمين صحي مكمّل',     'ביטוח משלים',     'Health insurance',  'health',    '🏥', 12,  600, 2400,  'IL', 60),
   ('طبيب أسنان',         'טיפול שיניים',    'Dentist',           'health',    '🦷', 12,  500, 3000,  'IL', 70),
   ('نظارات',             'משקפיים',         'Glasses',           'health',    '👓', 24,  400, 2000,  'IL', 80),
   ('أعراس ومناسبات',     'חתונות ואירועים', 'Weddings & events', 'events',    '💍', 12, 1500, 8000,  'IL', 90),
   ('أعياد وهدايا',       'חגים ומתנות',     'Holidays & gifts',  'events',    '🎁', 12,  800, 4000,  'IL', 100),
   ('سفر وإجازة',         'טיול וחופשה',     'Travel',            'lifestyle', '✈️', 12, 2000, 12000, 'IL', 110),
-  ('ضريبة الأرنونا',      'ארנונה',          'Municipal tax',     'home',      '🏠',  6,  800, 4000,  'IL', 120),
+  ('أرنونا (ضريبة البلدية)','ארנונה',        'Municipal tax',     'home',      '🏠',  6,  800, 4000,  'IL', 120),
   ('صيانة البيت',        'תחזוקת בית',      'Home maintenance',  'home',      '🔨', 12,  500, 5000,  'IL', 130),
   ('اشتراكات سنوية',     'מנויים שנתיים',   'Annual subscriptions', 'other',  '💳', 12,  200, 2000,  'IL', 140),
   ('طوارئ وأعطال',       'תקלות ובלת"מ',    'Emergencies',       'other',     '🚨', 12, 1000, 6000,  'IL', 150)
@@ -485,7 +490,9 @@ group by c.id, c.user_id, c.name, c.amount;
 comment on view public.bill_averages is
   'المبلغ المقدَّر مقابل المتوسط الفعلي لآخر 12 شهراً';
 
-
+-- ─────────────────────────────────────────────
+-- 0009_expense_categories.sql
+-- ─────────────────────────────────────────────
 -- المصاريف اليومية: تصنيفات بأيقونات، وتمييز المصروف المفاجئ.
 --
 -- جدول expenses كان موجوداً بلا واجهة ولا تصنيف مفهرس: عمود category نصّي
@@ -564,8 +571,9 @@ create index if not exists expenses_user_category_idx
 comment on column public.expenses.category_id is 'التصنيف المفهرس — يحلّ محلّ category النصّي';
 comment on column public.expenses.is_unexpected is 'مصروف لم يكن في الحسبان';
 
-
+-- ─────────────────────────────────────────────
 -- 0010_commitments_upgrade.sql
+-- ─────────────────────────────────────────────
 -- الفواتير الشهرية: أيقونة، ونهاية للأقساط، وحصص شركاء.
 --
 -- ثلاث حاجاتٍ يجمعها أن fixed_commitments كان اسماً ومبلغاً فحسب:
@@ -701,8 +709,9 @@ where c.is_active;
 comment on view public.commitment_details is
   'حصّتي بالشيكل وعدد الدفعات المتبقية لكل بند شهري نشط';
 
-
+-- ─────────────────────────────────────────────
 -- 0011_goal_templates.sql
+-- ─────────────────────────────────────────────
 -- أهداف الشراء: قوالب لما يُشترى مرةً واحدة.
 --
 -- الهدف ليس نوعاً جديداً في السكيما: obligations تدعم recurrence_months = 0
@@ -727,8 +736,9 @@ values
   ('صندوق طوارئ',      'קרן חירום',      'Emergency fund', 'goal', '🛟', 0, 5000, 50000, 'IL', 290)
 on conflict do nothing;
 
-
+-- ─────────────────────────────────────────────
 -- 0012_income_entries.sql
+-- ─────────────────────────────────────────────
 -- الدخل الفعلي: ما وصل فعلاً لا ما يُتوقَّع.
 --
 -- income_sources تقدير: "راتبي 5,000 كل شهر". وهو يكفي من يقبض ثابتاً
@@ -764,8 +774,9 @@ create policy "income_entries_all_own" on public.income_entries
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
-
+-- ─────────────────────────────────────────────
 -- 0013_payment_methods.sql
+-- ─────────────────────────────────────────────
 -- موعد الدفع وطريقته.
 --
 -- day_of_month موجود منذ 0003 وبلا واجهة قطّ. وطريقة الدفع ناقصة، وهي
@@ -838,3 +849,380 @@ alter table public.expenses
 
 create index if not exists bill_payments_method_idx on public.bill_payments (method_id);
 create index if not exists expenses_method_idx on public.expenses (user_id, method_id);
+
+-- ─────────────────────────────────────────────
+-- 0014_wealth.sql
+-- ─────────────────────────────────────────────
+-- الثروة: الطرف الآخر من المعادلة.
+--
+-- كل ما بناه التطبيق حتى الآن يجيب على سؤالٍ واحد: «كم يخرج من جيبي». وهو
+-- نصف السؤال. النصف الثاني — «كم تراكم لي» — لم يكن له جدولٌ ولا عمود، فلا
+-- يستطيع التطبيق أن يقول لصاحبه أين هو من الحرية المالية، وهي في جوهرها
+-- معادلةٌ من طرفين:
+--
+--     دخلٌ من الأصول ≥ مصاريف الحياة
+--
+-- هذه الهجرة تضيف الطرف الغائب: الأصول، ولقطاتها الشهرية لتتبّع النمو،
+-- ونسبة الفائدة على الديون (بدونها لا يمكن ترتيب سدادها)، وثوابت التخطيط
+-- الشخصية في الملف.
+--
+-- ما لا تضيفه عمداً: لا عرض `net_worth` محسوب في SQL. صافي الثروة قرارُ
+-- تعريفٍ لا جمعُ أعمدة — أيّ شيء يُعدّ أصلاً، وأيّ التزامٍ يُعدّ ديناً —
+-- ومكان قرارات التعريف في هذا المشروع هو المحرّك النقي المُختبَر
+-- (src/lib/wealth/networth.ts) لا تعريفُ عرضٍ لا اختبار له.
+
+/* ── الأصول ────────────────────────────────────────────────── */
+
+create table if not exists public.assets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  name text not null,
+
+  -- النوع يحدّد معنى الرقم لا شكله: النقد يُصرف اليوم، والعقار لا يُصرف
+  -- إلا ببيعه، والدَّين لك عند غيرك قد لا يعود. جمعها في رقمٍ واحد بلا
+  -- تمييز يعطي «ثروةً» لا يستطيع صاحبها أن يأكل منها.
+  kind text not null default 'cash'
+    check (kind in ('cash', 'savings', 'investment', 'property', 'receivable', 'other')),
+
+  amount numeric(14, 2) not null default 0 check (amount >= 0),
+
+  -- العائد السنوي المتوقّع لهذا الأصل — يدخل في الإسقاط وحده.
+  -- النقد صفر، ومحفظة المؤشرات ٧، والعقار ما يقدّره صاحبه.
+  annual_return_percent numeric(5, 2) not null default 0
+    check (annual_return_percent >= -100 and annual_return_percent <= 100),
+
+  -- السيولة: هل أستطيع الوصول إليه هذا الأسبوع؟ صندوق الطوارئ يُقاس بها،
+  -- ولا معنى لصندوق طوارئ في شقّة.
+  is_liquid boolean not null default true,
+
+  -- صندوق الطوارئ يُعلَّم ولا يُشتقّ: أصلان نقديّان بالمبلغ نفسه أحدهما
+  -- محجوزٌ للطوارئ والآخر مرصودٌ لسفرةٍ في الصيف، والتطبيق لا يفرّق بينهما
+  -- إلا إن قال صاحبهما.
+  is_emergency_fund boolean not null default false,
+
+  icon text,
+  note text,
+  is_active boolean not null default true,
+
+  -- تاريخ آخر تحديثٍ للقيمة — عمودٌ ضروريّ لا زينة.
+  -- صافي ثروةٍ مبنيّ على قيمةٍ أُدخلت قبل سنتين رقمٌ يكذب بثقة، والتطبيق
+  -- يحتاج أن يقول «هذا الأصل لم يُحدَّث منذ ١٤ شهراً» بدل أن يجمعه صامتاً.
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+comment on table public.assets is
+  'الأصول — الطرف الآخر من صافي الثروة، مقابل الالتزامات والديون';
+comment on column public.assets.is_liquid is
+  'هل يُصرف هذا الأسبوع؟ صندوق الطوارئ لا يكون إلا سائلاً';
+comment on column public.assets.updated_at is
+  'آخر تحديث للقيمة — قيمةٌ قديمة تجعل صافي الثروة يكذب بثقة';
+
+create index if not exists assets_user_idx
+  on public.assets (user_id, is_active);
+
+-- التحديث التلقائي للعمود: تركُه للعميل يعني أن أي مسارٍ ينسى ضبطه
+-- (استيراد، خادم MCP، سكربت) يترك تاريخاً كاذباً — والكذب هنا أسوأ من
+-- الغياب لأنه يُقرأ حقيقةً.
+create or replace function public.touch_updated_at()
+returns trigger
+language plpgsql
+-- مسارُ البحث مثبَّت كما في handle_new_user بـ 0001: دالّةٌ بمسارٍ متغيّر
+-- تُنفَّذ بما يجده المستدعي لا بما قصده كاتبها.
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists assets_touch_updated_at on public.assets;
+create trigger assets_touch_updated_at
+  before update on public.assets
+  for each row execute function public.touch_updated_at();
+
+/* ── لقطات صافي الثروة ─────────────────────────────────────── */
+
+-- الرقم الحالي وحده لا يجيب على السؤال الحقيقي: «هل أنا أتقدّم؟».
+-- لقطةٌ شهرية تحوّل رقماً إلى خطّ، والخطّ هو ما يُبقي الناس على الطريق.
+--
+-- لماذا تُخزَّن ولا تُشتقّ: قيمة الأصل يُكتب فوقها عند التحديث، فتاريخُها
+-- يضيع. لا يمكن استرجاع صافي ثروة شهرٍ مضى من جدولٍ يحمل الحاضر وحده.
+create table if not exists public.net_worth_snapshots (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+
+  -- أول يوم في الشهر — مفتاح الشهر لا تاريخ اللقطة، تماماً كـ bill_payments.
+  snapshot_month date not null,
+
+  assets_total numeric(14, 2) not null default 0,
+  -- صناديق الالتزامات: مالٌ حقيقيّ جمعه صاحبه ولم يُنفقه بعد.
+  restricted_total numeric(14, 2) not null default 0,
+  debts_total numeric(14, 2) not null default 0,
+  net_worth numeric(14, 2) not null default 0,
+
+  created_at timestamptz not null default now(),
+
+  -- لقطةٌ واحدة لكل شهر: الثانية تحديثٌ للأولى لا صفٌّ جديد، وإلا صار
+  -- الخطُّ البيانيّ يقفز داخل الشهر الواحد بلا معنى.
+  unique (user_id, snapshot_month)
+);
+
+comment on table public.net_worth_snapshots is
+  'لقطة شهرية لصافي الثروة — لأن الاتجاه يهمّ أكثر من الرقم';
+
+create index if not exists net_worth_snapshots_user_month_idx
+  on public.net_worth_snapshots (user_id, snapshot_month desc);
+
+/* ── الفائدة على الديون ────────────────────────────────────── */
+
+-- بدون هذا العمود يعرف التطبيق متى ينتهي الدَّين ولا يعرف كم يكلّف.
+-- والفرق عمليّ لا نظريّ: من عنده دينان ودفعةٌ زائدة، ترتيبُ سدادهما
+-- بالفائدة الأعلى أولاً يوفّر عليه مبلغاً حقيقياً — ولا يمكن ترتيبهما
+-- بلا الرقم.
+alter table public.fixed_commitments
+  add column if not exists annual_interest_percent numeric(5, 2) not null default 0
+    check (annual_interest_percent >= 0 and annual_interest_percent <= 100);
+
+comment on column public.fixed_commitments.annual_interest_percent is
+  'الفائدة السنوية — صفر للفاتورة، وغير صفر للقرض؛ عليها يُرتَّب السداد';
+
+-- العرض يُعاد إنشاؤه ليحمل العمود الجديد.
+--
+-- والعمود الجديد في آخر القائمة لا في موضعه «المنطقي» بجانب my_share_percent:
+-- ‏`create or replace view` في Postgres لا يعيد تعريف الأعمدة القائمة، إنما
+-- يسمح بإلحاق أعمدةٍ بعدها فقط. إقحامُ عمودٍ في الوسط يجعل الأمر يحاول إعادة
+-- تسمية `my_amount` إلى `annual_interest_percent` فيُجهض بـ
+-- «cannot change name of view column» — والهجرة كلها معه، على كل قاعدةٍ
+-- فيها العرض القديم.
+create or replace view public.commitment_details
+with (security_invoker = on) as
+select
+  c.id as commitment_id,
+  c.user_id,
+  c.name,
+  c.icon,
+  c.amount,
+  c.ends_on,
+  c.total_amount,
+  c.my_share_percent,
+  round(c.amount * c.my_share_percent / 100, 2) as my_amount,
+  case
+    when c.ends_on is null then null
+    -- الدفعات المتبقية تشمل شهر الاستحقاق نفسه: قسطٌ ينتهي هذا الشهر
+    -- بقيت له دفعةٌ واحدة لا صفر.
+    else greatest(
+      0,
+      (date_part('year', c.ends_on) - date_part('year', current_date)) * 12
+        + (date_part('month', c.ends_on) - date_part('month', current_date)) + 1
+    )::int
+  end as payments_left,
+  c.annual_interest_percent
+from public.fixed_commitments c
+where c.is_active;
+
+comment on view public.commitment_details is
+  'حصّتي بالشيكل وعدد الدفعات المتبقية لكل بند شهري نشط';
+
+/* ── ثوابت التخطيط ─────────────────────────────────────────── */
+
+-- ثلاثة أرقام تحوّل «ادّخر» إلى «متى تصل»، وهي شخصيّةٌ بطبعها:
+-- من يعيش على ٤٪ ليس كمن يحتاط بـ ٣٪، ومن يقرأ التضخّم عنده ٢ ليس كمن
+-- يقرأه ٥. تثبيتها في الكود يجعل الرقم النهائي رأياً لا حساباً.
+alter table public.profiles
+  add column if not exists emergency_months int not null default 3
+    check (emergency_months between 1 and 24);
+
+alter table public.profiles
+  add column if not exists withdrawal_rate_percent numeric(4, 2) not null default 4
+    check (withdrawal_rate_percent > 0 and withdrawal_rate_percent <= 20);
+
+alter table public.profiles
+  add column if not exists inflation_percent numeric(4, 2) not null default 3
+    check (inflation_percent >= 0 and inflation_percent <= 50);
+
+comment on column public.profiles.emergency_months is
+  'كم شهراً يجب أن يغطّيه صندوق الطوارئ من المصروف الأساسي';
+comment on column public.profiles.withdrawal_rate_percent is
+  'معدّل السحب الآمن — ٤٪ يعني أن رقم الحرية = المصروف السنوي × ٢٥';
+comment on column public.profiles.inflation_percent is
+  'التضخّم المفترض — بدونه يعِد الإسقاط بثروةٍ اسمية لا تشتري ما تعِد به';
+
+/* ── RLS ───────────────────────────────────────────────────── */
+
+alter table public.assets enable row level security;
+alter table public.net_worth_snapshots enable row level security;
+
+create policy "assets_all_own" on public.assets
+  for all using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create policy "net_worth_snapshots_all_own" on public.net_worth_snapshots
+  for all using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+-- ─────────────────────────────────────────────
+-- 0015_start_dates_variable_income_and_hints.sql
+-- ─────────────────────────────────────────────
+-- تاريخ بدء للبنود الثابتة، دخلٌ متغيّر، وشرحٌ لكل قالب.
+--
+-- ثلاثُ حاجاتٍ كشفتها أول جلسة استخدام حقيقية:
+--
+--   1) رخصة سيارة بـ1,900 على ثلاث دفعات أولها 15/9، سُجّلت في 5/8 فقيل
+--      «بقيت 4 دفعة — مجموعها 2,532». آب لا يحوي دفعة أصلاً. السبب أن
+--      `ends_on` وحده يفترض أن الدفعة الأولى في الشهر الحالي، ولا حقل
+--      لتاريخ أول دفعة. و«اشتريت اليوم والدفع يبدأ الشهر الجاي» ليس حالةً
+--      نادرة — هو النمط الشائع في الأقساط.
+--
+--   2) `income_sources.amount` مطلوب، فالشغل الجانبي المتغيّر يُجبَر على رقمٍ
+--      مخترَع يضخّم الدخل المتوقَّع. ومن دخلُه مصادرُ متعددة — ثابتٌ ومتغيّر —
+--      يصير كل رقم في التطبيق مبنيّاً على تقديرٍ لم يصل.
+--
+--   3) «رسائل الترخيص» في القوالب — و«رسائل» = letters، والصحيح «رسوم» =
+--      fees (אגרת רישוי). المستخدم يتجاوز أي بند لا يفهمه، فالتزامٌ سنوي
+--      بـ500–1,500 كان يسقط بصمت من ميزانيته. والعلاج ليس تصحيح الكلمة
+--      وحدها: القوالب بلا شرحٍ تترك المستخدم يخمّن ما هو البند ومتى يُدفع.
+
+/* ── 1. تاريخ أول دفعة ─────────────────────────────────────── */
+
+alter table public.fixed_commitments
+  add column if not exists starts_on date;
+
+comment on column public.fixed_commitments.starts_on is
+  'أول دفعة — فارغ يعني أن الدفعات بدأت فعلاً (سلوك ما قبل هذا العمود)';
+
+-- العرض يُعاد إنشاؤه: تعبير `payments_left` يتغيّر، والعمودان الجديدان
+-- يُلحقان في الآخر.
+--
+-- الإلحاق في الآخر ليس ترتيباً جمالياً: `create or replace view` لا يعيد
+-- تعريف الأعمدة القائمة ولا يقحم عموداً في الوسط — يحاول عندها إعادة تسمية
+-- ما بعده فيُجهض بـ «cannot change name of view column». نفس القيد الذي
+-- وُثّق في 0014 حين أُلحق annual_interest_percent. وتغييرُ *تعبير* عمودٍ
+-- قائم مسموح ما دام اسمه ونوعه لم يتغيّرا — ولذلك يمرّ payments_left.
+create or replace view public.commitment_details
+with (security_invoker = on) as
+select
+  c.id as commitment_id,
+  c.user_id,
+  c.name,
+  c.icon,
+  c.amount,
+  c.ends_on,
+  c.total_amount,
+  c.my_share_percent,
+  round(c.amount * c.my_share_percent / 100, 2) as my_amount,
+  case
+    when c.ends_on is null then null
+    -- الدفعات المتبقية تشمل شهر الاستحقاق نفسه: قسطٌ ينتهي هذا الشهر
+    -- بقيت له دفعةٌ واحدة لا صفر.
+    --
+    -- والعدّ يبدأ من الأكبر بين شهر أول دفعة وهذا الشهر: قسطٌ يبدأ الشهر
+    -- الجاي وينتهي بعد ثلاثة له ثلاث دفعات لا أربع.
+    else greatest(
+      0,
+      (date_part('year', c.ends_on)
+        - date_part('year', greatest(current_date, coalesce(c.starts_on, current_date)))) * 12
+        + (date_part('month', c.ends_on)
+          - date_part('month', greatest(current_date, coalesce(c.starts_on, current_date))))
+        + 1
+    )::int
+  end as payments_left,
+  c.annual_interest_percent,
+  c.starts_on,
+  -- البند الذي لم يبدأ يبقى في القائمة — المستخدم سجّله ويريد رؤيته — ولا
+  -- يُحمَّل على شهرٍ لا دفعة فيه. الفلترة في محرّك الحساب لا في العرض.
+  (c.starts_on is null
+    or date_trunc('month', c.starts_on) <= date_trunc('month', current_date)) as has_started
+from public.fixed_commitments c
+where c.is_active;
+
+comment on view public.commitment_details is
+  'حصّتي بالشيكل وعدد الدفعات المتبقية لكل بند شهري نشط، وهل بدأت دفعاته';
+
+/* ── 2. دخلٌ بلا تقدير ─────────────────────────────────────── */
+
+-- الشغل الجانبي لا رقم ثابت له. والصادق ألّا يُخترع له رقم: يبقى المصدر
+-- ظاهراً في القوائم، ويدخل في «ما وصل» عبر income_entries حين يصل فعلاً،
+-- ولا يدخل في «المتوقَّع». وهو امتداد لنفس القسمة التي بُني عليها
+-- income_entries في 0012: التقدير في جدول والواقع في آخر.
+alter table public.income_sources
+  add column if not exists is_variable boolean not null default false;
+
+comment on column public.income_sources.is_variable is
+  'دخلٌ لا تقدير ثابت له — يُحتسب حين يصل فعلاً ولا يدخل الدخل المتوقَّع';
+
+/* ── 3. شرحٌ لكل قالب ──────────────────────────────────────── */
+
+alter table public.obligation_templates
+  add column if not exists hint text;
+alter table public.commitment_templates
+  add column if not exists hint text;
+
+comment on column public.obligation_templates.hint is
+  'جملة واحدة: ما هو البند ومتى يُدفع — بندٌ غامض التزامٌ لا يُسجَّل';
+comment on column public.commitment_templates.hint is
+  'جملة واحدة: ما هو البند ومتى يُدفع';
+
+-- التصحيح: «رسائل» ← «رسوم». مطابقةٌ بالاسم القديم فيبقى قابلاً لإعادة
+-- التشغيل بلا أثر، ولا يمسّ صفّاً صُحّح من قبل.
+update public.obligation_templates
+  set name_ar = 'رسوم الترخيص'
+  where name_ar = 'رسائل الترخيص';
+
+-- «ضريبة الأرنونا» ← «أرنونا (ضريبة البلدية)»: الاسم وحده كان يلتبس بالبند
+-- الشهري المسمّى «أرنونا»، وهما وجهان لدفعةٍ واحدة — من يدفعها دفعةً كبيرة
+-- يسجّلها هنا، ومن يدفعها بأمر دفع شهري يسجّلها هناك. والشرح يفصل بينهما.
+update public.obligation_templates
+  set name_ar = 'أرنونا (ضريبة البلدية)'
+  where name_ar = 'ضريبة الأرنونا';
+
+update public.obligation_templates as t set hint = v.hint
+from (values
+  ('تأمين السيارة',        'إجباري وطرف ثالث أو شامل — يُدفع عند تجديد البوليصة مرة بالسنة.'),
+  ('טסט (فحص سنوي)',      'الفحص السنوي الإجباري للسيارة — بلا نجاحه لا تتجدّد الرخصة.'),
+  ('טיפול (صيانة)',        'الصيانة الدورية عند الكراج: زيت وفلاتر — كل نصف سنة أو حسب الكيلومترات.'),
+  ('إطارات',               'تبديل الإطارات — كل سنتين تقريباً أو حين يقلّ عمق النقشة عن الحدّ.'),
+  ('رسوم الترخيص',         'אגרת רישוי — رسم سنوي لوزارة المواصلات لتجديد رخصة السيارة، يصلك إشعاره بالبريد.'),
+  ('تأمين صحي مكمّل',       'שב"ן — المكمّل من صندوق المرضى (مكابي، كلاليت…) فوق سلّة الصحة الأساسية.'),
+  ('طبيب أسنان',           'الأسنان خارج سلّة الصحة: تنظيف وحشوات وتقويم — كلها من الجيب.'),
+  ('نظارات',               'نظارات أو عدسات ومعها فحص النظر — كل سنتين تقريباً.'),
+  ('أعراس ومناسبات',       'نقوط الأعراس والهدايا — تتجمّع في الموسم ولا أحد يحسبها شهرياً.'),
+  ('أعياد وهدايا',         'مصروف الأعياد: هدايا وضيافة وملابس العيد.'),
+  ('سفر وإجازة',           'تذاكر وفنادق ومصروف السفرة — يُجمَّع على مدار السنة لأجل أسبوع.'),
+  ('أرنونا (ضريبة البلدية)','ضريبة البلدية — تُدفع كل شهرين، أو دفعةً واحدة أول السنة بخصم. إن كنت تدفعها بأمر دفع شهري فسجّلها بنداً شهرياً بدلها.'),
+  ('صيانة البيت',          'دهان وتسريبات وتصليحات — ما لا بدّ منه ولا موعد ثابت له.'),
+  ('اشتراكات سنوية',       'ما يُدفع مرة بالسنة: برامج، نقابة، عضويات.'),
+  ('طوارئ وأعطال',         'احتياطٌ لما لا يُتوقَّع: عطل سيارة أو جهاز بيت أو طبيب مستعجل. غير «صندوق طوارئ» — هذا مصروفٌ متوقَّع حدوثه مجهولٌ موعده، وذاك هدفُ ادّخارٍ يُجمَّع مرة.'),
+  ('كمبيوتر / لابتوب',     'هدف شراء: تجمّع ثمنه شهرياً، وينتهي البند بالشراء ولا يتجدّد.'),
+  ('بلايستيشن / جيمنغ',    'هدف شراء لمرة واحدة — جهاز الألعاب وملحقاته.'),
+  ('تلفون جديد',           'هدف شراء: ثمن التلفون كاملاً بدل تقسيطه على فاتورة الخلوي.'),
+  ('سيارة',                'هدف شراء كبير — الدفعة الأولى أو ثمن السيارة كاملاً.'),
+  ('أثاث',                 'هدف شراء: تأثيث غرفة أو بيت.'),
+  ('دراجة / سكوتر',        'هدف شراء لمرة واحدة.'),
+  ('كورس أو دراسة',        'هدف: رسوم كورس أو فصل دراسي.'),
+  ('سفرة',                 'هدف سفرةٍ بعينها لها ثمنٌ وموعد — غير «سفر وإجازة» المتكرّر كل سنة.'),
+  ('عرس',                  'هدف كبير: تكاليف العرس — قاعة وذهب وتصوير.'),
+  ('صندوق طوارئ',          'هدف ادّخار: مصروف ثلاثة إلى ستة شهور جانباً لليوم الأسود. يُجمَّع مرة ويبقى.')
+) as v(name_ar, hint)
+where t.name_ar = v.name_ar;
+
+update public.commitment_templates as t set hint = v.hint
+from (values
+  ('كهرباء',          'فاتورة חשמל — تصل كل شهرين، والمبلغ هنا حصّة الشهر الواحد.'),
+  ('مي',              'فاتورة المياه من البلدية أو شركة المياه.'),
+  ('غاز',             'غاز البيت: مركزي بفاتورة شهرية، أو جرّة تُبدَّل.'),
+  ('إنترنت',          'خط الإنترنت ومعه التلفزيون إن كانا بحزمة واحدة.'),
+  ('تلفون',           'خط الخلوي — وتكبر الفاتورة إن كان الجهاز مقسّطاً عليها.'),
+  ('أرنونا',          'ضريبة البلدية بأمر دفع شهري. إن كنت تدفعها دفعةً كبيرة كل شهرين فسجّلها التزاماً بدلها.'),
+  ('إيجار',           'إيجار البيت الشهري.'),
+  ('واد بيت',         'ועד בית — رسم صيانة العمارة: الدرج والمصعد وكهرباء المشترك.'),
+  ('اشتراكات رقمية',  'نتفلكس وسبوتيفاي وأمثالهما — صغيرة منفردةً وكبيرة مجتمعةً.'),
+  ('نادي رياضي',      'اشتراك الجيم أو النادي.'),
+  ('مساعدة الأهل',    'ما ترسله شهرياً للأهل.'),
+  ('قرض سيارة',       'قسط قرض السيارة — حدّد تاريخ آخر دفعة ليخرج من حملك حين ينتهي.'),
+  ('قرض شخصي',        'قسط قرض من البنك — له عدد دفعات وتاريخ نهاية.'),
+  ('تقسيط جهاز',      'تلفون أو أثاث أو جهاز مقسّط — ينتهي بانتهاء أقساطه.'),
+  ('دين لحدا',        'دين لصاحب أو قريب تسدّده على دفعات متّفق عليها.')
+) as v(name_ar, hint)
+where t.name_ar = v.name_ar;

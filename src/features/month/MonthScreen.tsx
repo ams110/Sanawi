@@ -9,7 +9,7 @@ import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
 import { summarizeExpenses } from '@/lib/expenses/calc'
-import { summarizeMonthlyLoad } from '@/lib/commitments/calc'
+import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
 import { monthlyIncomeFrom } from '@/lib/budget/calc'
 import type { MonthPanelInput } from '@/lib/budget/month'
 import { MonthPanel } from './MonthPanel'
@@ -48,10 +48,26 @@ export function MonthScreen() {
       const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
       const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
 
+      // التقدير يرى ما تراه اللوحة: بندٌ انتهى قسطه أو لم يبدأ بعد لا دفعة
+      // له هذا الشهر، فحسابه يجعل الرقمين يختلفان لغير السبب المقصود.
+      const dueThisMonth = fixed.filter((f) => {
+        const view = viewCommitment({
+          amount: Number(f.amount),
+          startsOn: f.starts_on,
+          endsOn: f.ends_on,
+          mySharePercent: 100,
+        })
+        return view.hasStarted && !view.isFinished
+      })
+
       setSummary(
         summarizeMonth({
-          incomes: incomes.map((i) => ({ amount: Number(i.amount), frequency: i.frequency })),
-          fixedCommitments: fixed.map((f) => Number(f.amount)),
+          incomes: incomes.map((i) => ({
+            amount: Number(i.amount),
+            frequency: i.frequency,
+            isVariable: Boolean(i.is_variable),
+          })),
+          fixedCommitments: dueThisMonth.map((f) => Number(f.amount)),
           obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
           monthlySavingsTarget: savingsTarget,
         }),
@@ -65,6 +81,7 @@ export function MonthScreen() {
       const load = summarizeMonthlyLoad(
         details.map((d) => ({
           amount: Number(d.amount),
+          startsOn: d.starts_on,
           endsOn: d.ends_on,
           mySharePercent: Number(d.my_share_percent),
         })),
@@ -73,7 +90,11 @@ export function MonthScreen() {
 
       setPanel({
         expectedIncome: monthlyIncomeFrom(
-          incomes.map((i) => ({ amount: Number(i.amount), frequency: i.frequency })),
+          incomes.map((i) => ({
+            amount: Number(i.amount),
+            frequency: i.frequency,
+            isVariable: Boolean(i.is_variable),
+          })),
         ),
         receivedIncome: sumIncomeEntries(entries),
         obligationInstallments: Math.round(obligationsTotal * 100) / 100,

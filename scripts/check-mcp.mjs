@@ -201,6 +201,24 @@ async function call(name, args = {}) {
   return result.structuredContent ?? null
 }
 
+/**
+ * كـ`call` لكنه يعيد النصّ معه.
+ *
+ * بعض ما نفحصه يعيش في النصّ لا في البيانات المنظّمة — التحذيرات مثلاً:
+ * تحذيرُ تناقض المبلغ الكلّي ليس حقلاً، هو جملةٌ يقرأها المستخدم. وفحصُ
+ * الحقول وحدها كان سيمرّ على تحذيرٍ اختفى.
+ */
+async function callRaw(name, args = {}) {
+  called.add(name)
+  const result = await app.callTool({ name, arguments: args })
+  const text = result.content?.[0]?.text ?? ''
+  if (result.isError) {
+    fail(`${name}: ${text}`)
+    return { text: '', data: null }
+  }
+  return { text, data: result.structuredContent ?? null }
+}
+
 /** ينادي أداة ويتوقّع خطأً يذكر كذا — رسائل الأخطاء جزء من الواجهة. */
 async function expectError(name, args, needle) {
   called.add(name)
@@ -240,6 +258,44 @@ expect('الدخل الشهري', income?.monthly_equivalent, 12000)
 const weekly = await call('sanawi_add_income', { name: 'عمل إضافي', amount: 300, frequency: 'weekly' })
 // ‏300 × 52 ÷ 12 = 1300 — لا 1200. المعامل الخطأ يضيع أربعة رواتب في السنة.
 expect('تحويل الأسبوعي إلى شهري', weekly?.monthly_equivalent, 1300)
+
+/*
+ * الدخل المتغيّر: مصدرٌ ظاهرٌ بلا تقدير.
+ *
+ * صاحب المصادر المتعددة — راتبٌ ثابت وشغلٌ جانبي — كان مضطراً لإعطاء
+ * الجانبي رقماً ثابتاً فيتضخّم المتوقَّع. والاسم هنا لا يحوي «عمل إضافي»
+ * ولا يُحوى فيه: المطابقة الضبابية في record_income تُخطئ عند التداخل.
+ */
+const sideGig = await call('sanawi_add_income', {
+  name: 'شغل حرّ',
+  amount: 0,
+  is_variable: true,
+})
+expect('المتغيّر بلا تقدير شهري', sideGig?.monthly_equivalent, 0)
+expect('ومعلَّمٌ متغيّراً', sideGig?.is_variable, true)
+
+// ‏12,000 + 1,300 + صفرٌ من المتغيّر = 13,300. دخولُ المتغيّر كان سيضخّمه.
+expect(
+  'المتغيّر خارج الدخل المتوقَّع',
+  (await call('sanawi_month_overview'))?.expected_income,
+  13300,
+)
+
+// تعديل مصدر دخل وأرشفته — ما كان ممكناً إلا من الشاشة.
+const raised = await call('sanawi_update_income', { source: 'راتب', amount: 13000 })
+expect('التعديل يعيد الحساب', raised?.monthly_equivalent, 13000)
+await expectError('sanawi_update_income', { source: 'راتب' }, 'لا حقل للتعديل')
+
+const droppedGig = await call('sanawi_archive_income', { source: 'شغل حرّ' })
+expect('أُرشف المصدر', droppedGig?.archived, true)
+expect(
+  'ونداءٌ ثانٍ لا يفشل',
+  (await call('sanawi_archive_income', { source: 'شغل حرّ' }))?.archived,
+  true,
+)
+
+// نعيد الراتب إلى 12,000 حتى تبقى الأرقام التالية كما بُنيت عليه.
+await call('sanawi_update_income', { source: 'راتب', amount: 12000 })
 
 await call('sanawi_add_fixed_commitment', { name: 'كهرباء', amount: 300, day_of_month: 10 })
 
@@ -506,7 +562,7 @@ await expectError('sanawi_create_obligation', {
   total_amount: 100,
   next_due_date: '15/03/2027',
 }, 'YYYY-MM-DD')
-await expectError('sanawi_save_bill', { commitment: 'غاز', amount: 10 }, 'لا بند ثابت')
+await expectError('sanawi_save_bill', { commitment: 'غاز', amount: 10 }, 'لا يوجد بند ثابت')
 // حصة أقل من 100٪ تعني شركاء، وحصصهم لا تُكتب من هنا — فلا نترك المجموع ناقصاً.
 await expectError(
   'sanawi_create_obligation',
@@ -671,6 +727,114 @@ await expectError(
   'اختر أحدهما',
 )
 
+/* ─── قسطٌ يبدأ في المستقبل ─── */
+
+/*
+ * الحالة التي وُلد منها الحقل: رخصة سيارة بـ1,900 على ثلاث دفعات أولها بعد
+ * شهر. بلا `starts_on` كانت تُسجَّل بأربع دفعات ومجموع 2,532، ويُحمَّل الشهرُ
+ * الحاليّ قسطاً لا دفعة له.
+ *
+ * والتواريخ محسوبة من اليوم لا مثبَّتة: فحصٌ بتاريخٍ ثابت يمرّ اليوم ويكذب
+ * الشهر الجاي.
+ */
+const deferred = await call('sanawi_add_fixed_commitment', {
+  name: 'أقساط الرخصة',
+  amount: 633,
+  starts_on: inMonths(1),
+  installments: 3,
+  total_amount: 1900,
+})
+expect('ثلاث دفعات لا أربع', deferred?.payments_left, 3)
+expect('ومجموعها 1,899 لا 2,532', deferred?.remaining_total, 1899)
+expect('ومعلَّمٌ أنه لم يبدأ', deferred?.has_started, false)
+expect('وآخر دفعة بعد ثلاثة شهور', deferred?.ends_on?.slice(0, 7), inMonths(3).slice(0, 7))
+
+// أهمّ فحصٍ هنا: الشهر الحاليّ لا دفعة فيه، فلا يزيد حمله شيئاً.
+expect('ولا يدخل حمل هذا الشهر', (await call('sanawi_month_overview'))?.installments, 400)
+
+// وقائمة الفواتير تقول متى يبدأ بدل أن تعرضه مستحقاً الآن.
+const deferredRow = (await call('sanawi_list_bills'))?.bills?.find(
+  (b) => b.name === 'أقساط الرخصة',
+)
+expect('القائمة تعرف أنه لم يبدأ', deferredRow?.has_started, false)
+expect('وتعرف عدد دفعاته', deferredRow?.payments_left, 3)
+
+// التحقّق من المبلغ الكلّي: تحذيرٌ في النصّ لا استثناء يمنع الحفظ.
+const mismatch = await callRaw('sanawi_add_fixed_commitment', {
+  name: 'قسط متناقض',
+  amount: 633,
+  installments: 4,
+  total_amount: 1900,
+})
+if (!mismatch.text.includes('تحقّق')) {
+  fail(`تحذير تناقض المبلغ الكلّي: توقّعنا نصّاً فيه «تحقّق» ووصل: ${mismatch.text}`)
+}
+expect('ومع ذلك يُحفَظ البند', mismatch.data?.payments_left, 4)
+await call('sanawi_archive_fixed_commitment', { commitment: 'قسط متناقض' })
+
+// والاتّساق لا يُحذَّر منه: 633 × 3 = 1,899 مقابل 1,900 فرقُ تقريبٍ لا خطأ.
+const consistent = await callRaw('sanawi_add_fixed_commitment', {
+  name: 'قسط متّسق',
+  amount: 633,
+  installments: 3,
+  total_amount: 1900,
+})
+if (consistent.text.includes('تحقّق')) {
+  fail(`فرق التقريب لا يستحقّ تحذيراً، ومع ذلك وصل: ${consistent.text}`)
+}
+await call('sanawi_archive_fixed_commitment', { commitment: 'قسط متّسق' })
+
+/* ─── تعديل البنود الثابتة وأرشفتها ─── */
+
+// التصحيح الذي كان مستحيلاً عبر MCP: بندٌ سُجّل بلا تاريخ بدء يُصحَّح.
+const shifted = await call('sanawi_update_fixed_commitment', {
+  commitment: 'أقساط الرخصة',
+  starts_on: inMonths(2),
+})
+expect('التعديل يعيد حساب الدفعات', shifted?.payments_left, 2)
+expect('والمجموع معها', shifted?.remaining_total, 1266)
+
+// وتحويل القسط إلى بندٍ متكرّر بلا نهاية، ثم العكس.
+const perpetualNow = await call('sanawi_update_fixed_commitment', {
+  commitment: 'أقساط الرخصة',
+  ends_on: null,
+})
+expect('صار بلا نهاية', perpetualNow?.ends_on, null)
+expect('فلا عدّ دفعات', perpetualNow?.payments_left, null)
+
+// ومسحُ تاريخ البدء يعيده إلى حمل هذا الشهر — `null` قيمةٌ لا غياب.
+const cleared = await call('sanawi_update_fixed_commitment', {
+  commitment: 'أقساط الرخصة',
+  starts_on: null,
+})
+expect('مسح تاريخ البدء يُفعّله', cleared?.has_started, true)
+expect('ولا يبقى التاريخ', cleared?.starts_on, null)
+
+await expectError(
+  'sanawi_update_fixed_commitment',
+  { commitment: 'أقساط الرخصة' },
+  'لا حقل للتعديل',
+)
+await expectError(
+  'sanawi_update_fixed_commitment',
+  { commitment: 'أقساط الرخصة', starts_on: inMonths(6), ends_on: inMonths(2) },
+  'بعد آخر دفعة',
+)
+
+const archivedBill = await call('sanawi_archive_fixed_commitment', { commitment: 'أقساط الرخصة' })
+expect('أُرشف البند', archivedBill?.archived, true)
+// نداءٌ ثانٍ لا يفشل: الأداة معلَنة idempotent.
+expect(
+  'ونداءٌ ثانٍ لا يفشل',
+  (await call('sanawi_archive_fixed_commitment', { commitment: 'أقساط الرخصة' }))?.archived,
+  true,
+)
+expect(
+  'والمؤرشف خارج الحمل الشهري',
+  (await call('sanawi_month_overview'))?.installments,
+  400,
+)
+
 /* ─── شركاء البنود الشهرية ─── */
 
 // الحمل الشهري يُحسب على حصّتي — لا على المبلغ الكامل.
@@ -700,7 +864,11 @@ await expectError(
   { commitment: 'كهرباء', partners: [{ name: 'س', share_percent: 60 }, { name: 'ص', share_percent: 50 }] },
   '110',
 )
-await expectError('sanawi_set_commitment_partners', { commitment: 'لا يوجد', partners: [] }, 'لا بند شهري')
+await expectError(
+  'sanawi_set_commitment_partners',
+  { commitment: 'اسم غير موجود', partners: [] },
+  'لا يوجد بند ثابت',
+)
 
 const backToMe = await call('sanawi_set_commitment_partners', { commitment: 'كهرباء', partners: [] })
 expect('العودة إلى الكل عليّ', backToMe?.my_share_percent, 100)

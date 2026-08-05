@@ -21,6 +21,14 @@ export interface IncomeInput {
   amount: number
   frequency: IncomeFrequency
   isActive?: boolean
+  /**
+   * دخلٌ لا تقدير ثابت له — شغلٌ جانبي أو ساعاتٌ متغيّرة أو إكراميات.
+   *
+   * يُستثنى من **المتوقَّع** ولا يُحذف: مصدرٌ بلا رقمٍ موثوق خيرٌ من رقمٍ
+   * مخترَع يضخّم الدخل، ويبقى داخلاً في **الواصل** عبر income_entries حين
+   * يصل فعلاً. وهي نفس قسمة «التقدير في جدول والواقع في آخر».
+   */
+  isVariable?: boolean
 }
 
 export interface MonthlySummaryInput {
@@ -58,14 +66,20 @@ const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0)
 const finite = (n: number | undefined, fallback: number): number =>
   typeof n === 'number' && Number.isFinite(n) ? n : fallback
 
+/** الدخل الشهري المتوقَّع: المصادر النشطة التي لها تقدير موثوق. */
 export function monthlyIncomeFrom(incomes: IncomeInput[]): number {
   return round2(
     sum(
       incomes
-        .filter((i) => i.isActive !== false)
+        .filter((i) => i.isActive !== false && i.isVariable !== true)
         .map((i) => i.amount * FREQUENCY_TO_MONTHLY[i.frequency]),
     ),
   )
+}
+
+/** تحويل مبلغ الدورة الواحدة إلى ما يعادله شهرياً. */
+export function monthlyEquivalent(amount: number, frequency: IncomeFrequency): number {
+  return round2(amount * FREQUENCY_TO_MONTHLY[frequency])
 }
 
 export function summarizeMonth(input: MonthlySummaryInput): MonthlySummary {

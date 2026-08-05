@@ -15,6 +15,7 @@ export function MonthlyLoadPanel({ details }: { details: CommitmentDetail[] }) {
   const load = summarizeMonthlyLoad(
     details.map((d) => ({
       amount: Number(d.amount),
+      startsOn: d.starts_on,
       endsOn: d.ends_on,
       mySharePercent: Number(d.my_share_percent),
     })),

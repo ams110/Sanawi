@@ -8,7 +8,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { computeGroupCost } from '../../src/lib/budget/groupCost.js'
-import { projectSavings } from '../../src/lib/budget/calc.js'
+import { monthlyEquivalent, monthlyIncomeFrom, projectSavings } from '../../src/lib/budget/calc.js'
+import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { freedomSensitivity } from '../../src/lib/wealth/freedom.js'
 import { buildPayoffPlan, comparePayoff } from '../../src/lib/commitments/payoff.js'
 import { heaviestMonth } from '../../src/lib/obligations/calendar.js'
@@ -36,6 +37,7 @@ import {
   type ObligationView,
 } from '../data.js'
 import {
+  CADENCE,
   CATEGORY_LABEL,
   guard,
   isoDate,
@@ -104,6 +106,10 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   - projected_remaining: ما سيتبقّى آخر الشهر إن استمرّت وتيرة الصرف اليومي — هذا هو التحذير المبكر.
   - daily_allowance: كم يمكن صرفه يومياً حتى آخر الشهر.
   - income و income_is_actual و income_gap: الدخل المعتمد، وهل هو واقعٌ مسجَّل أم تقدير، وفرق الواصل عن المتوقَّع.
+  - expected_income و received_income: المتوقَّع من المصادر الثابتة، وما وصل فعلاً. **اذكرهما معاً**
+    حين يكون income_is_actual صحيحاً: من يقبض أسبوعياً أو من مصادر متعدّدة يكون قد سجّل بعض دخله
+    فحسب في أول الشهر، فالرقم الواصل وحده يبدو انهياراً وهو ليس كذلك.
+  - income_by_source: ما وصل من كل مصدر مقابل المتوقَّع منه — expected فارغة للمصادر المتغيّرة.
   - التفصيل: obligation_installments و recurring_bills و installments و daily_expenses و savings_target.
   - next_relief: متى ينخفض الحمل الشهري وبكم — بشرى المديون: العبء مؤقّت وله تاريخ.
     فارغة حين لا قسط ينتهي. وفيها amount و ends_on و months_away.
@@ -116,6 +122,15 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         income: z.number(),
         income_is_actual: z.boolean(),
         income_gap: z.number(),
+        expected_income: z.number(),
+        received_income: z.number(),
+        income_by_source: z.array(
+          z.object({
+            name: z.string(),
+            amount: z.number(),
+            expected: z.number().nullable(),
+          }),
+        ),
         remaining: z.number(),
         is_overspent: z.boolean(),
         projected_remaining: z.number(),
@@ -160,6 +175,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         income: panel.income,
         income_is_actual: panel.incomeIsActual,
         income_gap: panel.incomeGap,
+        expected_income: picture.expectedIncome,
+        received_income: picture.receivedIncome,
+        income_by_source: picture.incomeBySource,
         remaining: panel.remaining,
         is_overspent: panel.isOverspent,
         projected_remaining: panel.projectedRemaining,
@@ -197,10 +215,28 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           ? `📉 بوتيرة صرفك الحالية ستنتهي بـ ${money(Math.abs(panel.projectedRemaining), currency)} عجزاً.`
           : `بوتيرتك الحالية ستنتهي بـ ${money(panel.projectedRemaining, currency)} · ${money(allowance, currency)} يومياً.`,
         '',
+        /*
+         * الواصل والمتوقَّع معاً دائماً، لا أحدهما.
+         *
+         * اللوحة تنتقل إلى الفعلي بمجرّد أول دفعة تصل — وهو قرارٌ مقصود —
+         * لكن من يقبض أسبوعياً يسجّل أسبوعاً في الثالث من الشهر، فيقرأ
+         * «الدخل: 1,200» وكأنه دخل الشهر كلّه. ذكرُ المتوقَّع بجانبه يجعل
+         * الرقم مفهوماً بدل أن يبدو انهياراً.
+         */
         `- الدخل: ${money(panel.income, currency)} ${panel.incomeIsActual ? '(واصل فعلاً)' : '(تقدير — لم يُسجَّل دخل هذا الشهر)'}` +
-          (panel.incomeIsActual && panel.incomeGap !== 0
-            ? ` · ${panel.incomeGap < 0 ? 'أقل' : 'أعلى'} من المعتاد بـ ${money(Math.abs(panel.incomeGap), currency)}`
+          (panel.incomeIsActual
+            ? ` من أصل ${money(picture.expectedIncome, currency)} متوقَّع` +
+              (panel.incomeGap !== 0
+                ? ` · ${panel.incomeGap < 0 ? 'ناقص' : 'زائد'} ${money(Math.abs(panel.incomeGap), currency)}`
+                : '')
             : ''),
+        ...(picture.incomeBySource.length > 1
+          ? picture.incomeBySource.map(
+              (s) =>
+                `  · ${s.name}: وصل ${money(s.amount, currency)}` +
+                (s.expected === null ? ' (متغيّر)' : ` من ${money(s.expected, currency)}`),
+            )
+          : []),
         `- أقساط الالتزامات: ${money(summary.obligationsTotal, currency)} (${obligations.length} التزام)`,
         `- فواتير متكرّرة: ${money(load.recurring, currency)}`,
         `- أقساط تنتهي: ${money(load.installments, currency)}` +
@@ -711,11 +747,11 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 المخرجات تختلف بالقائمة:
   groups → items[] من { id, name, icon, color }
   partners → items[] من { id, name }
-  templates → items[] من { id, name, category, recurrence_months, suggested_min, suggested_max }
-  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency } و fixed_commitments[] من { id, name, amount, day_of_month }
+  templates → items[] من { id, name, name_he, category, recurrence_months, suggested_min, suggested_max, hint }
+  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency, is_variable, monthly_equivalent } و fixed_commitments[] من { id, name, amount, day_of_month, starts_on, has_started, ends_on, payments_left }
   categories → items[] من { id, name, icon } — تصنيفات المصاريف اليومية
   payment_methods → items[] من { id, name, icon, is_automatic }
-  commitment_templates → items[] من { id, name, category, icon, suggested_min, suggested_max, is_installment }`,
+  commitment_templates → items[] من { id, name, name_he, category, icon, suggested_min, suggested_max, is_installment, hint }`,
       inputSchema: {
         kind: z
           .enum([
@@ -740,6 +776,8 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
               name: z.string(),
               amount: z.number(),
               frequency: z.string(),
+              is_variable: z.boolean(),
+              monthly_equivalent: z.number(),
             }),
           )
           .optional(),
@@ -750,6 +788,10 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
               name: z.string(),
               amount: z.number(),
               day_of_month: z.number().nullable(),
+              starts_on: z.string().nullable(),
+              has_started: z.boolean(),
+              ends_on: z.string().nullable(),
+              payments_left: z.number().nullable(),
             }),
           )
           .optional(),
@@ -815,10 +857,12 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           }
           if (kind === 'payment_methods') base.is_automatic = Boolean(row.is_automatic)
           if (kind === 'commitment_templates') {
+            base.name_he = row.name_he ?? null
             base.category = row.category ?? null
             base.suggested_min = row.suggested_min === null ? null : Number(row.suggested_min)
             base.suggested_max = row.suggested_max === null ? null : Number(row.suggested_max)
             base.is_installment = Boolean(row.is_installment)
+            base.hint = row.hint ?? null
           }
           return base
         })
@@ -826,7 +870,13 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         return ok(
           items.length === 0
             ? `لا ${title} بعد.`
-            : `## ${title}\n${items.map((i) => `- ${i.icon ?? ''} ${i.name}`).join('\n')}`,
+            : `## ${title}\n${items
+                .map(
+                  (i) =>
+                    `- ${i.icon ?? ''} ${i.name}${i.name_he ? ` (${i.name_he})` : ''}` +
+                    (i.hint ? `\n  ${i.hint}` : ''),
+                )
+                .join('\n')}`,
           { kind, currency, items },
         )
       }
@@ -840,15 +890,21 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           .order('sort_order', { ascending: true })
         if (error) throw error
         const items = ((data ?? []) as ObligationTemplate[]).map(toTemplateOut)
+        // قائمةٌ فارغة تعني بلداً غير مزروع، لا «لا قوالب هنا» — والعنوان
+        // وحده كان يخرج فيبدو الردّ ناجحاً وهو أجوف.
+        if (items.length === 0) {
+          return ok(`لا قوالب مسجّلة للبلد ${country}.`, { kind, currency, items })
+        }
         return ok(
           `## قوالب الالتزامات (${country})\n` +
             items
               .map(
                 (t) =>
-                  `- ${t.name} — ${recurrenceLabel(t.recurrence_months)}` +
+                  `- ${t.name}${t.name_he ? ` (${t.name_he})` : ''} — ${recurrenceLabel(t.recurrence_months)}` +
                   (t.suggested_min !== null && t.suggested_max !== null
                     ? ` · المعتاد ${money(t.suggested_min, currency)}–${money(t.suggested_max, currency)}`
-                    : ''),
+                    : '') +
+                  (t.hint ? `\n  ${t.hint}` : ''),
               )
               .join('\n'),
           { kind, currency, items },
@@ -856,6 +912,16 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       }
 
       const { incomes, fixedCommitments } = await loadMoneyItems(connection)
+      const today = new Date()
+
+      /*
+       * المعادل الشهري يخرج مع المبلغ الخام.
+       *
+       * كانت القائمة تطبع مبلغ الدورة والدورية بالإنجليزية فحسب، فمصدرٌ
+       * أسبوعي بـ1,200 يُقرأ رقماً صغيراً بجانب راتبٍ شهري بـ4,000 — وهو
+       * أكبر منه فعلاً. ومن دخلُه مصادرُ بدوريّاتٍ مختلفة لا يستطيع مقارنتها
+       * بعينه، وهذه القائمة هي المكان الذي يُفترض أن تُقارَن فيه.
+       */
       const structured = {
         kind,
         currency,
@@ -864,24 +930,65 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           name: i.name,
           amount: Number(i.amount),
           frequency: i.frequency,
+          is_variable: Boolean(i.is_variable),
+          monthly_equivalent: i.is_variable ? 0 : monthlyEquivalent(Number(i.amount), i.frequency),
         })),
-        fixed_commitments: fixedCommitments.map((c) => ({
-          id: c.id,
-          name: c.name,
-          amount: Number(c.amount),
-          day_of_month: c.day_of_month,
-        })),
+        fixed_commitments: fixedCommitments.map((c) => {
+          const view = viewCommitment(
+            {
+              amount: Number(c.amount),
+              mySharePercent: Number(c.my_share_percent ?? 100),
+              startsOn: c.starts_on,
+              endsOn: c.ends_on,
+            },
+            today,
+          )
+          return {
+            id: c.id,
+            name: c.name,
+            amount: Number(c.amount),
+            day_of_month: c.day_of_month,
+            starts_on: c.starts_on,
+            has_started: view.hasStarted,
+            ends_on: c.ends_on,
+            payments_left: view.paymentsLeft,
+          }
+        }),
       }
+
+      const expectedTotal = monthlyIncomeFrom(
+        structured.incomes.map((i) => ({
+          amount: i.amount,
+          frequency: i.frequency,
+          isVariable: i.is_variable,
+        })),
+      )
 
       const text = [
         '## الدخل',
         ...(structured.incomes.length > 0
-          ? structured.incomes.map((i) => `- ${i.name}: ${money(i.amount, currency)} (${i.frequency})`)
+          ? [
+              ...structured.incomes.map(
+                (i) =>
+                  `- ${i.name}: ${money(i.amount, currency)} ${CADENCE[i.frequency]}` +
+                  (i.is_variable
+                    ? ' — **متغيّر**، لا يدخل المتوقَّع'
+                    : i.frequency === 'monthly'
+                      ? ''
+                      : ` = ${money(i.monthly_equivalent, currency)} بالشهر`),
+              ),
+              `**المتوقَّع شهرياً: ${money(expectedTotal, currency)}**`,
+            ]
           : ['- لا مصادر دخل بعد.']),
         '',
         '## البنود الثابتة',
         ...(structured.fixed_commitments.length > 0
-          ? structured.fixed_commitments.map((c) => `- ${c.name}: ${money(c.amount, currency)}`)
+          ? structured.fixed_commitments.map(
+              (c) =>
+                `- ${c.name}: ${money(c.amount, currency)}` +
+                (c.payments_left !== null ? ` · بقيت ${c.payments_left} دفعة` : '') +
+                (c.has_started ? '' : ` · تبدأ ${monthYear(c.starts_on!)}`),
+            )
           : ['- لا بنود ثابتة بعد.']),
       ].join('\n')
 
