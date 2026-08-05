@@ -571,7 +571,6 @@ export const ar = {
     expectedReturn: 'العائد السنوي المتوقّع',
     inflation: 'التضخّم',
     withdrawalRate: 'معدّل السحب الآمن',
-    saveSettings: 'احفظ أرقامك',
 
     sensitivityTitle: 'وإذا زدت شوي',
     sensitivity: 'زيادة {{amount}} بالشهر بتقرّبلك الحرية {{months}}',
@@ -609,7 +608,6 @@ export const ar = {
     interestPaid: 'فايدة {{amount}}',
     impossible: 'الحد الأدنى ما بيغطّي الفايدة، فالرصيد ما بينزل. لازم تزيد الدفعة.',
     balance: 'الباقي',
-    rate: '{{percent}}% فايدة',
     ratePercent: '% فايدة',
   },
 
