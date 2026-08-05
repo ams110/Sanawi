@@ -133,21 +133,33 @@ export function FreedomPanel({
         </div>
       </dl>
 
-      {/* أثر الشيكل الإضافي — أقصر مسافة بين رقمٍ وقرار. */}
+      {/*
+       * أثر الشيكل الإضافي — أقصر مسافة بين رقمٍ وقرار.
+       *
+       * وثلاث حالات لا اثنتان: الفراغ في `monthsSaved` لا يعني أن الزيادة لا
+       * تنفع. حين يكون المسار الحالي لا يُبلَغ والمُعزَّز يُبلَغ، فالفرق
+       * بالشهور لا يُقاس أصلاً — والزيادة هي التي فتحت الطريق كلَّه. قراءة
+       * الفراغ وحده تقلب أحسن خبرٍ إلى أسوئه.
+       */}
       {!result.isFree && (
         <p
           className={`rounded-2xl px-4 py-3 text-[13px] font-semibold ${
-            sensitivity.monthsSaved && sensitivity.monthsSaved > 0
+            sensitivityTone(sensitivity) === 'good'
               ? 'bg-brand-soft text-brand'
               : 'bg-surface-muted text-text-muted'
           }`}
         >
-          {sensitivity.monthsSaved && sensitivity.monthsSaved > 0
+          {sensitivity.monthsSaved !== null && sensitivity.monthsSaved > 0
             ? t('freedom.sensitivity', {
                 amount: formatMoney(SENSITIVITY_STEP),
                 months: durationLabel(sensitivity.monthsSaved, t),
               })
-            : t('freedom.sensitivityNone', { amount: formatMoney(SENSITIVITY_STEP) })}
+            : sensitivity.monthsSaved === null && sensitivity.newMonthsToFreedom !== null
+              ? t('freedom.sensitivityOpens', {
+                  amount: formatMoney(SENSITIVITY_STEP),
+                  months: durationLabel(sensitivity.newMonthsToFreedom, t),
+                })
+              : t('freedom.sensitivityNone', { amount: formatMoney(SENSITIVITY_STEP) })}
         </p>
       )}
 
@@ -203,6 +215,16 @@ export function FreedomPanel({
       </div>
     </section>
   )
+}
+
+/** بشرى أم لا: تقريبُ الموعد بشرى، وفتحُ طريقٍ مسدود بشرى أكبر. */
+function sensitivityTone(s: {
+  monthsSaved: number | null
+  newMonthsToFreedom: number | null
+}): 'good' | 'flat' {
+  if (s.monthsSaved !== null && s.monthsSaved > 0) return 'good'
+  if (s.monthsSaved === null && s.newMonthsToFreedom !== null) return 'good'
+  return 'flat'
 }
 
 /**

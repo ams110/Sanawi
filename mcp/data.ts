@@ -14,8 +14,8 @@ import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
-import { projectFreedom, type FreedomResult } from '../src/lib/wealth/freedom.js'
-import type { PayoffDebt } from '../src/lib/commitments/payoff.js'
+import { projectFreedom, type FreedomInput, type FreedomResult } from '../src/lib/wealth/freedom.js'
+import { debtBalanceFrom, type PayoffDebt } from '../src/lib/commitments/payoff.js'
 import type {
   Asset,
   CommitmentDetail,
@@ -382,6 +382,8 @@ export function monthKey(input?: string): string {
 export interface WealthPicture {
   net: NetWorthResult
   freedom: FreedomResult
+  /** مدخلات الحرية كما حُسبت — ليعيد المستدعي استعمالها بلا أن يبنيها ناقصة. */
+  freedomInput: FreedomInput
   assets: Asset[]
   payoffDebts: PayoffDebt[]
   monthlyEssentials: number
@@ -469,7 +471,7 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
     emergencyMonths: Number(profile?.emergency_months ?? 3),
   })
 
-  const freedom = projectFreedom({
+  const freedomInput: FreedomInput = {
     annualSpending,
     currentNetWorth: net.netWorth,
     monthlyContribution,
@@ -478,19 +480,25 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
     annualReturnPercent: net.weightedReturnPercent > 0 ? net.weightedReturnPercent : 7,
     inflationPercent: Number(profile?.inflation_percent ?? 3),
     withdrawalRatePercent: Number(profile?.withdrawal_rate_percent ?? 4),
-  })
+  }
+  const freedom = projectFreedom(freedomInput)
 
   return {
     net,
     freedom,
+    freedomInput,
     assets,
-    payoffDebts: live.map(({ row, view }) => ({
-      id: row.commitment_id,
-      name: row.name,
-      balance: view.remainingForMe ?? 0,
-      minimumPayment: view.myAmount,
-      annualInterestPercent: Number(row.annual_interest_percent ?? 0),
-    })),
+    payoffDebts: live.map(({ row, view }) => {
+      const rate = Number(row.annual_interest_percent ?? 0)
+      return {
+        id: row.commitment_id,
+        name: row.name,
+        // الأصل لا مجموع الدفعات — الشرح في debtBalanceFrom.
+        balance: debtBalanceFrom(view.myAmount, view.paymentsLeft ?? 0, rate),
+        minimumPayment: view.myAmount,
+        annualInterestPercent: rate,
+      }
+    }),
     monthlyEssentials,
     annualSpending,
     monthlyContribution,

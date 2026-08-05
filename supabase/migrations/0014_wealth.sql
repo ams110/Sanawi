@@ -130,7 +130,14 @@ alter table public.fixed_commitments
 comment on column public.fixed_commitments.annual_interest_percent is
   'الفائدة السنوية — صفر للفاتورة، وغير صفر للقرض؛ عليها يُرتَّب السداد';
 
--- العرض يُعاد إنشاؤه ليحمل العمود الجديد وأصل الدين المتبقّي.
+-- العرض يُعاد إنشاؤه ليحمل العمود الجديد.
+--
+-- والعمود الجديد في آخر القائمة لا في موضعه «المنطقي» بجانب my_share_percent:
+-- ‏`create or replace view` في Postgres لا يعيد تعريف الأعمدة القائمة، إنما
+-- يسمح بإلحاق أعمدةٍ بعدها فقط. إقحامُ عمودٍ في الوسط يجعل الأمر يحاول إعادة
+-- تسمية `my_amount` إلى `annual_interest_percent` فيُجهض بـ
+-- «cannot change name of view column» — والهجرة كلها معه، على كل قاعدةٍ
+-- فيها العرض القديم.
 create or replace view public.commitment_details
 with (security_invoker = on) as
 select
@@ -142,7 +149,6 @@ select
   c.ends_on,
   c.total_amount,
   c.my_share_percent,
-  c.annual_interest_percent,
   round(c.amount * c.my_share_percent / 100, 2) as my_amount,
   case
     when c.ends_on is null then null
@@ -153,7 +159,8 @@ select
       (date_part('year', c.ends_on) - date_part('year', current_date)) * 12
         + (date_part('month', c.ends_on) - date_part('month', current_date)) + 1
     )::int
-  end as payments_left
+  end as payments_left,
+  c.annual_interest_percent
 from public.fixed_commitments c
 where c.is_active;
 

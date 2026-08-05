@@ -1109,18 +1109,17 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       const wealth = await loadWealth(connection)
       const f = wealth.freedom
 
+      /*
+       * المدخلات تُستعاد من `loadWealth` نفسها لا تُبنى من جديد.
+       *
+       * بناؤها هنا كان يُسقط التضخّم ومعدّل السحب فيقعان على قيمتَي الدالّة
+       * الافتراضيتين، فيخرج تاريخٌ محسوبٌ بعائدٍ اسميّ وهدفٍ آخر — أي أن كلود
+       * يقتبس رقماً غير الذي على الشاشة، وهو العطل الوحيد الذي يحرس منه
+       * mcp/data.ts كلُّه.
+       */
       const sensitivity =
         extra_monthly > 0
-          ? freedomSensitivity(
-              {
-                annualSpending: wealth.annualSpending,
-                currentNetWorth: wealth.net.netWorth,
-                monthlyContribution: wealth.monthlyContribution,
-                annualReturnPercent:
-                  wealth.net.weightedReturnPercent > 0 ? wealth.net.weightedReturnPercent : 7,
-              },
-              extra_monthly,
-            )
+          ? freedomSensitivity(wealth.freedomInput, extra_monthly)
           : { monthsSaved: null, newMonthsToFreedom: null }
 
       const structured = {

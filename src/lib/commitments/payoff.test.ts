@@ -28,6 +28,60 @@ describe('debtBalanceFrom', () => {
     expect(debtBalanceFrom(-500, 12)).toBe(0)
     expect(debtBalanceFrom(500, -12)).toBe(0)
   })
+
+  /*
+   * بفائدة، الأصل أقلّ من مجموع الدفعات — والفرق هو الفائدة التي لم تُستحقّ.
+   * خلطُ الاثنين كان يُدخل المحاكاةَ رقماً يحمل فائدةً، فتركّب عليه فائدةً ثانية.
+   */
+  it('يرجع الأصل لا مجموع الدفعات حين تكون ثمّة فائدة', () => {
+    // ‏١٬٠٠٠ شهرياً لاثني عشر شهراً بـ ١٢٪: القيمة الحالية بمعدّل ١٪ شهرياً.
+    const gross = 1000 * 12
+    const principal = debtBalanceFrom(1000, 12, 12)
+    expect(principal).toBeLessThan(gross)
+    expect(principal).toBeCloseTo(11255.08, 1)
+  })
+
+  it('بفائدة صفر يبقى حاصل الضرب كما كان', () => {
+    expect(debtBalanceFrom(500, 12, 0)).toBe(6000)
+  })
+})
+
+/*
+ * قرضٌ حقيقيّ منتهٍ يجب ألّا يُعلَن مستحيلاً.
+ *
+ * حين كان الأصل يُقرأ مجموعَ الدفعات، صار رصيدُ هذا القرض ١٨٬٠٠٠ وفائدتُه
+ * الشهرية ٤٥٠ فوق قسطه البالغ ٣٠٠ — فيقول التطبيق «الحد الأدنى لا يغطّي
+ * الفائدة» عن قرضٍ يُسدَّد فعلاً كل شهر وينتهي في موعده.
+ */
+describe('القرض الحقيقي لا يُعلَن مستحيلاً', () => {
+  const debt = {
+    id: 'قرض',
+    name: 'قرض',
+    balance: debtBalanceFrom(300, 60, 30),
+    minimumPayment: 300,
+    annualInterestPercent: 30,
+  }
+
+  it('أصله أصغر بكثير من مجموع دفعاته', () => {
+    expect(debt.balance).toBeLessThan(300 * 60)
+    expect(debt.balance).toBeCloseTo(9272.6, 0)
+  })
+
+  /*
+   * ستون أو واحدٌ وستون، لا ستّمئة.
+   *
+   * الأصل مُعاد بناؤه من القسط وعدده ومقرَّبٌ إلى الأغورة، فقد يبقى بعد
+   * الدفعة الستين كسرٌ يستدعي شهراً أخيراً بقروش. تثبيتُ الستين بالضبط
+   * يجعل الاختبار يحرس دقّة التقريب لا المعنى؛ والمعنى هو أن قرضاً مدّته
+   * خمس سنوات يُسدَّد في خمس سنوات ولا يُعلَن مستحيلاً.
+   */
+  it('وخطّته تنتهي في مدّته لا تُعلَن مستحيلة', () => {
+    const plan = buildPayoffPlan({ debts: [debt] })
+    expect(plan.isImpossible).toBe(false)
+    expect(plan.months).not.toBeNull()
+    expect(plan.months!).toBeGreaterThanOrEqual(60)
+    expect(plan.months!).toBeLessThanOrEqual(61)
+  })
 })
 
 describe('ترتيب المهاجمة', () => {

@@ -80,18 +80,46 @@ const atLeastZero = (n: number): number => (Number.isFinite(n) && n > 0 ? n : 0)
  */
 const EPSILON = 1e-9
 
+/**
+ * وأقلُّ من نصف أغورة ليس ديناً، مهما قالت الفاصلة العائمة.
+ *
+ * ‏`EPSILON` يحرس من ضجيج الفاصلة العائمة وحده، وهذا يحرس من شيءٍ آخر:
+ * الأغورة هي أصغر ما يُدفع فعلاً، وما دونها لا يطالب به دائن ولا يستطيع
+ * مدينٌ تسديده. إبقاؤه ديناً حيّاً يضيف شهراً كاملاً إلى الخطة لأجل كسرٍ
+ * لا وجود له في العالم.
+ */
+const SETTLED = 0.01
+
 /** خمسون سنة — أطول من أيّ قرضٍ استهلاكي، وسقفٌ يمنع الدوران بلا نهاية. */
 const DEFAULT_MAX_MONTHS = 600
 
 /**
- * رصيد الدَّين من القسط وعدد الدفعات — كل ما يملكه التطبيق عن قرضٍ لم يُسجَّل أصلُه.
+ * أصل الدَّين من القسط وعدد الدفعات — كل ما يملكه التطبيق عن قرضٍ لم يُسجَّل أصلُه.
  *
- * الناتج مجموع ما سيُدفع لا أصل الدين، أي أنه يتضمّن فائدةً ستُحتسب عليه مرّةً
- * أخرى في المحاكاة، فتخرج الخطة أغلى قليلاً من الحقيقة. الخطأ في الاتجاه الآمن،
- * والمقارنة بين الترتيبين لا تتأثر لأن كليهما ينطلق من الرقم نفسه.
+ * القيمة الحالية لا مجموع الدفعات. والفرق ليس تدقيقاً محاسبياً: مجموعُ ما
+ * سيُدفع يتضمّن فائدةً لم تُستحقّ بعد، فإن أدخلناه المحاكاةَ بوصفه أصلاً
+ * ركّبت عليه الفائدةَ مرّةً ثانية. وقرضٌ حقيقيّ منتهٍ — ٣٠٠ شهرياً لستين
+ * شهراً بثلاثين بالمئة — يصير عندها رصيده ١٨٬٠٠٠ وفائدتُه الشهرية ٤٥٠ فوق
+ * قسطه، فتُعلَن خطّتُه «مستحيلة» وهو يُسدَّد فعلاً كل شهر. أصلُه الحقيقي
+ * نحو ٩٬٣٠٠، ويُسدَّد في ستين شهراً بالضبط.
+ *
+ *     الأصل = القسط × (1 − (1+i)^−n) ÷ i
+ *
+ * وبفائدة صفر تنهار المعادلة على قسمةٍ على صفر، وناتجها الصحيح حاصل الضرب:
+ * قسطٌ بلا فائدة أصلُه مجموع دفعاته. وهذه حال أكثر بنود التطبيق — «قسط
+ * التلفون» وما يشبهه — فالسلوك القديم يبقى كما هو لمن لم يسجّل فائدة.
  */
-export function debtBalanceFrom(monthlyAmount: number, paymentsLeft: number): number {
-  return round2(atLeastZero(monthlyAmount) * atLeastZero(paymentsLeft))
+export function debtBalanceFrom(
+  monthlyAmount: number,
+  paymentsLeft: number,
+  annualInterestPercent = 0,
+): number {
+  const payment = atLeastZero(monthlyAmount)
+  const months = atLeastZero(paymentsLeft)
+  const monthlyRate = atLeastZero(annualInterestPercent) / 100 / 12
+
+  if (monthlyRate < EPSILON) return round2(payment * months)
+  return round2((payment * (1 - Math.pow(1 + monthlyRate, -months))) / monthlyRate)
 }
 
 /**
@@ -160,7 +188,7 @@ export function buildPayoffPlan(input: PayoffInput): PayoffPlan {
       totalPaid: 0,
       // دينٌ رصيده صفر ميتٌ قبل أن تبدأ الخطة، فلا يستهلك شهراً: صفرٌ يميّزه
       // عن الفارغ الذي يعني "لم يمُت أبداً".
-      clearedAtMonth: balance <= EPSILON ? 0 : null,
+      clearedAtMonth: balance <= SETTLED ? 0 : null,
     }
   })
 
@@ -199,12 +227,12 @@ export function buildPayoffPlan(input: PayoffInput): PayoffPlan {
     // ثم يُرمى كل ما بقي على الهدف، وما فاض عنه ينزل إلى الذي يليه في الشهر
     // نفسه: الفائض المهدور يعني شهراً ضائعاً بلا سبب.
     for (const debt of alive) {
-      if (purse <= EPSILON) break
+      if (purse <= SETTLED) break
       pay(debt, purse)
     }
 
     for (const debt of alive) {
-      if (debt.balance <= EPSILON) {
+      if (debt.balance <= SETTLED) {
         debt.balance = 0
         debt.clearedAtMonth = month
       }

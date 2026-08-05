@@ -6,7 +6,7 @@ import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
 import type { AssetInput, DebtInput } from '@/lib/wealth/networth'
-import type { PayoffDebt } from '@/lib/commitments/payoff'
+import { debtBalanceFrom, type PayoffDebt } from '@/lib/commitments/payoff'
 
 /* ── الأصول ────────────────────────────────────────────────── */
 
@@ -214,13 +214,18 @@ export async function loadWealthSources(): Promise<WealthSources> {
     paymentsLeft: view.paymentsLeft ?? 0,
   }))
 
-  const payoffDebts: PayoffDebt[] = live.map(({ row, view }) => ({
-    id: row.commitment_id,
-    name: row.name,
-    balance: view.remainingForMe ?? 0,
-    minimumPayment: view.myAmount,
-    annualInterestPercent: Number(row.annual_interest_percent ?? 0),
-  }))
+  const payoffDebts: PayoffDebt[] = live.map(({ row, view }) => {
+    const rate = Number(row.annual_interest_percent ?? 0)
+    return {
+      id: row.commitment_id,
+      name: row.name,
+      // الأصل لا مجموع الدفعات: الثاني يحمل فائدةً لم تُستحقّ بعد، وإدخالُه
+      // المحاكاةَ يجعلها تركّب الفائدة مرّتين وتعلن قرضاً حقيقياً مستحيلاً.
+      balance: debtBalanceFrom(view.myAmount, view.paymentsLeft ?? 0, rate),
+      minimumPayment: view.myAmount,
+      annualInterestPercent: rate,
+    }
+  })
 
   const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
   const obligationInstallments = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
