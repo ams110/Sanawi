@@ -11,9 +11,14 @@ import { calculateObligation, type ObligationCalcResult } from '../src/lib/oblig
 import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligations/calendar.js'
 import { monthlyIncomeFrom, summarizeMonth, type MonthlySummary } from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
-import { summarizeMonthlyLoad, type MonthlyLoad } from '../src/lib/commitments/calc.js'
+import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
+import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
+import { spendingBaseline } from '../src/lib/wealth/baseline.js'
+import { projectFreedom, type FreedomInput, type FreedomResult } from '../src/lib/wealth/freedom.js'
+import { debtBalanceFrom, type PayoffDebt } from '../src/lib/commitments/payoff.js'
 import type {
+  Asset,
   CommitmentDetail,
   Expense,
   FixedCommitment,
@@ -371,4 +376,160 @@ export function monthKey(input?: string): string {
   if (monthNumber < 1 || monthNumber > 12) throw new Error(`شهر خارج المدى: «${input}».`)
 
   return `${year}-${month}-01`
+}
+
+/* ── الثروة ────────────────────────────────────────────────── */
+
+  /*
+   * الاحتياطي لا يُطلق إلا حين لا أصول أصلاً.
+   *
+   * `weightedReturnPercent === 0` تعني شيئين مختلفين: «لا أصول فلا عائد
+   * معروف»، و«كل أصولي كاش عائده صفر». إطلاقُ ٧٪ على الثانية يَعِد صاحب
+   * الكاش بنموٍّ لن يحدث ويقرّب تاريخ حريته سنواتٍ بلا سبب.
+   */
+const DEFAULT_RETURN = 7
+
+export interface WealthPicture {
+  net: NetWorthResult
+  freedom: FreedomResult
+  /** مدخلات الحرية كما حُسبت — ليعيد المستدعي استعمالها بلا أن يبنيها ناقصة. */
+  freedomInput: FreedomInput
+  assets: Asset[]
+  payoffDebts: PayoffDebt[]
+  monthlyEssentials: number
+  /** خطّ الأساس مبنيّ على شهرٍ لم ينتهِ — الرقم مبدئيّ. */
+  spendingIsProvisional: boolean
+  annualSpending: number
+  monthlyContribution: number
+}
+
+export async function loadAssets({ db }: Connection): Promise<Asset[]> {
+  const { data, error } = await db
+    .from('assets')
+    .select('*')
+    .eq('is_active', true)
+    .order('amount', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Asset[]
+}
+
+/**
+ * صورة الثروة كاملةً — بنفس التعريفات التي تعرضها شاشة الثروة.
+ *
+ * تُبنى على `loadMonth` لا بجانبها: المصروف الأساسي الذي يُقاس عليه رقمُ
+ * الحرية وصندوقُ الطوارئ هو نفسه الذي تعرضه لوحة الشهر، وأيّ حسابٍ ثانٍ له
+ * هنا يجعل كلود يقول رقماً غير الذي على الشاشة — وهي الآفة الوحيدة التي
+ * يحرس منها هذا الملف كلّه.
+ */
+export async function loadWealth(connection: Connection): Promise<WealthPicture> {
+  // ثلاثة شهورٍ مكتملة خلف الجاري — نفس نافذة الشاشة بالضبط.
+  const completedKeys = [1, 2, 3].map((back) => monthsBack(back))
+
+  const [assets, month, profile, details, ...completed] = await Promise.all([
+    loadAssets(connection),
+    loadMonth(connection),
+    loadProfile(connection),
+    loadCommitmentDetails(connection),
+    ...completedKeys.map((key) => loadMonthExpenses(connection, key)),
+  ])
+
+  /*
+   * الحصّة والدفعات المتبقية تُشتقّان من `viewCommitment` لا من عمودَي العرض.
+   *
+   * العرض يحملهما فعلاً، لكن اشتقاقهما من المحرّك يجعل الرقم واحداً في
+   * الشاشة والخادم مهما تغيّر تعريفه، ويُبقي الفحص على القاعدة المزيّفة
+   * فحصاً حقيقياً بدل أن يقرأ أعمدةً غير موجودة فيها فيخرج بأصفارٍ تبدو
+   * نجاحاً.
+   */
+  const live = details
+    .map((d) => ({
+      row: d,
+      view: viewCommitment({
+        amount: Number(d.amount),
+        endsOn: d.ends_on,
+        mySharePercent: Number(d.my_share_percent),
+      }),
+    }))
+    .filter(({ view }) => view.isInstallment && !view.isFinished)
+
+  const obligationInstallments = month.obligations.reduce(
+    (sum, o) => sum + o.calc.monthlyInstallment,
+    0,
+  )
+
+  // نفس التعريف الموجود في src/features/wealth/api.ts: الدائم من الفواتير،
+  // وأقساط الالتزامات السنوية، والمصروف اليومي مُسقَطاً — بلا أقساط الديون
+  // (لها نهاية) وبلا الادخار (هو الطريق لا الوجهة).
+  // المصروف اليومي من الشهور المكتملة لا من إسقاط الجاري — الشرح في
+  // src/lib/wealth/baseline.ts.
+  const baseline = spendingBaseline({
+    // شهرٌ بلا صفوف شهرٌ مجهول لا شهرٌ صفريّ.
+    completedMonths: completed.map((rows) =>
+      rows.length === 0 ? null : rows.reduce((total, row) => total + Number(row.amount), 0),
+    ),
+    currentMonthProjection: month.expenses.projectedTotal,
+  })
+
+  const monthlyEssentials =
+    Math.round((month.load.recurring + obligationInstallments + baseline.monthly) * 100) / 100
+  const annualSpending = Math.round(monthlyEssentials * 12 * 100) / 100
+  const monthlyContribution = Number(profile?.monthly_savings_target ?? 0)
+
+  const net = computeNetWorth({
+    assets: assets.map((a) => ({
+      name: a.name,
+      kind: a.kind,
+      amount: Number(a.amount),
+      isLiquid: a.is_liquid,
+      isEmergencyFund: a.is_emergency_fund,
+      annualReturnPercent: Number(a.annual_return_percent),
+      updatedAt: a.updated_at,
+    })),
+    restrictedFunds: month.obligations.map((o) => Number(o.balance?.my_fund_balance ?? 0)),
+    debts: live.map(({ row, view }) => ({
+      name: row.name,
+      monthlyAmount: view.myAmount,
+      paymentsLeft: view.paymentsLeft ?? 0,
+    })),
+    monthlyEssentials,
+    emergencyMonths: Number(profile?.emergency_months ?? 3),
+  })
+
+  const freedomInput: FreedomInput = {
+    annualSpending,
+    currentNetWorth: net.netWorth,
+    monthlyContribution,
+    annualReturnPercent: net.assetsTotal > 0 ? net.weightedReturnPercent : DEFAULT_RETURN,
+    inflationPercent: Number(profile?.inflation_percent ?? 3),
+    withdrawalRatePercent: Number(profile?.withdrawal_rate_percent ?? 4),
+  }
+  const freedom = projectFreedom(freedomInput)
+
+  return {
+    net,
+    freedom,
+    freedomInput,
+    assets,
+    payoffDebts: live.map(({ row, view }) => {
+      const rate = Number(row.annual_interest_percent ?? 0)
+      return {
+        id: row.commitment_id,
+        name: row.name,
+        // الأصل لا مجموع الدفعات — الشرح في debtBalanceFrom.
+        balance: debtBalanceFrom(view.myAmount, view.paymentsLeft ?? 0, rate),
+        minimumPayment: view.myAmount,
+        annualInterestPercent: rate,
+      }
+    }),
+    monthlyEssentials,
+    spendingIsProvisional: baseline.isProvisional,
+    annualSpending,
+    monthlyContribution,
+  }
+}
+
+/** مفتاح شهرٍ مضى: أول يومٍ في الشهر الذي يسبق الجاري بـ n. */
+function monthsBack(n: number): string {
+  const now = new Date()
+  return isoDate(new Date(now.getFullYear(), now.getMonth() - n, 1))
 }

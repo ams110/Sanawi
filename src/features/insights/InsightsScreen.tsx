@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { computeGroupCost } from '@/lib/budget/groupCost'
@@ -48,6 +49,23 @@ export function InsightsScreen() {
 
   return (
     <div className="space-y-6 px-5 py-6">
+      {/* شاشة التحليل تقيس ما يخرج؛ ومدخلٌ واحد يصلها بما يتراكم. */}
+      <Link
+        to="/wealth"
+        className="flex items-center gap-3 rounded-3xl border border-brand/30 bg-brand-soft p-5"
+      >
+        <span className="text-2xl" aria-hidden="true">
+          🌱
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-bold text-brand">{t('wealth.entryTitle')}</span>
+          <span className="block text-[12px] text-text-muted">{t('wealth.entryHint')}</span>
+        </span>
+        <span className="text-brand" aria-hidden="true">
+          ←
+        </span>
+      </Link>
+
       <section className="space-y-4">
         <div>
           <h1 className="text-xl font-bold text-text">{t('insights.groupTitle')}</h1>

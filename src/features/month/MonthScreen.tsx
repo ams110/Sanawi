@@ -184,6 +184,29 @@ export function MonthScreen() {
           )}
         </dl>
       </section>
+
+      {/*
+       * مدخل الثروة في آخر لوحة الشهر لا في أوّلها.
+       *
+       * الترتيب هو الرسالة: من يفتح التطبيق يسأل عن شهره، ومن يصل إلى آخر
+       * الشاشة يكون قد فرغ من السؤال القريب — وعندها وحدها يعني السؤالُ
+       * البعيد شيئاً.
+       */}
+      <Link
+        to="/wealth"
+        className="flex items-center gap-3 rounded-3xl border border-brand/30 bg-brand-soft p-5"
+      >
+        <span className="text-2xl" aria-hidden="true">
+          🌱
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-bold text-brand">{t('wealth.entryTitle')}</span>
+          <span className="block text-[12px] text-text-muted">{t('wealth.entryHint')}</span>
+        </span>
+        <span className="text-brand" aria-hidden="true">
+          ←
+        </span>
+      </Link>
     </div>
   )
 }

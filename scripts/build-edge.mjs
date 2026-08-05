@@ -2,7 +2,7 @@
  * تجهيز دالّة Supabase من مصدر الخادم نفسه.
  * التشغيل: node scripts/build-edge.mjs   (أو `npm run build:edge`)
  *
- * لماذا توليد لا كتابة يدوية؟ لأن البديل نسخةٌ ثانية من سبعَ عشرةَ أداة تعيش
+ * لماذا توليد لا كتابة يدوية؟ لأن البديل نسخةٌ ثانية من الأدوات كلها تعيش
  * في مجلد آخر وتنحرف عن الأولى بعد أول تعديل. المصدر واحد — `mcp/` و
  * `src/lib/` — والفرق بين البيئتين تحويلُ مسارات لا تحويلُ منطق:
  *
@@ -46,6 +46,13 @@ const SERVER_FILES = [
   'mcp/tools/write.ts',
 ]
 
+/**
+ * القائمة يدوية ويحرسها فحص المسارات في آخر هذا الملف.
+ *
+ * محرّكٌ جديد يستورده الخادم ولا يُذكَر هنا لا يُكسر البناء ولا الاختبارات —
+ * يُكسر النشر وحده، ولا يظهر إلا في التدفّق. فإن أضفتَ استيراداً من
+ * `src/lib/**` في `mcp/**` فأضف ملفه هنا.
+ */
 const LIB_FILES = [
   'src/lib/db/types.ts',
   'src/lib/obligations/calc.ts',
@@ -54,8 +61,12 @@ const LIB_FILES = [
   'src/lib/budget/calc.ts',
   'src/lib/budget/month.ts',
   'src/lib/commitments/calc.ts',
+  'src/lib/commitments/payoff.ts',
   'src/lib/expenses/calc.ts',
   'src/lib/budget/groupCost.ts',
+  'src/lib/wealth/networth.ts',
+  'src/lib/wealth/freedom.ts',
+  'src/lib/wealth/baseline.ts',
 ]
 
 const HEADER = `// مولَّد من mcp/ و src/lib/ بـ scripts/build-edge.mjs — لا تعدّله هنا.\n`

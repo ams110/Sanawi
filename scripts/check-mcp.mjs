@@ -5,7 +5,7 @@
  * أربع مراحل:
  * 1. الأدوات المعلنة — لكلٍّ وصف وتوصيف، وأشكالها تتحوّل إلى JSON Schema.
  * 2. وضع القراءة فقط لا يسرّب أداة كتابة.
- * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: الإحدى والعشرين أداة كلها،
+ * 3. تجربة كاملة على Supabase مزيّف في الذاكرة: كل أداة معلَنة تُستدعى فعلاً،
  *    بأرقام محسوبة يدوياً تُقارَن بما يردّه الخادم.
  * 4. نداء قراءة على الحساب الحقيقي إن وُجد SANAWI_EMAIL و SANAWI_PASSWORD
  *    في .env — ويُتخطّى بلا فشل إن لم يوجدا.
@@ -179,8 +179,18 @@ const app = await connect({
   SANAWI_READ_ONLY: '0',
 })
 
+/*
+ * كل أداةٍ نُوديت فعلاً.
+ *
+ * ترويسة هذا الملف تَعِد بأن «كل أداة معلَنة تُستدعى»، والوعد الذي لا يُفحَص
+ * يتحلّل: أداةٌ جديدة تُضاف ولا يُنادَى عليها أحد، والعدد المقروء من الخادم
+ * لا يمكن أن يخالف نفسه فيبقى الفحص أخضر وهو لم يلمسها.
+ */
+const called = new Set()
+
 /** ينادي أداة ويفشل الفحص إن ردّت خطأً. يعيد البيانات المنظّمة. */
 async function call(name, args = {}) {
+  called.add(name)
   const result = await app.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (result.isError) {
@@ -193,6 +203,7 @@ async function call(name, args = {}) {
 
 /** ينادي أداة ويتوقّع خطأً يذكر كذا — رسائل الأخطاء جزء من الواجهة. */
 async function expectError(name, args, needle) {
+  called.add(name)
   const result = await app.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (!result.isError) return fail(`${name}: كان يجب أن يفشل على ${JSON.stringify(args)}`)
@@ -390,6 +401,66 @@ expect('ما أُودع فعلاً', projection?.total_deposited, 120000)
 if (!(projection?.future_value > projection?.total_deposited)) {
   fail('المحاكي لا يُظهر نمواً بعائد 7٪')
 }
+
+// ١٠ب. الثروة: أصول، صافي ثروة، رقم حرية، ترتيب سداد.
+//
+// الأصول صفر قبل هذا القسم، وهذا هو الفحص الأول: تطبيقٌ بلا أصولٍ مسجّلة
+// يجب أن يقول «صافي ثروتك سالب بمقدار ديونك» لا أن ينهار ولا أن يخترع رقماً.
+const emptyNet = await call('sanawi_net_worth')
+expect('بلا أصول: الأصول صفر', emptyNet?.assets_total, 0)
+if (!(emptyNet?.restricted_total > 0)) {
+  fail('صناديق الالتزامات لم تُحتسب ملكاً')
+}
+
+const cash = await call('sanawi_save_asset', {
+  name: 'كاش بالبنك',
+  amount: 20000,
+  kind: 'cash',
+  is_emergency_fund: true,
+})
+expect('الأصل أُنشئ', cash?.created, true)
+expect('ومعلَّم صندوقَ طوارئ', cash?.asset.is_emergency_fund, true)
+
+// الاسم نفسه يحدّث ولا يكرّر — وإلا صار كل «الكاش صار كذا» أصلاً جديداً.
+const cashAgain = await call('sanawi_save_asset', { name: 'كاش بالبنك', amount: 25000 })
+expect('الاسم نفسه يحدّث لا ينشئ', cashAgain?.created, false)
+expect('والقيمة الجديدة محفوظة', cashAgain?.asset.amount, 25000)
+expect('ولم يتكرّر الصف', fake.db.assets.length, 1)
+// تحديث المبلغ وحده لا يمحو ما لم يُرسَل — وإلا سقطت علامة صندوق الطوارئ صامتةً.
+expect('والعلامة نجت من التحديث', cashAgain?.asset.is_emergency_fund, true)
+
+// صندوق طوارئ غير سائل تناقض: العلامة تُهمَل ولا تُحفظ.
+const flat = await call('sanawi_save_asset', {
+  name: 'شقة',
+  amount: 400000,
+  kind: 'property',
+  is_liquid: false,
+  is_emergency_fund: true,
+})
+expect('صندوق طوارئ غير سائل لا يُقبل', flat?.asset.is_emergency_fund, false)
+
+const net = await call('sanawi_net_worth')
+expect('مجموع الأصول', net?.assets_total, 425000)
+expect('السائل يستثني العقار', net?.liquid_total, 25000)
+expect('صندوق الطوارئ هو السائل المُعلَّم', net?.emergency_fund.current, 25000)
+if (!(net?.net_worth > 425000)) {
+  fail('صافي الثروة لا يضمّ صناديق الالتزامات')
+}
+if (net?.is_underwater !== false) fail('حُسب غارقاً وهو ليس كذلك')
+
+const freedom = await call('sanawi_freedom_number')
+if (!(freedom?.target > 0)) fail('رقم الحرية صفر مع وجود مصروف')
+if (freedom?.is_free !== false) fail('قال إنه حرّ ماليّاً بـ 425 ألفاً')
+if (!(freedom?.real_return_percent < 7)) {
+  fail('العائد الحقيقي لم يُخصَم منه التضخّم')
+}
+// كل حقلٍ عددي يجب أن يكون رقماً حقيقياً: NaN يعبر JSON كـ null ويبدو غياباً.
+for (const [key, value] of Object.entries(freedom ?? {})) {
+  if (typeof value === 'number' && !Number.isFinite(value)) fail(`حقل فاسد في رقم الحرية: ${key}`)
+}
+
+// ترتيب السداد يحتاج ديوناً بفائدتين مختلفتين، وإضافتها ترفع الحمل الشهري
+// فتُزحزح أرقاماً تتحقّق منها فحوصٌ لاحقة — لذلك مكانها آخر التجربة لا هنا.
 
 // ١١. التعديل
 const updated = await call('sanawi_update_obligation', {
@@ -670,10 +741,73 @@ expect('والهدف لم يُمَسّ', renamed?.monthly_savings_target, 800)
 await expectError('sanawi_update_profile', {}, 'لم تُرسَل')
 await call('sanawi_update_profile', { monthly_savings_target: 500 })
 
+/* ─── ترتيب سداد الديون ─── */
+
+// آخر التجربة عمداً: الدَّينان أدناه يرفعان الحمل الشهري، وكل فحصٍ بعدهما
+// كان سيقرأ رقماً أكبر ممّا يتوقّع.
+const netBeforeDebts = await call('sanawi_net_worth')
+
+await call('sanawi_add_fixed_commitment', {
+  name: 'قرض غالي',
+  amount: 400,
+  installments: 24,
+  annual_interest_percent: 18,
+})
+await call('sanawi_add_fixed_commitment', {
+  name: 'قرض رخيص',
+  amount: 300,
+  installments: 12,
+  annual_interest_percent: 3,
+})
+
+const payoff = await call('sanawi_debt_payoff', { extra_monthly: 200 })
+expect('الديون وُجدت', payoff?.has_debts, true)
+expect('ليست كلها بفائدة صفر', payoff?.all_zero_interest, false)
+
+/*
+ * الترتيب يُقاس بين الدَّينين المعروفين لا بموقعٍ مطلق في القائمة:
+ * الفحص ينشئ ديوناً أخرى قبل هذا القسم، وتثبيت "الأول" يجعل الفحص يفشل
+ * لأن فحصاً سابقاً أضاف صفّاً — لا لأن الترتيب انكسر.
+ */
+const rank = (plan, name) => plan.lines.findIndex((l) => l.name === name)
+if (!(rank(payoff.avalanche, 'قرض غالي') < rank(payoff.avalanche, 'قرض رخيص'))) {
+  fail('الانهيار لم يقدّم الأعلى فائدة')
+}
+if (!(rank(payoff.snowball, 'قرض رخيص') < rank(payoff.snowball, 'قرض غالي'))) {
+  fail('كرة الثلج لم تقدّم الأصغر رصيداً')
+}
+expect('لا خطة مستحيلة', payoff?.avalanche.is_impossible, false)
+if (!(payoff?.interest_saved >= 0)) {
+  fail('الانهيار خسر أمام كرة الثلج في الفائدة')
+}
+if (payoff?.avalanche.months === null) fail('خطة الانهيار لا تنتهي')
+
+// الفاتورة الدائمة ليست ديناً: «كهرباء» بلا نهاية يجب ألّا تدخل الخطة.
+if (payoff?.avalanche.lines.some((l) => l.name === 'كهرباء')) {
+  fail('فاتورة دائمة دخلت خطة سداد الديون')
+}
+
+// وصافي الثروة ينزل بمقدار الديون الجديدة بالضبط — لا بأقلّ ولا بأكثر.
+const netAfterDebts = await call('sanawi_net_worth')
+expect(
+  'الدَّين الجديد نزل من صافي الثروة',
+  Math.round((netBeforeDebts.net_worth - netAfterDebts.net_worth) * 100) / 100,
+  400 * 24 + 300 * 12,
+)
+
 await app.close()
 await fake.stop()
 
-if (!failed) console.log('✓ الإحدى والعشرين أداة كلها تعمل، والأرقام تطابق الحساب اليدوي.')
+// العدد يُقرأ من الخادم لا يُكتب هنا: رقمٌ ثابت في نصٍّ ينحرف عند كل أداة
+// جديدة، وقد انحرف مرّتين من قبل.
+const untouched = tools.map((t) => t.name).filter((name) => !called.has(name))
+if (untouched.length > 0) {
+  fail(`أدوات معلَنة لم تُستدعَ ولا مرة: ${untouched.join('، ')}`)
+}
+
+if (!failed) {
+  console.log(`✓ الأدوات كلها (${tools.length}) تعمل، والأرقام تطابق الحساب اليدوي.`)
+}
 
 /* ── 5. النقل البعيد: HTTP بالمفتاح ───────────────────────── */
 

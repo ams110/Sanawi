@@ -17,6 +17,7 @@ import type {
   PartnerSettlement,
 } from '../src/lib/db/types.js'
 import type { CalendarMonth } from '../src/lib/obligations/calendar.js'
+import type { PayoffPlan } from '../src/lib/commitments/payoff.js'
 import { viewCommitment } from '../src/lib/commitments/calc.js'
 import { STATUS_LABEL, isoDate, recurrenceLabel } from './format.js'
 
@@ -207,4 +208,45 @@ export function toTemplateOut(template: ObligationTemplate) {
 
 export function toPartnerOut(partner: ObligationPartner) {
   return { id: partner.id, name: partner.name }
+}
+
+/* ── خطة سداد الديون ──────────────────────────────────────── */
+
+export const payoffPlanOut = z.object({
+  strategy: z.enum(['avalanche', 'snowball']),
+  /** فارغ = لم تنتهِ الخطة ضمن السقف. */
+  months: z.number().nullable(),
+  total_interest: z.number(),
+  total_paid: z.number(),
+  first_cleared_month: z.number().nullable(),
+  is_impossible: z.boolean(),
+  lines: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      order: z.number(),
+      cleared_at_month: z.number().nullable(),
+      interest_paid: z.number(),
+      total_paid: z.number(),
+    }),
+  ),
+})
+
+export function toPayoffPlanOut(plan: PayoffPlan): z.infer<typeof payoffPlanOut> {
+  return {
+    strategy: plan.strategy,
+    months: plan.months,
+    total_interest: plan.totalInterest,
+    total_paid: plan.totalPaid,
+    first_cleared_month: plan.firstClearedMonth,
+    is_impossible: plan.isImpossible,
+    lines: plan.lines.map((l) => ({
+      id: l.id,
+      name: l.name,
+      order: l.order,
+      cleared_at_month: l.clearedAtMonth,
+      interest_paid: l.interestPaid,
+      total_paid: l.totalPaid,
+    })),
+  }
 }

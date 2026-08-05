@@ -9,6 +9,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { computeGroupCost } from '../../src/lib/budget/groupCost.js'
 import { projectSavings } from '../../src/lib/budget/calc.js'
+import { freedomSensitivity } from '../../src/lib/wealth/freedom.js'
+import { buildPayoffPlan, comparePayoff } from '../../src/lib/commitments/payoff.js'
 import { heaviestMonth } from '../../src/lib/obligations/calendar.js'
 import { dailyAllowance } from '../../src/lib/budget/month.js'
 import type {
@@ -29,12 +31,14 @@ import {
   loadMonth,
   loadMoneyItems,
   loadObligations,
+  loadWealth,
   monthKey,
   type ObligationView,
 } from '../data.js'
 import {
   CATEGORY_LABEL,
   guard,
+  isoDate,
   longDate,
   money,
   monthYear,
@@ -46,10 +50,12 @@ import {
   calendarMonthOut,
   obligationOut,
   partnerSettlementOut,
+  payoffPlanOut,
   toBillRowOut,
   toCalendarMonthOut,
   toObligationOut,
   toPartnerOut,
+  toPayoffPlanOut,
   toSettlementOut,
   toTemplateOut,
 } from '../schemas.js'
@@ -903,6 +909,8 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         monthly_amount: z.number().positive().describe('المبلغ الشهري'),
         years: z.number().min(1).max(50).describe('عدد السنوات'),
         annual_rate_percent: z.number().min(0).max(30).default(7).describe('العائد السنوي المفترض'),
+        initial_balance: z.number().min(0).default(0).describe('الرصيد الابتدائي'),
+        inflation_percent: z.number().min(0).max(20).default(0).describe('التضخّم المفترض'),
       },
       outputSchema: {
         currency: z.string(),
@@ -910,13 +918,24 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         total_deposited: z.number(),
         growth: z.number(),
         monthly_passive_income: z.number(),
+        real_future_value: z.number(),
+        real_monthly_passive_income: z.number(),
       },
       annotations: READ_ONLY,
     },
-    guard(async ({ monthly_amount, years, annual_rate_percent }) => {
+    guard(async ({
+      monthly_amount,
+      years,
+      annual_rate_percent,
+      initial_balance,
+      inflation_percent,
+    }) => {
       const connection = await connect()
       const currency = connection.currency
-      const projection = projectSavings(monthly_amount, years, annual_rate_percent)
+      const projection = projectSavings(monthly_amount, years, annual_rate_percent, {
+        initialBalance: initial_balance,
+        inflationPercent: inflation_percent,
+      })
 
       const structured = {
         currency,
@@ -924,16 +943,319 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         total_deposited: projection.totalDeposited,
         growth: projection.growth,
         monthly_passive_income: projection.monthlyPassiveIncome,
+        real_future_value: projection.realFutureValue,
+        real_monthly_passive_income: projection.realMonthlyPassiveIncome,
       }
 
       const text = [
         `## ${money(monthly_amount, currency)} شهرياً لمدة ${years} سنة بعائد ${annual_rate_percent}٪`,
+        initial_balance > 0 ? `ابتداءً من ${money(initial_balance, currency)}` : null,
         '',
         `- **القيمة بعد ${years} سنة: ${money(projection.futureValue, currency)}**`,
         `- ما أودعتَه فعلاً: ${money(projection.totalDeposited, currency)}`,
         `- النمو: ${money(projection.growth, currency)}`,
         `- دخل شهري سلبي (سحب آمن 4٪): ${money(projection.monthlyPassiveIncome, currency)}`,
-      ].join('\n')
+        inflation_percent > 0
+          ? `- بقيمة اليوم بعد تضخّم ${inflation_percent}٪: ${money(projection.realFutureValue, currency)} — ودخلها ${money(projection.realMonthlyPassiveIncome, currency)} شهرياً`
+          : null,
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
+
+      return ok(text, structured)
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_net_worth',
+    {
+      title: 'صافي الثروة',
+      description: `كل ما يملكه المستخدم ناقص كل ما عليه، وحالة صندوق الطوارئ.
+
+التعريفات المستعملة — اقتبسها كما هي ولا تعِد تفسيرها:
+  - أرصدة صناديق الالتزامات تُحتسب ملكاً (مالٌ حقيقيّ جُمع ولم يُنفق بعد).
+  - ما تبقّى من التزامٍ ولم يُموَّل ليس ديناً: هو مصروفٌ قادم لا اقتراض.
+  - الأقساط التي لها تاريخ نهاية ديونٌ؛ الفواتير الدائمة مصروفٌ لا دين.
+
+استعمله لأسئلة «كم صار معي؟» و«هل ثروتي بتزيد؟» و«صندوق الطوارئ كافي؟».
+
+المخرجات: صافي الثروة وتفصيله، وتوزيع الأصول، وصندوق الطوارئ، وأصولٌ صارت قيمتها قديمة.`,
+      inputSchema: {},
+      outputSchema: {
+        currency: z.string(),
+        net_worth: z.number(),
+        owned_total: z.number(),
+        assets_total: z.number(),
+        restricted_total: z.number(),
+        liquid_total: z.number(),
+        debts_total: z.number(),
+        is_underwater: z.boolean(),
+        weighted_return_percent: z.number(),
+        by_kind: z.array(
+          z.object({ kind: z.string(), total: z.number(), share: z.number(), count: z.number() }),
+        ),
+        emergency_fund: z.object({
+          current: z.number(),
+          target: z.number(),
+          months_covered: z.number(),
+          progress: z.number(),
+          is_funded: z.boolean(),
+        }),
+        stale_assets: z.array(z.object({ name: z.string(), months_since_update: z.number() })),
+      },
+      annotations: READ_ONLY,
+    },
+    guard(async () => {
+      const connection = await connect()
+      const currency = connection.currency
+      const { net } = await loadWealth(connection)
+
+      const structured = {
+        currency,
+        net_worth: net.netWorth,
+        owned_total: net.ownedTotal,
+        assets_total: net.assetsTotal,
+        restricted_total: net.restrictedTotal,
+        liquid_total: net.liquidTotal,
+        debts_total: net.debtsTotal,
+        is_underwater: net.isUnderwater,
+        weighted_return_percent: net.weightedReturnPercent,
+        by_kind: net.byKind.map((k) => ({
+          kind: k.kind,
+          total: k.total,
+          share: k.share,
+          count: k.count,
+        })),
+        emergency_fund: {
+          current: net.emergencyFund.current,
+          target: net.emergencyFund.target,
+          months_covered: net.emergencyFund.monthsCovered,
+          progress: net.emergencyFund.progress,
+          is_funded: net.emergencyFund.isFunded,
+        },
+        stale_assets: net.staleAssets.map((a) => ({
+          name: a.name,
+          months_since_update: a.monthsSinceUpdate,
+        })),
+      }
+
+      const text = [
+        `## صافي الثروة: ${money(net.netWorth, currency)}`,
+        net.isUnderwater ? '⚠️ الديون أكبر من الملك.' : null,
+        '',
+        `- ما يملكه: ${money(net.ownedTotal, currency)} — منها ${money(net.assetsTotal, currency)} أصولاً مسجّلة و${money(net.restrictedTotal, currency)} في صناديق الالتزامات`,
+        `- منها سائل: ${money(net.liquidTotal, currency)}`,
+        `- الديون: ${money(net.debtsTotal, currency)}`,
+        '',
+        `### صندوق الطوارئ`,
+        net.emergencyFund.isFunded
+          ? `مكتمل: ${money(net.emergencyFund.current, currency)}`
+          : `${money(net.emergencyFund.current, currency)} من ${money(net.emergencyFund.target, currency)} — يغطّي ${net.emergencyFund.monthsCovered.toFixed(1)} شهر`,
+        net.byKind.length > 0 ? '' : null,
+        net.byKind.length > 0 ? '### التوزيع' : null,
+        ...net.byKind.map(
+          (k) => `- ${k.kind}: ${money(k.total, currency)} (${Math.round(k.share * 100)}٪)`,
+        ),
+        net.staleAssets.length > 0
+          ? `\n⚠️ قيمٌ قديمة لم تُحدَّث: ${net.staleAssets.map((a) => `${a.name} (${a.monthsSinceUpdate} شهر)`).join('، ')}`
+          : null,
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
+
+      return ok(text, structured)
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_freedom_number',
+    {
+      title: 'رقم الحرية وتاريخها',
+      description: `رأس المال الذي يغطّي دخلُه مصروف المستخدم، وكم يبعد عنه بوتيرته الحالية.
+
+كل الأرقام بقيمة اليوم: العائد المستعمل حقيقيّ (بعد خصم التضخّم)، فلا تقارنها بأرقام اسمية.
+المصروف السنوي مشتقٌّ من بيانات المستخدم نفسها — الفواتير الدائمة وأقساط الالتزامات السنوية
+والمصروف اليومي مُسقَطاً — بلا أقساط الديون لأن لها نهاية.
+
+استعمله لأسئلة «إيمتى بقدر أوقف عن الشغل؟» و«كم لازم يصير معي؟» و«لو زدت ادخاري شو بيصير؟».`,
+      inputSchema: {
+        extra_monthly: z
+          .number()
+          .min(0)
+          .default(0)
+          .describe('ادخارٌ إضافي شهري لقياس أثره على التاريخ'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        target: z.number(),
+        coverage: z.number(),
+        shortfall: z.number(),
+        is_free: z.boolean(),
+        months_to_freedom: z.number().nullable(),
+        years_to_freedom: z.number().nullable(),
+        freedom_date: z.string().nullable(),
+        passive_income_now: z.number(),
+        months_covered_now: z.number(),
+        real_return_percent: z.number(),
+        annual_spending: z.number(),
+        monthly_contribution: z.number(),
+        months_saved_by_extra: z.number().nullable(),
+      },
+      annotations: READ_ONLY,
+    },
+    guard(async ({ extra_monthly }) => {
+      const connection = await connect()
+      const currency = connection.currency
+      const wealth = await loadWealth(connection)
+      const f = wealth.freedom
+
+      /*
+       * المدخلات تُستعاد من `loadWealth` نفسها لا تُبنى من جديد.
+       *
+       * بناؤها هنا كان يُسقط التضخّم ومعدّل السحب فيقعان على قيمتَي الدالّة
+       * الافتراضيتين، فيخرج تاريخٌ محسوبٌ بعائدٍ اسميّ وهدفٍ آخر — أي أن كلود
+       * يقتبس رقماً غير الذي على الشاشة، وهو العطل الوحيد الذي يحرس منه
+       * mcp/data.ts كلُّه.
+       */
+      const sensitivity =
+        extra_monthly > 0
+          ? freedomSensitivity(wealth.freedomInput, extra_monthly)
+          : { monthsSaved: null, newMonthsToFreedom: null }
+
+      const structured = {
+        currency,
+        target: f.target,
+        coverage: f.coverage,
+        shortfall: f.shortfall,
+        is_free: f.isFree,
+        months_to_freedom: f.monthsToFreedom,
+        years_to_freedom: f.yearsToFreedom,
+        freedom_date: f.freedomDate ? isoDate(f.freedomDate) : null,
+        passive_income_now: f.passiveIncomeNow,
+        months_covered_now: f.monthsCoveredNow,
+        real_return_percent: f.realReturnPercent,
+        annual_spending: wealth.annualSpending,
+        monthly_contribution: wealth.monthlyContribution,
+        months_saved_by_extra: sensitivity.monthsSaved,
+      }
+
+      const text = [
+        `## رقم الحرية: ${money(f.target, currency)}`,
+        `مصروفك السنوي ${money(wealth.annualSpending, currency)}، وتدّخر ${money(wealth.monthlyContribution, currency)} بالشهر.`,
+        '',
+        `- قطعتَ ${Math.round(f.coverage * 100)}٪ من الطريق`,
+        f.isFree ? '- **وصلتَ: دخلك السلبي يغطّي مصروفك.**' : `- ينقصك ${money(f.shortfall, currency)}`,
+        f.freedomDate && !f.isFree
+          ? `- **التاريخ التقريبي: ${longDate(f.freedomDate)}** (بعد ${f.monthsToFreedom} شهر)`
+          : null,
+        !f.freedomDate && !f.isFree
+          ? '- ⚠️ بهذه الوتيرة لا يُبلَغ الرقم. يحتاج ادخاراً أكبر أو مصروفاً أقل.'
+          : null,
+        `- دخلك السلبي اليوم: ${money(f.passiveIncomeNow, currency)} شهرياً — يغطّي ${f.monthsCoveredNow.toFixed(1)} من كل 12 شهر`,
+        `- العائد الحقيقي المستعمَل: ${f.realReturnPercent.toFixed(1)}٪ بعد التضخّم`,
+        sensitivity.monthsSaved !== null && sensitivity.monthsSaved > 0
+          ? `\nزيادة ${money(extra_monthly, currency)} شهرياً تقرّب التاريخ ${sensitivity.monthsSaved} شهراً.`
+          : null,
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
+
+      return ok(text, structured)
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_debt_payoff',
+    {
+      title: 'ترتيب سداد الديون',
+      description: `بأيّ دَينٍ يبدأ، وكم يوفّر الترتيب الصحيح.
+
+يقارن طريقتين على ديون المستخدم الحقيقية:
+  - avalanche (الانهيار): الأعلى فائدة أولاً — يوفّر أكثر مالاً.
+  - snowball (كرة الثلج): الأصغر رصيداً أولاً — يُسقط أول دَينٍ أبكر.
+
+المحاكاة تدحرج الحدّ الأدنى المُحرَّر من كل دَينٍ سقط إلى الذي يليه، وهذا هو
+مصدر معظم التسريع؛ لا تعِد الحساب يدوياً.
+
+الديون تُقرأ من البنود الشهرية التي لها تاريخ نهاية، ورصيدها = حصّتي من القسط × الدفعات المتبقية.
+الفائدة من عمود annual_interest_percent؛ صفرٌ فيه يعني أن المستخدم لم يسجّلها بعد — قل له ذلك بدل أن تفترض رقماً.`,
+      inputSchema: {
+        extra_monthly: z
+          .number()
+          .min(0)
+          .default(0)
+          .describe('ما يستطيع دفعه فوق الحدود الدنيا شهرياً'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        has_debts: z.boolean(),
+        all_zero_interest: z.boolean(),
+        interest_saved: z.number(),
+        months_saved: z.number().nullable(),
+        avalanche: payoffPlanOut,
+        snowball: payoffPlanOut,
+      },
+      annotations: READ_ONLY,
+    },
+    guard(async ({ extra_monthly }) => {
+      const connection = await connect()
+      const currency = connection.currency
+      const { payoffDebts } = await loadWealth(connection)
+
+      if (payoffDebts.length === 0) {
+        return ok('لا ديون مسجّلة — البنود الشهرية كلها بلا تاريخ نهاية.', {
+          currency,
+          has_debts: false,
+          all_zero_interest: true,
+          interest_saved: 0,
+          months_saved: null,
+          avalanche: toPayoffPlanOut(buildPayoffPlan({ debts: [], strategy: 'avalanche' })),
+          snowball: toPayoffPlanOut(buildPayoffPlan({ debts: [], strategy: 'snowball' })),
+        })
+      }
+
+      const comparison = comparePayoff({ debts: payoffDebts, extraMonthly: extra_monthly })
+      const allZero = payoffDebts.every((d) => d.annualInterestPercent <= 0)
+
+      const structured = {
+        currency,
+        has_debts: true,
+        all_zero_interest: allZero,
+        interest_saved: comparison.interestSaved,
+        months_saved: comparison.monthsSaved,
+        avalanche: toPayoffPlanOut(comparison.avalanche),
+        snowball: toPayoffPlanOut(comparison.snowball),
+      }
+
+      const planLines = (plan: typeof comparison.avalanche) =>
+        plan.lines.map(
+          (l) =>
+            `  ${l.order}. ${l.name} — ${l.clearedAtMonth === null ? 'لا ينتهي ضمن المدة' : `يسقط بعد ${l.clearedAtMonth} شهر`}، فائدة ${money(l.interestPaid, currency)}`,
+        )
+
+      const text = [
+        `## ترتيب سداد ${payoffDebts.length} دَين`,
+        extra_monthly > 0 ? `بدفعة إضافية ${money(extra_monthly, currency)} شهرياً.` : null,
+        comparison.avalanche.isImpossible
+          ? '⚠️ الحد الأدنى لا يغطّي الفائدة على أحد الديون — الرصيد لا ينزل.'
+          : null,
+        '',
+        `### الأعلى فائدة أولاً`,
+        `تنتهي بعد ${comparison.avalanche.months ?? '—'} شهر، بفائدة ${money(comparison.avalanche.totalInterest, currency)}`,
+        ...planLines(comparison.avalanche),
+        '',
+        `### الأصغر رصيداً أولاً`,
+        `تنتهي بعد ${comparison.snowball.months ?? '—'} شهر، بفائدة ${money(comparison.snowball.totalInterest, currency)}`,
+        ...planLines(comparison.snowball),
+        '',
+        allZero
+          ? 'كل الديون بفائدة صفر — الترتيب لا يوفّر مالاً، لكن كرة الثلج تُسقط أول دَينٍ أبكر.'
+          : comparison.interestSaved > 0
+            ? `**الأعلى فائدة أولاً يوفّر ${money(comparison.interestSaved, currency)}**${comparison.monthsSaved && comparison.monthsSaved > 0 ? ` ويختصر ${comparison.monthsSaved} شهراً` : ''}.`
+            : 'الطريقتان متساويتان على هذه الديون.',
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
 
       return ok(text, structured)
     }),
