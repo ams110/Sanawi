@@ -40,7 +40,10 @@ export interface PayoffPlan {
   months: number | null
   totalInterest: number
   totalPaid: number
-  /** متى يسقط أول دين — أول فرحة، وهي ما يبقي الناس على الخطة. */
+  /**
+   * متى يسقط أول دين — أول فرحة، وهي ما يبقي الناس على الخطة.
+   * فارغ = لا دين يسقط ضمن السقف، أو ما سقط كان ميتاً قبل أن تبدأ.
+   */
   firstClearedMonth: number | null
   /**
    * الحد الأدنى لا يغطّي الفائدة، فالرصيد لا ينزل أبداً.
@@ -97,6 +100,11 @@ export function debtBalanceFrom(monthlyAmount: number, paymentsLeft: number): nu
  * كسر التعادل ليس زينة: دينان بالفائدة نفسها يُقتل أصغرهما أولاً ليتحرّر حدّه
  * الأدنى مبكّراً، ودينان بالرصيد نفسه يُقتل أغلاهما أولاً. وبدون الرجوع إلى
  * الترتيب الأصلي عند تساوي كل شيء تختلف الخطة بين استدعاءين على البيانات نفسها.
+ *
+ * والمقارنة تقع على الأرقام بعد تنظيفها لا كما وردت: NaN واحدٌ يجعل الفرق NaN،
+ * و NaN ‏`!== 0` فيرجع المقارِن NaN ويصير ترتيب المصفوفة غير معرَّف. ورصيدٌ سالب
+ * كان يقفز إلى رأس كرة الثلج وهو دينٌ تعدّه المحاكاة ميتاً — الترتيب يجب أن يرى
+ * ما تراه المحاكاة بالضبط.
  */
 export function orderDebts(
   debts: readonly PayoffDebt[],
@@ -105,8 +113,9 @@ export function orderDebts(
   return debts
     .map((debt, index) => ({ debt, index }))
     .sort((a, b) => {
-      const rateGap = b.debt.annualInterestPercent - a.debt.annualInterestPercent
-      const balanceGap = a.debt.balance - b.debt.balance
+      const rateGap =
+        atLeastZero(b.debt.annualInterestPercent) - atLeastZero(a.debt.annualInterestPercent)
+      const balanceGap = atLeastZero(a.debt.balance) - atLeastZero(b.debt.balance)
       const primary = strategy === 'avalanche' ? rateGap : balanceGap
       if (primary !== 0) return primary
       const secondary = strategy === 'avalanche' ? balanceGap : rateGap
@@ -134,7 +143,10 @@ interface DebtState {
 export function buildPayoffPlan(input: PayoffInput): PayoffPlan {
   const strategy = input.strategy ?? 'avalanche'
   const requestedMax = Math.floor(atLeastZero(input.maxMonths ?? DEFAULT_MAX_MONTHS))
-  const maxMonths = requestedMax > 0 ? requestedMax : DEFAULT_MAX_MONTHS
+  // السقف سقفٌ على من يطلب أكثر منه أيضاً: `maxMonths` يصل من مُدخَلٍ خارجي،
+  // وطلبُ مليون شهرٍ يجمّد الخيط الذي يرسم الشاشة بدل أن يحسب شيئاً مفيداً.
+  const maxMonths =
+    requestedMax > 0 ? Math.min(requestedMax, DEFAULT_MAX_MONTHS) : DEFAULT_MAX_MONTHS
   const extraMonthly = atLeastZero(input.extraMonthly ?? 0)
 
   const state: DebtState[] = orderDebts(input.debts, strategy).map((source) => {
@@ -220,6 +232,14 @@ export function buildPayoffPlan(input: PayoffInput): PayoffPlan {
     .map((debt) => debt.clearedAtMonth)
     .filter((month): month is number => month !== null)
 
+  /**
+   * أول فرحة تُحسب من الشهور المعاشة وحدها.
+   * دينٌ رصيده صفرٌ قبل أن تبدأ الخطة يحمل الشهر صفراً، وأخذُه هنا يُخرج
+   * «أول دين يسقط بعد ٠ شهر» — جملةٌ تُعرَض للمستخدم ولا تعني شيئاً، والفارغ
+   * أصدق منها: لا فرحة قادمة لأنها وقعت قبل الخطة.
+   */
+  const firstWins = clearedMonths.filter((month) => month > 0)
+
   return {
     strategy,
     lines,
@@ -228,7 +248,7 @@ export function buildPayoffPlan(input: PayoffInput): PayoffPlan {
     // فيظهر انحرافه شواكل فائدةٍ لم تُدفع.
     totalInterest: round2(state.reduce((sum, debt) => sum + debt.interestPaid, 0)),
     totalPaid: round2(state.reduce((sum, debt) => sum + debt.totalPaid, 0)),
-    firstClearedMonth: clearedMonths.length === 0 ? null : Math.min(...clearedMonths),
+    firstClearedMonth: firstWins.length === 0 ? null : Math.min(...firstWins),
     isImpossible,
   }
 }

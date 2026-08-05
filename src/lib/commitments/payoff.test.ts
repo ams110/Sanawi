@@ -104,6 +104,8 @@ describe('الفائض ينزل إلى الذي يليه في الشهر نفس�
 
   it('يقتل الدينين في شهرٍ واحد بدل شهرين', () => {
     expect(plan.months).toBe(1)
+    // الطول يُثبَّت قبل `every`: على مصفوفةٍ فارغة تُرجع `true` فيمرّ الفحص بلا فحص.
+    expect(plan.lines).toHaveLength(2)
     expect(plan.lines.every((l) => l.clearedAtMonth === 1)).toBe(true)
   })
 
@@ -124,24 +126,24 @@ describe('الانهيار مقابل كرة الثلج', () => {
     expect(cmp.snowball.lines[0]!.id).toBe('قرض')
   })
 
+  // الأرقام مثبَّتة لا مشتقّة من الناتج نفسه: `interestSaved === snowball - avalanche`
+  // جملةٌ صادقةٌ مهما انهار المحرّك، وهي أسوأ ما يُكتب في هذا الملف تحديداً —
+  // ملفٌ كلّ قيمته في الرقم الذي يخرج منه.
   it('الانهيار يوفّر فائدةً حقيقية', () => {
-    expect(cmp.avalanche.totalInterest).toBeLessThan(cmp.snowball.totalInterest)
-    expect(cmp.interestSaved).toBeGreaterThan(0)
-    expect(cmp.interestSaved).toBe(
-      Math.round((cmp.snowball.totalInterest - cmp.avalanche.totalInterest) * 100) / 100,
-    )
+    expect(cmp.avalanche.totalInterest).toBe(541.4)
+    expect(cmp.snowball.totalInterest).toBe(634.18)
+    expect(cmp.interestSaved).toBe(92.78)
   })
 
   it('وثمن الراحة: كرة الثلج تشتري فرحةً أبكر', () => {
-    expect(cmp.snowball.firstClearedMonth).toBeLessThan(
-      cmp.avalanche.firstClearedMonth as number,
-    )
+    expect(cmp.snowball.firstClearedMonth).toBe(4)
+    expect(cmp.avalanche.firstClearedMonth).toBe(11)
   })
 
   it('يقيس الاختصار بالشهور أيضاً', () => {
-    expect(cmp.monthsSaved).toBe(
-      (cmp.snowball.months as number) - (cmp.avalanche.months as number),
-    )
+    expect(cmp.avalanche.months).toBe(11)
+    expect(cmp.snowball.months).toBe(12)
+    expect(cmp.monthsSaved).toBe(1)
   })
 })
 
@@ -154,6 +156,7 @@ describe('حين يتطابق الترتيبان', () => {
   const cmp = comparePayoff({ debts, extraMonthly: 200 })
 
   it('لا فائدة تُوفَّر ولا شهر يُختصر', () => {
+    expect(cmp.avalanche.months).toBe(5)
     expect(cmp.interestSaved).toBe(0)
     expect(cmp.monthsSaved).toBe(0)
   })
@@ -216,7 +219,10 @@ describe('الخطة المستحيلة', () => {
       extraMonthly: 0,
     })
     expect(rescued.isImpossible).toBe(false)
-    expect(rescued.months).not.toBeNull()
+    // الشهر مثبَّت لا مُختبَرٌ بـ`not.toBeNull`: الأخيرة تكرار لسطرٍ فوقها
+    // لأن `isImpossible === false` تعني `months !== null` بحكم البناء.
+    expect(rescued.months).toBe(23)
+    expect(rescued.lines[1]!.clearedAtMonth).toBe(1)
   })
 })
 
@@ -242,6 +248,8 @@ describe('الحالات الحدّية', () => {
     expect(plan.lines[0]!.clearedAtMonth).toBe(0)
     // حدّه الأدنى يبقى في المحفظة، فيُقتل الحيّ في شهرين لا ثلاثة.
     expect(plan.months).toBe(2)
+    // وموتُه قبل البدء ليس «أول فرحة»: الشهر الثاني هو أول ما يُبشَّر به.
+    expect(plan.firstClearedMonth).toBe(2)
   })
 
   it('لا يجمع خطأ التقريب عبر عشرات الشهور', () => {
@@ -262,5 +270,25 @@ describe('الحالات الحدّية', () => {
     })
     expect(plan.isImpossible).toBe(true)
     expect(plan.lines[0]!.totalPaid).toBe(3)
+  })
+
+  it('سقفٌ مبالغٌ فيه يُقصّ إلى ٦٠٠ ولا يدور مليون دورة', () => {
+    const plan = buildPayoffPlan({
+      debts: [debt({ id: 'قرض', balance: 1e9, minimumPayment: 1 })],
+      maxMonths: 5_000_000,
+    })
+    expect(plan.lines[0]!.totalPaid).toBe(600)
+  })
+
+  it('مُدخَلٌ فاسد لا يقلب الترتيب رأساً على عقب', () => {
+    // NaN في الفائدة كان يجعل المقارِن يرجع NaN، وترتيب المصفوفة عندها غير
+    // معرَّف؛ والرصيد السالب كان يتصدّر كرة الثلج وهو دينٌ تعدّه المحاكاة ميتاً.
+    const dirty = [
+      debt({ id: 'سالب', balance: -500, minimumPayment: 10 }),
+      debt({ id: 'مجهول', balance: 300, annualInterestPercent: Number.NaN }),
+      debt({ id: 'سليم', balance: 200, minimumPayment: 10, annualInterestPercent: 9 }),
+    ]
+    expect(orderDebts(dirty, 'avalanche').map((d) => d.id)).toEqual(['سليم', 'سالب', 'مجهول'])
+    expect(orderDebts(dirty, 'snowball').map((d) => d.id)).toEqual(['سالب', 'سليم', 'مجهول'])
   })
 })
