@@ -284,6 +284,9 @@ function ExpenseRow({
   const [spentAt, setSpentAt] = useState(expense.spent_at)
   const [isUnexpected, setIsUnexpected] = useState(expense.is_unexpected)
   const [error, setError] = useState<string | null>(null)
+  // فشل الحذف حالةٌ مستقلّة: `error` يُعرض داخل نموذج التعديل وحده، والحذف
+  // يقع والنموذج مغلق فلا يراه أحد.
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   // الرجوع عن التعديل يعيد القيم الأصلية لا آخر ما كُتب في الحقول.
   const cancel = () => {
@@ -314,10 +317,23 @@ function ExpenseRow({
         {!editing && (
           <>
             <EditButton onClick={() => setEditing(true)} />
-            <DeleteButton id={expense.id} onDeleted={onChanged} />
+            <DeleteButton
+              id={expense.id}
+              onDeleted={async () => {
+                setRemoveError(null)
+                await onChanged()
+              }}
+              onFailed={(err) => setRemoveError(failureText(err, t, t('expenses.removeFailed')))}
+            />
           </>
         )}
       </div>
+
+      {removeError && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {removeError}
+        </p>
+      )}
 
       <InlineEdit
         open={editing}
@@ -383,7 +399,19 @@ function ExpenseRow({
   )
 }
 
-function DeleteButton({ id, onDeleted }: { id: string; onDeleted: () => Promise<void> }) {
+/**
+ * `onFailed` لا خيار: حذفٌ يفشل صامتاً يترك السطر مكانه بلا خبر، فيعيد
+ * المستخدم الضغط ظنّاً أنّ ضغطته لم تُسجَّل.
+ */
+function DeleteButton({
+  id,
+  onDeleted,
+  onFailed,
+}: {
+  id: string
+  onDeleted: () => Promise<void>
+  onFailed: (err: unknown) => void
+}) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
 
@@ -397,6 +425,8 @@ function DeleteButton({ id, onDeleted }: { id: string; onDeleted: () => Promise<
         try {
           await deleteExpense(id)
           await onDeleted()
+        } catch (err) {
+          onFailed(err)
         } finally {
           setBusy(false)
         }

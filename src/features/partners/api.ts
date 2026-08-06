@@ -105,26 +105,41 @@ export async function saveShares(
 }
 
 /**
+ * ما الخلل في الحصص — رمزاً لا نصّاً.
+ *
+ * هذا ملف وصولٍ للبيانات لا مكوّن، فلا يعرف الترجمة: يُخرج رمزاً ومعه ما
+ * يحتاجه النصّ من أرقام، ويصوغه المكوّن من `ar.ts` — كما يفعل
+ * `src/lib/errors.ts` مع `src/lib/i18n/failure.ts`.
+ */
+export type SharesProblem =
+  /** شريكٌ له حصّة ولا اسم له. */
+  | { code: 'needName' }
+  /** بلا شركاء، وحصّتي دون 100. */
+  | { code: 'mustBe100' }
+  /** المجموع لا يساوي 100 — و`percent` هو المجموع مقرَّباً للعرض. */
+  | { code: 'sumMismatch'; percent: number }
+
+/**
  * مجموع حصتي وحصص الشركاء يجب أن يساوي 100 بالضبط.
  * نتحقق هنا لا في القاعدة: قيدٌ في القاعدة سيفشل في منتصف تعديل متعدد الصفوف.
  */
 export function validateShares(
   mySharePercent: number,
   partners: PartnerShareDraft[],
-): string | null {
+): SharesProblem | null {
   // فحص الاسم أولاً: شريك بحصة بلا اسم لا يُحتسب ضمن الشركاء الفعليين،
   // فلو تأخّر هذا الفحص لقيل للمستخدم "بلا شركاء..." وهو يرى شريكاً أمامه.
   const unnamed = partners.find((p) => !p.name.trim() && p.sharePercent > 0)
-  if (unnamed) return 'اكتب اسم كل شريك'
+  if (unnamed) return { code: 'needName' }
 
   const active = partners.filter((p) => p.name.trim() && p.sharePercent > 0)
   if (active.length === 0) {
-    return mySharePercent === 100 ? null : 'بلا شركاء لازم حصتك تكون 100%'
+    return mySharePercent === 100 ? null : { code: 'mustBe100' }
   }
 
   const total = active.reduce((sum, p) => sum + p.sharePercent, mySharePercent)
   if (Math.abs(total - 100) > 0.01) {
-    return `المجموع ${Math.round(total)}% — لازم يكون 100% بالضبط`
+    return { code: 'sumMismatch', percent: Math.round(total) }
   }
   return null
 }

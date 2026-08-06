@@ -618,7 +618,14 @@ function defaultsFor(table) {
     case 'obligation_payments':
       return { paid_from_account_id: null }
     case 'expenses':
-      return { group_id: null, category: null, account_id: null, note: null, spent_at: today() }
+      return {
+        group_id: null,
+        category: null,
+        category_id: null,
+        account_id: null,
+        note: null,
+        spent_at: today(),
+      }
     case 'bill_payments':
       return { paid_at: null, note: null }
     case 'income_sources':

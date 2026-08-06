@@ -1,5 +1,5 @@
 import { formatMoney } from '@/lib/format'
-import type { PartnerShareDraft } from './api'
+import type { PartnerShareDraft, SharesProblem } from './api'
 import { useTranslation } from 'react-i18next'
 
 interface Props {
@@ -8,7 +8,8 @@ interface Props {
   partners: PartnerShareDraft[]
   onPartnersChange: (next: PartnerShareDraft[]) => void
   totalAmount: number
-  error?: string | null
+  /** رمز المشكلة لا نصّها — الصياغة هنا من `ar.ts`. */
+  error?: SharesProblem | null
 }
 
 /**
@@ -114,7 +115,15 @@ export function PartnersField({
         </span>
       </div>
 
-      {error && <p className="text-[13px] font-semibold text-danger">{error}</p>}
+      {error && (
+        <p className="text-[13px] font-semibold text-danger">
+          {error.code === 'needName'
+            ? t('partners.errors.needName')
+            : error.code === 'mustBe100'
+              ? t('partners.errors.mustBe100')
+              : t('partners.errors.sumMismatch', { percent: error.percent })}
+        </p>
+      )}
     </div>
   )
 }

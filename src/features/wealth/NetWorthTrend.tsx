@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatMoney, formatMonthYear } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import type { NetWorthSnapshot } from '@/lib/db/types'
 
 /**
@@ -26,6 +27,7 @@ export function NetWorthTrend({
 }) {
   const { t } = useTranslation()
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const points = snapshots.map((s) => Number(s.net_worth))
   const first = snapshots[0]
@@ -79,8 +81,13 @@ export function NetWorthTrend({
           loading={busy}
           onClick={async () => {
             setBusy(true)
+            setError(null)
             try {
               await onSave()
+            } catch (err) {
+              // «انحفظت ✓» تُرفع عند المستدعي بعد `await`، فهي لا تظهر على فشل.
+              // لكن بلا هذه الرسالة يعود الزرّ من دورانه بلا جواب البتّة.
+              setError(failureText(err, t, t('wealth.snapshotFailed')))
             } finally {
               setBusy(false)
             }
@@ -88,6 +95,12 @@ export function NetWorthTrend({
         >
           {saved ? t('wealth.snapshotSaved') : t('wealth.saveSnapshot')}
         </Button>
+      )}
+
+      {error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
       )}
     </section>
   )

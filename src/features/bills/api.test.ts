@@ -88,7 +88,24 @@ describe('ملخّص فواتير الشهر', () => {
 
   it('يتعامل مع شهر فارغ', () => {
     const s = summarizeBills([])
-    expect(s).toEqual({ recorded: 0, paid: 0, outstanding: 0, missing: 0 })
+    expect(s).toEqual({ recorded: 0, paid: 0, outstanding: 0, missing: 0, payable: 0 })
+  })
+
+  /*
+   * العدّاد المعروض في الشاشة يقيس ما يجب دفعه، و«بلا صفّ فاتورة» ليس كافياً:
+   * بندٌ تبدأ دفعاته الشهر الجاي وقسطٌ انتهى كلاهما بلا صفّ ولا يُدفع اليوم.
+   */
+  it('لا يعدّ ضمن المستحقّ بنداً لم يبدأ ولا قسطاً انتهى', () => {
+    const today = new Date('2026-08-15T00:00:00')
+    const notStarted = row('a', null, false)
+    notStarted.commitment.starts_on = '2026-10-01'
+    const finished = row('b', null, false)
+    finished.commitment.ends_on = '2026-06-01'
+    const due = row('c', null, false)
+
+    const s = summarizeBills([notStarted, finished, due], today)
+    expect(s.missing).toBe(3)
+    expect(s.payable).toBe(1)
   })
 
   it('كل الفواتير مدفوعة يعني لا مستحقّ', () => {

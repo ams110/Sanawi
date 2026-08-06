@@ -13,7 +13,7 @@ describe('التحقق من الحصص', () => {
   })
 
   it('يرفض حصة ناقصة بلا شركاء', () => {
-    expect(validateShares(60, [])).toMatch(/100%/)
+    expect(validateShares(60, [])).toEqual({ code: 'mustBe100' })
   })
 
   it('يقبل مناصفة مع شريك واحد', () => {
@@ -25,15 +25,21 @@ describe('التحقق من الحصص', () => {
   })
 
   it('يرفض مجموعاً أقل من 100', () => {
-    expect(validateShares(50, [partner('أخوي', 30)])).toMatch(/80%/)
+    expect(validateShares(50, [partner('أخوي', 30)])).toEqual({
+      code: 'sumMismatch',
+      percent: 80,
+    })
   })
 
   it('يرفض مجموعاً أكثر من 100', () => {
-    expect(validateShares(70, [partner('أخوي', 50)])).toMatch(/120%/)
+    expect(validateShares(70, [partner('أخوي', 50)])).toEqual({
+      code: 'sumMismatch',
+      percent: 120,
+    })
   })
 
   it('يرفض شريكاً بحصة بلا اسم', () => {
-    expect(validateShares(50, [partner('   ', 50)])).toMatch(/اسم/)
+    expect(validateShares(50, [partner('   ', 50)])).toEqual({ code: 'needName' })
   })
 
   it('يتجاهل صفاً فارغاً تماماً فلا يعيق الحفظ', () => {

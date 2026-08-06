@@ -73,15 +73,26 @@ export async function addExpense(
   input: {
     amount: number
     categoryId: string | null
+    /** اسم التصنيف كما يقرأه المستخدم — يُكتب مع المعرّف لا بدله. */
+    categoryName?: string | null
     spentAt: string
     isUnexpected: boolean
     note?: string | null
   },
 ): Promise<void> {
+  /*
+   * العمودان معاً.
+   *
+   * كان التطبيق يكتب `category_id` وحده وكلود يكتب `category` وحده، فلا يرى
+   * أحدهما ما كتبه الآخر: شاشة المصاريف تصنّف بالمعرّف فلا ترى ما سجّله
+   * كلود، و`sanawi_group_cost` يرشّح بالنصّ فلا يرى ما سجّلته الشاشة —
+   * فتخرج «التكلفة الحقيقية للسيارة» ناقصةً بمقدار ما سُجّل من الجهة الأخرى.
+   */
   const { error } = await supabase.from('expenses').insert({
     user_id: userId,
     amount: input.amount,
     category_id: input.categoryId,
+    category: input.categoryName ?? null,
     spent_at: input.spentAt,
     is_unexpected: input.isUnexpected,
     note: input.note ?? null,

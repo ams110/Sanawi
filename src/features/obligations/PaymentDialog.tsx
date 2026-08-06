@@ -1,15 +1,19 @@
 import { useTranslation } from 'react-i18next'
 import { formatDate, formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
-import type { RenewalResult } from '@/lib/obligations/renewal'
-import type { ObligationWithCalc } from './api'
+import type { Account } from '@/lib/db/types'
+import type { ObligationWithCalc, PaymentResult } from './api'
 
 interface Props {
   item: ObligationWithCalc
+  /** الحسابات المتاحة — فارغة يعني لا حسابات مسجّلة بعد. */
+  accounts: Account[]
+  paidFromAccountId: string | null
+  onPaidFromChange: (accountId: string | null) => void
   onConfirm: () => Promise<void>
   onClose: () => void
   /** غير فارغ = الدفع تمّ، فنعرض النتيجة بدل التأكيد. */
-  result: RenewalResult | null
+  result: PaymentResult | null
   busy: boolean
   error: string | null
 }
@@ -21,7 +25,17 @@ interface Props {
  * — دفع مبلغاً كبيراً دون أن يشعر، وقسطه القادم أقل. بدونها يبدو الدفع
  * إجراءً إدارياً لا إنجازاً، ويضيع سبب بقائه في التطبيق سنةً أخرى.
  */
-export function PaymentDialog({ item, onConfirm, onClose, result, busy, error }: Props) {
+export function PaymentDialog({
+  item,
+  accounts,
+  paidFromAccountId,
+  onPaidFromChange,
+  onConfirm,
+  onClose,
+  result,
+  busy,
+  error,
+}: Props) {
   const { t } = useTranslation()
   const { calc, obligation } = item
   const balance = Number(item.balance?.my_fund_balance ?? 0)
@@ -60,6 +74,18 @@ export function PaymentDialog({ item, onConfirm, onClose, result, busy, error }:
               </p>
             )}
 
+            {/*
+              * الدفعة سُجّلت والرصيد لم يُحدَّث.
+              *
+              * لا نُفشل الدفع لأنه وقع في البنك فعلاً، ولا نبتلع الخبر لأن
+              * رصيداً يكذب أسوأ من رسالةٍ مزعجة — فيقرأ صاحبه أن عليه تصحيحه.
+              */}
+            {result.accountUpdateFailed && (
+              <p className="rounded-2xl bg-accent-soft px-4 py-3 text-[13px] font-semibold text-text">
+                ⚠️ {t('payment.accountNotUpdated')}
+              </p>
+            )}
+
             <Button onClick={onClose} className="w-full">
               {t('payment.close')}
             </Button>
@@ -80,6 +106,32 @@ export function PaymentDialog({ item, onConfirm, onClose, result, busy, error }:
                   shortfall: formatMoney(shortfall),
                 })}
               </p>
+            )}
+
+            {/*
+              * من أيّ حساب خرج المال.
+              *
+              * الافتراضي حساب الصندوق — من لم يقل من أين دفع دفع من حيث جمع.
+              * واختيار غيره مقبولٌ ويُعلَّم بتسويةٍ معلّقة: البطاقة في جيبٍ
+              * والصندوق في حسابٍ آخر حالةٌ عادية، ورفضُها يجبر صاحبها على
+              * الكذب. وقبل هذا لم يكن للشاشة أن تمسّ رصيد حسابٍ إطلاقاً.
+              */}
+            {accounts.length > 0 && (
+              <label className="block space-y-1.5">
+                <span className="text-sm font-semibold text-text">{t('payment.paidFrom')}</span>
+                <select
+                  value={paidFromAccountId ?? ''}
+                  onChange={(ev) => onPaidFromChange(ev.target.value || null)}
+                  className="w-full rounded-xl border border-border bg-surface-muted px-3 py-2.5 text-sm font-semibold text-text"
+                >
+                  <option value="">{t('payment.paidFromDefault')}</option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             )}
 
             {error && (

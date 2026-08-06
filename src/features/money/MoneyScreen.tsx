@@ -175,6 +175,9 @@ function IncomeRow({
   const [frequency, setFrequency] = useState<IncomeFrequency>(income.frequency)
   const [isVariable, setIsVariable] = useState(Boolean(income.is_variable))
   const [error, setError] = useState<string | null>(null)
+  // فشل الحذف حالةٌ مستقلّة: `error` يُعرض داخل نموذج التعديل وحده، والحذف
+  // يقع والنموذج مغلق فلا يراه أحد.
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(income.name)
@@ -213,13 +216,21 @@ function IncomeRow({
             <RemoveButton
               label={t('money.remove')}
               onClick={async () => {
+                setRemoveError(null)
                 await archiveIncome(income.id)
                 await onChanged()
               }}
+              onFailed={(err) => setRemoveError(failureText(err, t, t('money.removeFailed')))}
             />
           </>
         )}
       </div>
+
+      {removeError && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {removeError}
+        </p>
+      )}
 
       <InlineEdit
         open={editing}
@@ -298,6 +309,7 @@ function FixedRow({
   const amount = useAmount(0, String(item.amount))
   const [startsOn, setStartsOn] = useState(item.starts_on ?? '')
   const [error, setError] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(item.name)
@@ -330,13 +342,21 @@ function FixedRow({
             <RemoveButton
               label={t('money.remove')}
               onClick={async () => {
+                setRemoveError(null)
                 await archiveFixedCommitment(item.id)
                 await onChanged()
               }}
+              onFailed={(err) => setRemoveError(failureText(err, t, t('money.removeFailed')))}
             />
           </>
         )}
       </div>
+
+      {removeError && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {removeError}
+        </p>
+      )}
 
       <InlineEdit
         open={editing}
@@ -378,7 +398,21 @@ function FixedRow({
   )
 }
 
-function RemoveButton({ label, onClick }: { label: string; onClick: () => Promise<void> }) {
+/**
+ * `onFailed` لا خيار: الحذف الصامت يجعل المستخدم يعيد الكرّة على سطرٍ لم يُحذف.
+ *
+ * والرسالة تُبنى عند المستدعي لا هنا، فيقول كل صفٍّ ما يخصّه — مصدر دخلٍ أو
+ * التزامٍ ثابت — بدل جملةٍ واحدة مبهمة للاثنين.
+ */
+function RemoveButton({
+  label,
+  onClick,
+  onFailed,
+}: {
+  label: string
+  onClick: () => Promise<void>
+  onFailed: (err: unknown) => void
+}) {
   const [busy, setBusy] = useState(false)
   return (
     <button
@@ -389,6 +423,8 @@ function RemoveButton({ label, onClick }: { label: string; onClick: () => Promis
         setBusy(true)
         try {
           await onClick()
+        } catch (err) {
+          onFailed(err)
         } finally {
           setBusy(false)
         }
@@ -419,17 +455,23 @@ function AddIncomeForm({
   const [isVariable, setIsVariable] = useState(false)
   const [frequency, setFrequency] = useState<IncomeFrequency>('weekly')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     // المتغيّر يُقبل بلا مبلغ: هو تحديداً ما لا رقم ثابت له.
     if (!name.trim() || (!amount.isValid && !isVariable)) return
     setBusy(true)
+    setError(null)
     try {
       await onAdd(name.trim(), amount.value, frequency, isVariable)
+      // الحقول لا تُفرَغ إلا بعد نجاح الكتابة، فمن فشلت شبكته يعيد المحاولة
+      // بما كتبه لا بنموذجٍ فارغ.
       setName('')
       amount.reset()
       setIsVariable(false)
+    } catch (err) {
+      setError(failureText(err, t, t('money.addIncomeFailed')))
     } finally {
       setBusy(false)
     }
@@ -437,6 +479,12 @@ function AddIncomeForm({
 
   return (
     <form onSubmit={submit} className="space-y-2 border-t border-border pt-3">
+      {error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
       <div className="flex gap-2">
         <input
           value={name}
@@ -500,16 +548,20 @@ function AddFixedForm({
   const amount = useAmount()
   const [startsOn, setStartsOn] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!name.trim() || !amount.isValid) return
     setBusy(true)
+    setError(null)
     try {
       await onAdd(name.trim(), amount.value, startsOn || null)
       setName('')
       amount.reset()
       setStartsOn('')
+    } catch (err) {
+      setError(failureText(err, t, t('money.addFixedFailed')))
     } finally {
       setBusy(false)
     }
@@ -517,6 +569,12 @@ function AddFixedForm({
 
   return (
     <form onSubmit={submit} className="space-y-2 border-t border-border pt-3">
+      {error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
       <div className="flex gap-2">
         <input
           value={name}
@@ -567,6 +625,7 @@ function SavingsTarget({
   // مكتوباً يمسحه المستخدم قبل أن يكتب رقمه.
   const amount = useAmount(0, value ? String(value) : '')
   const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // `amount` خارج قائمة الاعتماديات عمداً: الخطّاف يعيد كائناً جديداً كل رسمة،
   // فإدخاله يمسح ما يكتبه المستخدم عند كل حرف.
@@ -575,12 +634,20 @@ function SavingsTarget({
   return (
     <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
       <h2 className="text-sm font-bold text-text">{t('money.savingsSection')}</h2>
+
+      {error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
       <div className="flex gap-2">
         <input
           {...amount.props}
           onChange={(e) => {
             amount.set(e.target.value)
             setSaved(false)
+            setError(null)
           }}
           className={`num ${inputClass}`}
         />
@@ -588,8 +655,15 @@ function SavingsTarget({
           type="button"
           variant="secondary"
           onClick={async () => {
-            await onSave(amount.value)
-            setSaved(true)
+            setError(null)
+            try {
+              await onSave(amount.value)
+              setSaved(true)
+            } catch (err) {
+              // «انحفظ ✓» يبقى مطفأً: الهدف تغيّر محلياً عند المستدعي لكنه لم
+              // يصل القاعدة، فإعلان الحفظ هنا كذبٌ يُصدَّق.
+              setError(failureText(err, t, t('money.saveFailed')))
+            }
           }}
         >
           {saved ? t('money.saved') : t('common.save')}

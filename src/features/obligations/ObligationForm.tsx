@@ -14,6 +14,7 @@ import {
   saveShares,
   validateShares,
   type PartnerShareDraft,
+  type SharesProblem,
 } from '@/features/partners/api'
 import {
   createObligation,
@@ -21,6 +22,7 @@ import {
   listTemplates,
   track,
   updateObligation,
+  type ObligationDraft,
 } from './api'
 import type { ObligationTemplate } from '@/lib/db/types'
 import { useTranslation } from 'react-i18next'
@@ -60,7 +62,7 @@ export function ObligationForm() {
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [shareError, setShareError] = useState<string | null>(null)
+  const [shareError, setShareError] = useState<SharesProblem | null>(null)
 
   useEffect(() => {
     if (isEdit) return
@@ -131,15 +133,15 @@ export function ObligationForm() {
     setError(null)
     setSaving(true)
 
-    const draft = {
+    // ما لا يعرضه النموذج لا يرسله: كان يضع `group_id: null` و`notes: null`
+    // فيمحو من كلٍّ منهما ما كتبه المستخدم من كلود عند أول تعديلٍ من هنا.
+    const draft: ObligationDraft = {
       name: name.trim(),
       category,
       total_amount: amount.value,
       next_due_date: nextDueDate,
       recurrence_months: recurrenceMonths,
       my_share_percent: sharePercent,
-      group_id: null,
-      notes: null,
     }
 
     try {

@@ -12,7 +12,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
+import { planPayment } from '../../src/lib/obligations/payment.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
 import { viewAccount } from '../../src/lib/accounts/calc.js'
@@ -201,6 +201,24 @@ async function resolveShares(
   }))
 
   return { mine, out, rows }
+}
+
+/**
+ * معرّف تصنيفٍ باسمه، أو null إن لم يوجد.
+ *
+ * لا يُنشئ تصنيفاً: من كتب «قهوة» وليست تصنيفاً عنده لا يريد جدولاً جديداً،
+ * وإنشاؤه صامتاً يملأ قائمته بأسماء عابرة. يبقى النصّ الحرّ كما هو.
+ */
+async function findExpenseCategoryId(
+  { db }: Connection,
+  name: string,
+): Promise<string | null> {
+  const { data, error } = await db.from('expense_categories').select('id, name_ar')
+  if (error) throw error
+
+  const needle = name.trim().toLowerCase()
+  const match = (data ?? []).find((row) => String(row.name_ar).trim().toLowerCase() === needle)
+  return match ? (match.id as string) : null
 }
 
 function requireDate(value: string, field: string): string {
@@ -849,13 +867,23 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
         ? await findAccount(connection, paid_from_account)
         : target.account
 
-      const result = renewAfterPayment({
+      /*
+       * القرار من المحرّك، والتنفيذ هنا.
+       *
+       * كان هذا المسار يحسب أثر الدفع بنفسه — الخصم والتسوية — والشاشة تحسبه
+       * بنفسها، فكتب أحدهما ما لم يكتبه الآخر في القاعدة نفسها. صار القرار
+       * واحداً في `planPayment`، ولكلٍّ تنفيذُه بعميله.
+       */
+      const plan = planPayment({
         totalAmount: Number(o.total_amount),
         mySharePercent: Number(o.my_share_percent),
         myFundBalance: Number(target.balance?.my_fund_balance ?? 0),
         nextDueDate: o.next_due_date,
         recurrenceMonths: o.recurrence_months,
+        fundAccountId: target.account?.id ?? null,
+        paidFromAccountId: payingAccount?.id ?? null,
       })
+      const result = plan.renewal
 
       const paidDate = isoDate(result.cycleStartDate)
       const nextDue = result.nextDueDate ? isoDate(result.nextDueDate) : o.next_due_date
@@ -885,28 +913,12 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
         if (drawError) throw drawError
       }
 
-      /*
-       * الرصيد ينقص بما خرج فعلاً، لا بما كان في الصندوق.
-       *
-       * ما خرج من البنك هو حصّتي كاملةً: ما جمعه الصندوق زائد ما غُطّي من
-       * الجيب. وخصمُ `amountPaid` وحده كان يترك الرصيد أعلى من الحقيقة بمقدار
-       * النقص — أي أن التطبيق يَعِد بمالٍ أُنفق فعلاً.
-       */
-      const withdrawn = Math.round((result.amountPaid + result.shortfall) * 100) / 100
+      const withdrawn = plan.withdrawn
       let accountBalance: number | null = null
-      if (payingAccount && withdrawn > 0) {
-        accountBalance = await moveBalance(connection, payingAccount.id, -withdrawn)
+      if (plan.chargeAccountId) {
+        accountBalance = await moveBalance(connection, plan.chargeAccountId, -withdrawn)
       }
 
-      /*
-       * الدفع من حسابٍ غير حساب الصندوق: يُقبل، ويُعلَّم.
-       *
-       * هذا ما يحدث فعلاً حين تكون البطاقة في جيبٍ والصندوق في حسابٍ آخر،
-       * ورفضُه يجبر المستخدم على الكذب. والأثر حقيقيّ: حساب الصندوق تحرّر منه
-       * ‏`amountPaid` بلا أن ينقص رصيده، والحساب الدافع نقص. فالمدين هو الأول
-       * بمقدار ما تحرّر عنده — والنقص المغطّى من الجيب لا يدخل التسوية لأنه
-       * لم يكن في الصندوق أصلاً.
-       */
       let settlement: {
         id: string
         amount: number
@@ -915,19 +927,14 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       } | null = null
 
       const fundAccount = target.account
-      if (
-        payingAccount &&
-        fundAccount &&
-        payingAccount.id !== fundAccount.id &&
-        result.amountPaid > 0
-      ) {
+      if (plan.settlement && fundAccount && payingAccount) {
         const { data: settlementRow, error: settlementError } = await connection.db
           .from('account_settlements')
           .insert({
             user_id: connection.userId,
-            debtor_account_id: fundAccount.id,
-            creditor_account_id: payingAccount.id,
-            amount: result.amountPaid,
+            debtor_account_id: plan.settlement.debtorAccountId,
+            creditor_account_id: plan.settlement.creditorAccountId,
+            amount: plan.settlement.amount,
             obligation_id: o.id,
             note: `دفع ${o.name} من ${payingAccount.name} وصندوقه في ${fundAccount.name}`,
           })
@@ -937,7 +944,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
 
         settlement = {
           id: (settlementRow as AccountSettlement).id,
-          amount: result.amountPaid,
+          amount: plan.settlement.amount,
           debtor: fundAccount.name,
           creditor: payingAccount.name,
         }
@@ -1751,6 +1758,19 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       const account = input.account ? await findAccount(connection, input.account) : null
       const spentAt = input.date ? requireDate(input.date, 'date') : isoDate()
 
+      /*
+       * التصنيف يُكتب في العمودين معاً.
+       *
+       * التطبيق يكتب `category_id` (تصنيفٌ مفهرس من جدول `expense_categories`)
+       * وكلود كان يكتب `category` (نصّ حرّ قديم). فالعمودان لا يلتقيان: شاشة
+       * المصاريف لا ترى ما سجّله كلود تحت أيّ تصنيف، و`sanawi_group_cost` لا
+       * يرى ما سجّلته الشاشة. صار الاسم يُطابَق بجدول التصنيفات — فإن وُجد
+       * كُتب المعرّف ومعه النصّ، وإلا بقي النصّ وحده كما كان.
+       */
+      const categoryId = input.category
+        ? await findExpenseCategoryId(connection, input.category)
+        : null
+
       const { data, error } = await connection.db
         .from('expenses')
         .insert({
@@ -1758,6 +1778,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           group_id: group?.id ?? null,
           account_id: account?.id ?? null,
           category: input.category ?? null,
+          category_id: categoryId,
           amount: input.amount,
           spent_at: spentAt,
           note: input.note ?? null,

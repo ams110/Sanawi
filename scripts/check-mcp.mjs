@@ -543,6 +543,25 @@ expect('النقص المكشوف', paid?.shortfall, 1200)
 expect('القسط بعد التجديد', paid?.new_installment, 100)
 expect('لم ينتهِ', paid?.is_finished, false)
 
+/*
+ * التصنيف يُكتب في العمودين معاً.
+ *
+ * كان التطبيق يكتب `category_id` وكلود يكتب `category`، فلا يرى أحدهما ما
+ * كتبه الآخر: شاشة المصاريف لا ترى ما سجّله كلود، و`group_cost` لا يرى ما
+ * سجّلته الشاشة.
+ */
+const known = fake.db.expense_categories[0]
+await call('sanawi_add_expense', { amount: 25, category: known.name_ar, note: 'قهوة' })
+const linked = fake.db.expenses.find((e) => e.note === 'قهوة')
+expect('التصنيف المعروف يُربط بمعرّفه', linked?.category_id, known.id)
+expect('ويبقى نصّه كما هو', linked?.category, known.name_ar)
+
+// وما ليس تصنيفاً مفهرساً يبقى نصّاً حرّاً ولا يُنشأ له صفّ.
+await call('sanawi_add_expense', { amount: 10, category: 'تصنيف ما إله وجود', note: 'حرّ' })
+const free = fake.db.expenses.find((e) => e.note === 'حرّ')
+expect('غير المعروف يبقى نصّاً', free?.category_id, null)
+expect('ولا يُنشأ تصنيف جديد', fake.db.expense_categories.length, 2)
+
 // ١٣. المصروف بحرف كبير: المطابقة تتجاهل حالة الأحرف في الجانبين معاً
 await call('sanawi_add_expense', { amount: 100, category: 'CAR', note: 'غيار زيت' })
 expect(

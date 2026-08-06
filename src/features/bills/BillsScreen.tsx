@@ -77,7 +77,12 @@ export function BillsScreen() {
     void load()
   }, [load])
 
-  const summary = useMemo(() => summarizeBills(rows), [rows])
+  // الاستحقاق يُقاس بالشهر المعروض لا باليوم: من يتصفّح شهراً ماضياً يسأل عمّا
+  // كان مستحقّاً فيه، وقسطٌ انتهى بعده لم يكن منتهياً حينها.
+  const summary = useMemo(
+    () => summarizeBills(rows, new Date(`${month}T00:00:00`)),
+    [rows, month],
+  )
   const isCurrentMonth = month === monthKey()
   const detailById = useMemo(
     () => new Map(details.map((d) => [d.commitment_id, d])),
@@ -138,7 +143,7 @@ export function BillsScreen() {
         <button
           type="button"
           onClick={() => setMonth(shiftMonth(month, -1))}
-          aria-label="الشهر السابق"
+          aria-label={t('bills.prevMonth')}
           className="flex size-9 items-center justify-center rounded-xl text-lg text-text-muted"
         >
           ›
@@ -151,7 +156,7 @@ export function BillsScreen() {
           type="button"
           onClick={() => setMonth(shiftMonth(month, 1))}
           disabled={isCurrentMonth}
-          aria-label="الشهر التالي"
+          aria-label={t('bills.nextMonth')}
           className="flex size-9 items-center justify-center rounded-xl text-lg text-text-muted disabled:opacity-30"
         >
           ‹
@@ -199,9 +204,9 @@ export function BillsScreen() {
               </div>
             </dl>
             <p className="mt-3 text-center text-[13px] text-text-muted">
-              {summary.missing > 0
-                ? t('bills.missing', { count: summary.missing })
-                : t('bills.allRecorded')}
+              {summary.payable > 0
+                ? t('bills.payableCount', { count: summary.payable })
+                : t('bills.payableNone')}
             </p>
           </section>
 
@@ -300,6 +305,7 @@ function BillCard({
   const [editStartsOn, setEditStartsOn] = useState(row.commitment.starts_on ?? '')
   const [editEndsOn, setEditEndsOn] = useState(row.commitment.ends_on ?? '')
   const [editError, setEditError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const cancelEdit = () => {
     setEditName(row.commitment.name)
@@ -321,10 +327,20 @@ function BillCard({
   const paid = Boolean(row.payment?.paid_at)
   const overBudget = recorded && Number(row.payment!.amount) > budgeted
 
-  const run = async (fn: () => Promise<void>) => {
+  /*
+   * أزرار البطاقة الثلاثة تقع ونموذج التعديل مغلق، و`editError` لا يُعرض إلا
+   * داخله — فحالةٌ مستقلّة تحت صفّ الأزرار هي وحدها ما يصل المستخدم.
+   *
+   * وكان `run` بلا `catch` ومناديه `void run(...)`: فشلُ تسجيل الفاتورة أو
+   * مسحِها يذهب رفضاً مهمَلاً، والزرّ يعود من دورانه كأن شيئاً حُفظ.
+   */
+  const run = async (fn: () => Promise<void>, fallback: string) => {
     setBusy(true)
+    setActionError(null)
     try {
       await fn()
+    } catch (err) {
+      setActionError(failureText(err, t, fallback))
     } finally {
       setBusy(false)
     }
@@ -396,8 +412,15 @@ function BillCard({
               variant="danger"
               className="w-full"
               onClick={async () => {
-                await archiveCommitment(row.commitment.id)
-                await onReload()
+                setEditError(null)
+                try {
+                  await archiveCommitment(row.commitment.id)
+                  await onReload()
+                } catch (err) {
+                  // نموذج التعديل هو ما يعرض `editError`، وهو مفتوحٌ الآن —
+                  // فالرسالة تقع فوق الزرّ نفسه الذي ضُغط.
+                  setEditError(failureText(err, t, t('bills.archiveFailed')))
+                }
               }}
             >
               {t('bills.archive')}
@@ -601,21 +624,39 @@ function BillCard({
           className="flex-1"
           loading={busy}
           variant={paid ? 'secondary' : 'primary'}
-          onClick={() => void run(() => onSave(amount.value, !paid, methodId))}
+          onClick={() =>
+            void run(() => onSave(amount.value, !paid, methodId), t('bills.saveFailed'))
+          }
         >
           {paid ? t('bills.markUnpaid') : t('bills.markPaid')}
         </Button>
         {!paid && (
-          <Button variant="secondary" disabled={busy} onClick={() => void run(() => onSave(amount.value, false, methodId))}>
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() =>
+              void run(() => onSave(amount.value, false, methodId), t('bills.saveFailed'))
+            }
+          >
             {t('bills.save')}
           </Button>
         )}
         {recorded && (
-          <Button variant="danger" disabled={busy} onClick={() => void run(onClear)}>
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => void run(onClear, t('bills.clearFailed'))}
+          >
             {t('bills.clear')}
           </Button>
         )}
       </div>
+
+      {actionError && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {actionError}
+        </p>
+      )}
 
       {/* القسمة مطويّة: أكثر الفواتير لا تُقسَم، وإظهارها دائماً ضجيج. */}
       <button

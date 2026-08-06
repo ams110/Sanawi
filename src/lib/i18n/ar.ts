@@ -181,6 +181,8 @@ export const ar = {
     thisMonth: 'هذا الشهر',
     loadFailed: 'ما قدرنا نجيب المصاريف',
     saveFailed: 'ما قدرنا نسجّل المصروف',
+    removeFailed: 'ما قدرنا نحذف المصروف',
+    categoryFailed: 'ما قدرنا نضيف التصنيف',
     editTitle: 'عدّل المصروف',
     editFailed: 'ما قدرنا نحفظ التعديل',
   },
@@ -207,6 +209,37 @@ export const ar = {
     noteDueIn: 'بعد {{days}} يوم',
     noteDuePassed: 'فات موعدها من {{days}} يوم',
     noteAverage: 'متوسّطها {{amount}}',
+  },
+
+  /*
+   * الحسابات — صارت تُكتب من التلفون لا من كلود وحده.
+   *
+   * وكل تحذيرٍ هنا معه زرُّه: «اربطها بحساب» كان يظهر كل يوم بلا فعلٍ يُطفئه،
+   * وتحذيرٌ لا يُطفأ يدرّب صاحبه على تجاهل التحذيرات كلها.
+   */
+  accounts: {
+    title: 'حساباتك',
+    empty:
+      'ما سجّلت ولا حساب. سجّل رصيد حسابك من كشف البنك، وبنقلك قدّيش منه محجوز لصناديقك وقدّيش ضلّ غير مخصّص.',
+    add: '+ ضيف حساب',
+    name: 'اسم الحساب',
+    namePlaceholder: 'لئومي / حساب الالتزامات',
+    balance: 'الرصيد الفعلي',
+    updateBalance: 'حدّث الرصيد',
+    archive: 'شيله',
+    stale: 'آخر تحديث للرصيد من {{days}} يوم — حدّثه ليطلع الحساب صح',
+    note: 'المصاري بتعيش بالحساب، والصناديق مظاريف فوقه مش جنبه. الرصيد بتدخّله إنت من كشف البنك.',
+    unlinkedTitle: 'صناديق بلا حساب — اربطها ليطلع «غير مخصّص» صح',
+    pick: 'اختر حساب',
+    linkTo: 'اربط {{name}} بحساب',
+    settlementsTitle: 'تسويات معلّقة',
+    settlementLine: '{{debtor}} مدين لـ{{creditor}} بـ{{amount}}',
+    settle: 'حوّل',
+    saveFailed: 'ما قدرنا نحفظ الحساب',
+    archiveFailed: 'ما قدرنا نشيل الحساب',
+    linkFailed: 'ما قدرنا نربط الصندوق',
+    transferFailed: 'ما قدرنا نعمل التحويل',
+    loadFailed: 'ما قدرنا نجيب حساباتك',
   },
 
   month: {
@@ -251,6 +284,9 @@ export const ar = {
     isVariable: 'دخل متغيّر — ما بعرف قديش بيجي',
     variableHint: 'متغيّر — بينحسب لما يوصل',
     remove: 'احذف',
+    removeFailed: 'ما قدرنا نشيله',
+    addIncomeFailed: 'ما قدرنا نضيف مصدر الدخل',
+    addFixedFailed: 'ما قدرنا نضيف الالتزام',
     saved: 'انحفظ ✓',
     saveFailed: 'ما قدرنا نحفظ',
     loadFailed: 'ما قدرنا نجيب البيانات',
@@ -262,6 +298,10 @@ export const ar = {
 
   payment: {
     markPaid: 'اندفع ✓',
+    accountNotUpdated:
+      'الدفعة انسجّلت، بس ما قدرنا نحدّث رصيد الحساب — صحّحه من شاشة الثروة.',
+    paidFrom: 'من أي حساب دفعت؟',
+    paidFromDefault: 'من حساب الصندوق',
     confirmTitle: 'أكّد الدفع',
     confirmBody: 'رح نسحب {{amount}} من الصندوق ونبلّش دورة جديدة.',
     shortfallWarning: 'بصندوقك {{balance}} بس، فرح تدفع {{shortfall}} من جيبك.',
@@ -327,8 +367,6 @@ export const ar = {
     recorded: 'مسجّل',
     paid: 'مدفوع',
     outstanding: 'باقي عليك',
-    missing: 'لسا {{count}} فاتورة ما سجّلتها',
-    allRecorded: 'سجّلت كل الفواتير 👌',
     budgeted: 'بالميزانية {{amount}}',
     average: 'معدّل آخر سنة {{amount}}',
     aboveBudget: 'أعلى من ميزانيتك بـ {{amount}}',
@@ -342,7 +380,11 @@ export const ar = {
     goToMoney: 'روح لشاشة الدخل',
     loadFailed: 'ما قدرنا نجيب الفواتير',
     saveFailed: 'ما قدرنا نحفظ الفاتورة',
+    clearFailed: 'ما قدرنا نمسح الفاتورة',
     thisMonth: 'هذا الشهر',
+    /* اسمُ السهم لقارئ الشاشة: الرمز ‹ › لا يُنطق اتجاهاً. */
+    prevMonth: 'الشهر السابق',
+    nextMonth: 'الشهر التالي',
 
     addTitle: 'ضيف بند شهري',
     pickTemplate: 'اختار من الجاهز',
@@ -383,6 +425,7 @@ export const ar = {
     noPartners: 'ما في شركاء بعد',
     sharesSaved: 'انحفظت 👌',
     sharesFailed: 'ما قدرنا نحفظ الحصص',
+    addPartnerFailed: 'ما قدرنا نضيف الشريك',
 
     dayOfMonth: 'موعد الدفع',
     dayHint: 'أي يوم بالشهر بتنزل؟',
@@ -400,12 +443,20 @@ export const ar = {
     methodName: 'اسم الطريقة',
     isAutomaticMethod: 'اقتطاع تلقائي (هوراة كيفع)',
     saveMethod: 'ضيف الطريقة',
+    /*
+     * العدّاد يقيس الواجب تجاه البنك لا تجاه التطبيق.
+     *
+     * كان يقول «لسا {{count}} فاتورة ما سجّلتها» فيعدّ بنداً لم تبدأ دفعاته
+     * وقسطاً انتهى — وكلاهما لا يُدفع هذا الشهر. من يفتح الشاشة يريد جواب
+     * «شو باقي عليّ أدفع»، لا محاسبةً على إدخال البيانات.
+     */
     payableCount: 'لازم تدفع {{count}} فاتورة',
     payableNone: 'ما ضل عليك ولا فاتورة تدفعها 👌',
     editTitle: 'عدّل البند',
     editName: 'الاسم',
     archive: 'شيل البند',
     archiveHint: 'بيختفي من الشاشات وبيضل تاريخ فواتيره محفوظ',
+    archiveFailed: 'ما قدرنا نشيل البند',
     editFailed: 'ما قدرنا نحفظ التعديل',
   },
 
@@ -467,7 +518,15 @@ export const ar = {
     incomeList: 'دخل هالشهر',
     noIncomeYet: 'ما سجّلت ولا دفعة دخل هالشهر',
     removeIncome: 'احذف',
+    /*
+     * قراءةٌ وكتابةٌ جملتان لا جملة.
+     *
+     * كان فشل جلب القائمة يقول «ما قدرنا نسجّل الدخل»، فيظنّ من فتح الشاشة
+     * أن دفعةً كتبها ضاعت — وهو لم يكتب شيئاً بعد.
+     */
+    incomeLoadFailed: 'ما قدرنا نجيب دخل هالشهر',
     incomeFailed: 'ما قدرنا نسجّل الدخل',
+    removeFailed: 'ما قدرنا نحذف الدخل',
     editIncome: 'عدّل الدفعة',
     editFailed: 'ما قدرنا نحفظ التعديل',
   },
@@ -632,7 +691,8 @@ export const ar = {
     isEmergency: 'هاد صندوق الطوارئ',
     updatedAgo: 'آخر تحديث {{date}}',
     remove: 'شيل الأصل',
-    saveFailed: 'ما انحفظ',
+    removeFailed: 'ما قدرنا نشيل الأصل',
+    saveFailed: 'ما قدرنا نحفظ',
     needName: 'اكتب اسم الأصل',
     needAmount: 'اكتب قيمة أكبر من صفر',
 
@@ -643,6 +703,7 @@ export const ar = {
     trendDown: 'نزلت {{amount}} على مدى {{count}} لقطات.',
     saveSnapshot: 'احفظ لقطة هالشهر',
     snapshotSaved: 'انحفظت ✓',
+    snapshotFailed: 'ما قدرنا نحفظ اللقطة',
   },
 
   freedom: {
