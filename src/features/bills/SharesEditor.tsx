@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatMoney } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { validateShares } from '@/lib/commitments/calc'
 import type { CommitmentPartnerShare, ObligationPartner } from '@/lib/db/types'
 import { addPartner, replaceCommitmentShares } from './commitments'
@@ -137,7 +138,7 @@ export function SharesEditor({
             setSaved(true)
             await onSaved()
           } catch (err) {
-            setError(err instanceof Error ? err.message : t('bills.sharesFailed'))
+            setError(failureText(err, t, t('bills.sharesFailed')))
           } finally {
             setBusy(false)
           }

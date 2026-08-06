@@ -113,6 +113,11 @@ describe('الدخل', () => {
     expect(r.items[0]).toMatchObject({ kind: 'income', amount: 9000 })
   })
 
+  // «قسطك الشهري» تخصّ الصندوق: الدخل يأتي إليك ولا تدفعه لنفسك.
+  it('سطر الدخل لا يقول «قسطك»', () => {
+    expect(run({ incomes: [income({})] }).items[0]!.note).toEqual({ type: 'expected' })
+  })
+
   it('والذي وصل يسقط', () => {
     expect(run({ incomes: [income({ receivedCount: 1 })] }).items).toHaveLength(0)
   })

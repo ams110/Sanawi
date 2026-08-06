@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { calculateObligation } from '@/lib/obligations/calc'
 import { formatMoney, formatMonthsRemaining } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 import { Button } from '@/components/ui/Button'
 import { BridgeNotice } from '@/components/ui/BridgeNotice'
 import { TemplatePicker } from './TemplatePicker'
@@ -49,7 +51,7 @@ export function ObligationForm() {
 
   const [name, setName] = useState('')
   const [category, setCategory] = useState<string | null>(null)
-  const [totalAmount, setTotalAmount] = useState(0)
+  const amount = useAmount()
   const [nextDueDate, setNextDueDate] = useState(defaultDueDate(12))
   const [recurrenceMonths, setRecurrenceMonths] = useState(12)
   const [sharePercent, setSharePercent] = useState(100)
@@ -76,13 +78,13 @@ export function ObligationForm() {
         const o = found.obligation
         setName(o.name)
         setCategory(o.category)
-        setTotalAmount(Number(o.total_amount))
+        amount.reset(String(Number(o.total_amount)))
         setNextDueDate(o.next_due_date)
         setRecurrenceMonths(o.recurrence_months)
         setSharePercent(Number(o.my_share_percent))
         setFundBalance(Number(found.balance?.my_fund_balance ?? 0))
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('form.loadFailed')))
+      .catch((err) => setError(failureText(err, t, t('form.loadFailed'))))
 
     // حصص الشركاء تُجلب على حدة: فشلها لا يمنع تعديل بقية الحقول.
     listShares(id).then(setPartners).catch(() => setPartners([]))
@@ -92,14 +94,14 @@ export function ObligationForm() {
   const calc = useMemo(
     () =>
       calculateObligation({
-        totalAmount,
+        totalAmount: amount.value,
         mySharePercent: sharePercent,
         myFundBalance: fundBalance,
         nextDueDate,
         recurrenceMonths,
         cycleStartDate: toDateKey(),
       }),
-    [totalAmount, sharePercent, fundBalance, nextDueDate, recurrenceMonths],
+    [amount.value, sharePercent, fundBalance, nextDueDate, recurrenceMonths],
   )
 
   // الاسم tpl لا t: حجب دالة الترجمة داخل الدالة يعمل اليوم ويكسر عند أول سطر يترجم.
@@ -110,7 +112,7 @@ export function ObligationForm() {
     setNextDueDate(defaultDueDate(tpl.default_recurrence_months || 12))
     // المتوسط المقترح نقطةَ بداية معقولة — يعدّلها المستخدم فوراً وهو يرى الأثر.
     if (tpl.suggested_min != null && tpl.suggested_max != null) {
-      setTotalAmount(Math.round((Number(tpl.suggested_min) + Number(tpl.suggested_max)) / 2))
+      amount.reset(String(Math.round((Number(tpl.suggested_min) + Number(tpl.suggested_max)) / 2)))
     }
     setShowPicker(false)
   }
@@ -118,6 +120,9 @@ export function ObligationForm() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!user) return
+    // الحقل صار نصّاً، فحارس `min={1}` الذي كان يمنع الحفظ سقط معه — ومعه
+    // رسالةُ المتصفّح. والرجوع الصامت هنا يترك الضغطة بلا جواب.
+    if (!amount.isValid) return setError(t('form.needAmount'))
 
     const shareProblem = validateShares(sharePercent, partners)
     setShareError(shareProblem)
@@ -129,7 +134,7 @@ export function ObligationForm() {
     const draft = {
       name: name.trim(),
       category,
-      total_amount: totalAmount,
+      total_amount: amount.value,
       next_due_date: nextDueDate,
       recurrence_months: recurrenceMonths,
       my_share_percent: sharePercent,
@@ -155,7 +160,7 @@ export function ObligationForm() {
       }
       navigate('/obligations', { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('form.saveFailed'))
+      setError(failureText(err, t, t('form.saveFailed')))
     } finally {
       setSaving(false)
     }
@@ -210,12 +215,8 @@ export function ObligationForm() {
         <label className="block space-y-1.5">
           <span className="text-sm font-semibold text-text">{t('form.amount')}</span>
           <input
-            type="number"
-            inputMode="numeric"
+            {...amount.props}
             required
-            min={1}
-            value={totalAmount || ''}
-            onChange={(e) => setTotalAmount(Math.max(0, Number(e.target.value) || 0))}
             className="num w-full rounded-xl border border-border bg-bg px-3 py-3 text-[15px] text-text outline-none focus:border-brand"
           />
         </label>
@@ -256,7 +257,7 @@ export function ObligationForm() {
           onMyShareChange={setSharePercent}
           partners={partners}
           onPartnersChange={setPartners}
-          totalAmount={totalAmount}
+          totalAmount={amount.value}
           error={shareError}
         />
 
@@ -264,7 +265,7 @@ export function ObligationForm() {
           <p className="rounded-xl bg-surface-muted px-3 py-2.5 text-[13px] text-text-muted">
             {t('form.shareNote', {
               myTotal: formatMoney(calc.myTotal),
-              total: formatMoney(totalAmount),
+              total: formatMoney(amount.value),
             })}
           </p>
         )}

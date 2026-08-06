@@ -4,6 +4,8 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { updateProfile } from '@/features/profile/api'
 import { formatMoney, formatMonthYear } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { hasStarted } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
@@ -47,7 +49,7 @@ export function MoneyScreen() {
       setIncomes(i)
       setFixed(f)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('money.loadFailed'))
+      setError(failureText(err, t, t('money.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -167,14 +169,16 @@ function IncomeRow({
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(income.name)
-  const [amount, setAmount] = useState(Number(income.amount))
+  // الخطّاف هنا لا في الحلقة: القائمة تبني `IncomeRow` لكل صفّ، فلكل سطرٍ
+  // حالته وحده وقواعد الخطّافات قائمة.
+  const amount = useAmount(0, String(income.amount))
   const [frequency, setFrequency] = useState<IncomeFrequency>(income.frequency)
   const [isVariable, setIsVariable] = useState(Boolean(income.is_variable))
   const [error, setError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(income.name)
-    setAmount(Number(income.amount))
+    amount.reset(String(income.amount))
     setFrequency(income.frequency)
     setIsVariable(Boolean(income.is_variable))
     setError(null)
@@ -228,7 +232,7 @@ function IncomeRow({
          * مطفأً إلى الأبد: لا إعادة تسمية ولا تغيير دورية ولا حتى إلغاء
          * صفة التغيّر عنه.
          */
-        canSave={name.trim().length > 0 && (amount > 0 || isVariable)}
+        canSave={name.trim().length > 0 && (amount.isValid || isVariable)}
         error={error}
         title={t('money.editSource')}
         onSave={async () => {
@@ -236,26 +240,20 @@ function IncomeRow({
           try {
             await updateIncomeSource(income.id, {
               name: name.trim(),
-              amount,
+              amount: amount.value,
               frequency,
               isVariable,
             })
             setEditing(false)
             await onChanged()
           } catch (err) {
-            setError(err instanceof Error ? err.message : t('money.editFailed'))
+            setError(failureText(err, t, t('money.editFailed')))
           }
         }}
       >
         <div className="flex gap-2">
           <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
-          <input
-            type="number"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
-            className={`num ${editInputClass}`}
-          />
+          <input {...amount.props} className={`num ${editInputClass}`} />
         </div>
         <div className="flex gap-2">
           {FREQUENCIES.map((f) => (
@@ -297,13 +295,13 @@ function FixedRow({
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(item.name)
-  const [amount, setAmount] = useState(Number(item.amount))
+  const amount = useAmount(0, String(item.amount))
   const [startsOn, setStartsOn] = useState(item.starts_on ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(item.name)
-    setAmount(Number(item.amount))
+    amount.reset(String(item.amount))
     setStartsOn(item.starts_on ?? '')
     setError(null)
     setEditing(false)
@@ -343,7 +341,7 @@ function FixedRow({
       <InlineEdit
         open={editing}
         onCancel={cancel}
-        canSave={name.trim().length > 0 && amount > 0}
+        canSave={name.trim().length > 0 && amount.isValid}
         error={error}
         title={t('bills.editTitle')}
         onSave={async () => {
@@ -351,25 +349,19 @@ function FixedRow({
           try {
             await updateFixedCommitment(item.id, {
               name: name.trim(),
-              amount,
+              amount: amount.value,
               startsOn: startsOn || null,
             })
             setEditing(false)
             await onChanged()
           } catch (err) {
-            setError(err instanceof Error ? err.message : t('money.editFailed'))
+            setError(failureText(err, t, t('money.editFailed')))
           }
         }}
       >
         <div className="flex gap-2">
           <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
-          <input
-            type="number"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
-            className={`num ${editInputClass}`}
-          />
+          <input {...amount.props} className={`num ${editInputClass}`} />
         </div>
         {/* بلا هذا الحقل كان تاريخ بدءٍ مكتوبٌ خطأً لا يُصحَّح من أي شاشة. */}
         <label className="block space-y-1">
@@ -423,7 +415,7 @@ function AddIncomeForm({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
-  const [amount, setAmount] = useState(0)
+  const amount = useAmount()
   const [isVariable, setIsVariable] = useState(false)
   const [frequency, setFrequency] = useState<IncomeFrequency>('weekly')
   const [busy, setBusy] = useState(false)
@@ -431,12 +423,12 @@ function AddIncomeForm({
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     // المتغيّر يُقبل بلا مبلغ: هو تحديداً ما لا رقم ثابت له.
-    if (!name.trim() || (amount <= 0 && !isVariable)) return
+    if (!name.trim() || (!amount.isValid && !isVariable)) return
     setBusy(true)
     try {
-      await onAdd(name.trim(), amount, frequency, isVariable)
+      await onAdd(name.trim(), amount.value, frequency, isVariable)
       setName('')
-      setAmount(0)
+      amount.reset()
       setIsVariable(false)
     } finally {
       setBusy(false)
@@ -453,10 +445,7 @@ function AddIncomeForm({
           className={inputClass}
         />
         <input
-          type="number"
-          inputMode="numeric"
-          value={amount || ''}
-          onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+          {...amount.props}
           placeholder={t('money.amountPlaceholder')}
           className={`num ${inputClass}`}
         />
@@ -508,18 +497,18 @@ function AddFixedForm({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
-  const [amount, setAmount] = useState(0)
+  const amount = useAmount()
   const [startsOn, setStartsOn] = useState('')
   const [busy, setBusy] = useState(false)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!name.trim() || amount <= 0) return
+    if (!name.trim() || !amount.isValid) return
     setBusy(true)
     try {
-      await onAdd(name.trim(), amount, startsOn || null)
+      await onAdd(name.trim(), amount.value, startsOn || null)
       setName('')
-      setAmount(0)
+      amount.reset()
       setStartsOn('')
     } finally {
       setBusy(false)
@@ -536,10 +525,7 @@ function AddFixedForm({
           className={inputClass}
         />
         <input
-          type="number"
-          inputMode="numeric"
-          value={amount || ''}
-          onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+          {...amount.props}
           placeholder={t('money.amountPlaceholder')}
           className={`num ${inputClass}`}
         />
@@ -577,21 +563,23 @@ function SavingsTarget({
   onSave: (value: number) => Promise<void>
 }) {
   const { t } = useTranslation()
-  const [amount, setAmount] = useState(value)
+  // الهدف صفرٌ ما دام لم يُضبط بعد، والحقل يبقى فارغاً عندها كما كان — لا «0»
+  // مكتوباً يمسحه المستخدم قبل أن يكتب رقمه.
+  const amount = useAmount(0, value ? String(value) : '')
   const [saved, setSaved] = useState(false)
 
-  useEffect(() => setAmount(value), [value])
+  // `amount` خارج قائمة الاعتماديات عمداً: الخطّاف يعيد كائناً جديداً كل رسمة،
+  // فإدخاله يمسح ما يكتبه المستخدم عند كل حرف.
+  useEffect(() => amount.reset(value ? String(value) : ''), [value])
 
   return (
     <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
       <h2 className="text-sm font-bold text-text">{t('money.savingsSection')}</h2>
       <div className="flex gap-2">
         <input
-          type="number"
-          inputMode="numeric"
-          value={amount || ''}
+          {...amount.props}
           onChange={(e) => {
-            setAmount(Math.max(0, Number(e.target.value) || 0))
+            amount.set(e.target.value)
             setSaved(false)
           }}
           className={`num ${inputClass}`}
@@ -600,7 +588,7 @@ function SavingsTarget({
           type="button"
           variant="secondary"
           onClick={async () => {
-            await onSave(amount)
+            await onSave(amount.value)
             setSaved(true)
           }}
         >

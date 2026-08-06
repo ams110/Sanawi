@@ -49,6 +49,8 @@ export type PendingNote =
   | { type: 'partial'; done: number; total: number }
   /** دخلٌ لا تقدير له. */
   | { type: 'variable' }
+  /** دخلٌ متوقَّع من مصدرٍ مسجَّل — رقمه من المصدر لا من قسط. */
+  | { type: 'expected' }
   /** موعد الفاتورة: اليوم، أو بعد كذا، أو فات. */
   | { type: 'due'; days: number }
   /** متوسّط ما دُفع فعلاً — تلميحٌ يُصحَّح من الفاتورة التي بيده. */
@@ -199,11 +201,12 @@ export function pendingThisMonth(input: PendingInput): PendingResult {
       // المتغيّر بلا رقم: اختراع رقمٍ له هو ما كان يضخّم الدخل المتوقَّع.
       amount: source.isVariable ? null : round2(source.amount),
       isCertain: !source.isVariable,
+      // «قسطك الشهري» تخصّ الصندوق وحده: الدخل يأتي إليك ولا تدفعه لنفسك.
       note: source.isVariable
         ? { type: 'variable' }
         : partial
           ? { type: 'partial', done: source.receivedCount, total: expected }
-          : { type: 'installment' },
+          : { type: 'expected' },
       urgency: 40,
     })
   }

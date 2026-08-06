@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { useRefresh } from '@/lib/refresh'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
+import { useAmount } from '@/features/record/amount'
 import { AddExpenseForm } from './AddExpenseForm'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import {
@@ -35,7 +37,7 @@ export function ExpensesScreen() {
       setRows(e)
       setCategories(c)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('expenses.loadFailed'))
+      setError(failureText(err, t, t('expenses.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -275,7 +277,9 @@ function ExpenseRow({
 }) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
-  const [amount, setAmount] = useState(Number(expense.amount))
+  // الخطّاف هنا لا في الحلقة: `ExpenseList` يبني مكوّن سطرٍ لكل صفّ، فلكل
+  // سطرٍ حالته وحده وقواعد الخطّافات قائمة.
+  const amount = useAmount(0, String(expense.amount))
   const [categoryId, setCategoryId] = useState(expense.category_id)
   const [spentAt, setSpentAt] = useState(expense.spent_at)
   const [isUnexpected, setIsUnexpected] = useState(expense.is_unexpected)
@@ -283,7 +287,7 @@ function ExpenseRow({
 
   // الرجوع عن التعديل يعيد القيم الأصلية لا آخر ما كُتب في الحقول.
   const cancel = () => {
-    setAmount(Number(expense.amount))
+    amount.reset(String(expense.amount))
     setCategoryId(expense.category_id)
     setSpentAt(expense.spent_at)
     setIsUnexpected(expense.is_unexpected)
@@ -318,28 +322,27 @@ function ExpenseRow({
       <InlineEdit
         open={editing}
         onCancel={cancel}
-        canSave={amount > 0}
+        canSave={amount.isValid}
         error={error}
         title={t('expenses.editTitle')}
         onSave={async () => {
           setError(null)
           try {
-            await updateExpense(expense.id, { amount, categoryId, spentAt, isUnexpected })
+            await updateExpense(expense.id, {
+              amount: amount.value,
+              categoryId,
+              spentAt,
+              isUnexpected,
+            })
             setEditing(false)
             await onChanged()
           } catch (err) {
-            setError(err instanceof Error ? err.message : t('expenses.editFailed'))
+            setError(failureText(err, t, t('expenses.editFailed')))
           }
         }}
       >
         <div className="flex gap-2">
-          <input
-            type="number"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(ev) => setAmount(Math.max(0, Number(ev.target.value) || 0))}
-            className={`num ${editInputClass}`}
-          />
+          <input {...amount.props} className={`num ${editInputClass}`} />
           <input
             type="date"
             value={spentAt}

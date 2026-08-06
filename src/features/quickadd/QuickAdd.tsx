@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/features/auth/AuthProvider'
 import { useRefresh } from '@/lib/refresh'
-import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
-import { summarizeDeposits } from '@/lib/obligations/deposits'
-import {
-  addDeposit,
-  listDeposits,
-  listObligations,
-  track,
-  type ObligationWithCalc,
-} from '@/features/obligations/api'
+import { failureText } from '@/lib/i18n/failure'
+import { DepositField, DepositResult, type DepositDone } from '@/features/record/DepositField'
+import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
 
 /**
  * محلٌّ واحد للإضافة.
@@ -66,20 +59,13 @@ const DESTINATIONS = [
 
 function QuickAddSheet({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation()
-  const { user } = useAuth()
   const { refresh } = useRefresh()
   const navigate = useNavigate()
 
   const [obligations, setObligations] = useState<ObligationWithCalc[] | null>(null)
   const [selectedId, setSelectedId] = useState<string>('')
-  const [amount, setAmount] = useState('')
-  const [monthly, setMonthly] = useState<ReturnType<typeof summarizeDeposits> | null>(null)
-  const [confirmSecond, setConfirmSecond] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<{ name: string; balance: number; installment: number } | null>(
-    null,
-  )
+  const [done, setDone] = useState<DepositDone | null>(null)
 
   useEffect(() => {
     listObligations()
@@ -87,81 +73,10 @@ function QuickAddSheet({ onClose }: { onClose: () => void }) {
         setObligations(rows)
         if (rows[0]) setSelectedId(rows[0].obligation.id)
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('quickAdd.loadFailed')))
+      .catch((err) => setError(failureText(err, t, t('quickAdd.loadFailed'))))
   }, [t])
 
   const selected = obligations?.find((o) => o.obligation.id === selectedId) ?? null
-
-  /*
-   * حركات الصندوق تُقرأ عند اختيار الالتزام لا عند الإرسال.
-   *
-   * الحارس الذي يُسأل بعد الكتابة يصل متأخراً: المستخدم يكون قد ضغط. وقراءتها
-   * هنا تجعل «حطّيت هالشهر كذا» مكتوباً فوق الحقل قبل أن يبدأ.
-   */
-  const loadMovements = useCallback(async (obligationId: string) => {
-    setMonthly(null)
-    if (!obligationId) return
-    try {
-      const rows = await listDeposits(obligationId)
-      setMonthly(
-        summarizeDeposits(
-          rows.map((d) => ({
-            id: d.id,
-            amount: Number(d.amount),
-            depositDate: d.deposit_date,
-            createdAt: d.created_at,
-            partnerId: d.partner_id,
-            note: d.note,
-          })),
-        ),
-      )
-    } catch {
-      // فشل قراءة الحركات لا يمنع الإيداع — يُسقط التحذير وحده.
-      setMonthly(null)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadMovements(selectedId)
-    setConfirmSecond(false)
-  }, [selectedId, loadMovements])
-
-  const typed = Number(amount.replace(',', '.'))
-  const draft =
-    amount.trim() === ''
-      ? (selected?.calc.monthlyInstallment ?? 0)
-      : Number.isFinite(typed)
-        ? typed
-        : 0
-
-  const submit = async () => {
-    if (!user || !selected || draft <= 0) return
-    setBusy(true)
-    setError(null)
-    try {
-      await addDeposit(selected.obligation.id, user.id, draft)
-      void track(user.id, 'deposit_added', {
-        obligation_id: selected.obligation.id,
-        from: 'quick_add',
-      })
-
-      // النتيجة من الصفّ كما صار لا من حسابٍ هنا: نفس قاعدة إعادة القراءة في
-      // أدوات الكتابة — الرد يحمل ما وقع فعلاً لا ما ظننّا أنه سيقع.
-      const after = (await listObligations()).find(
-        (o) => o.obligation.id === selected.obligation.id,
-      )
-      setDone({
-        name: selected.obligation.name,
-        balance: Number(after?.balance?.my_fund_balance ?? 0),
-        installment: after?.calc.monthlyInstallment ?? 0,
-      })
-      refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('quickAdd.depositFailed'))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   const go = (to: string) => {
     onClose()
@@ -180,39 +95,7 @@ function QuickAddSheet({ onClose }: { onClose: () => void }) {
         className="max-h-[85dvh] w-full max-w-sm space-y-4 overflow-y-auto rounded-3xl border border-border bg-surface p-6"
         onClick={(ev) => ev.stopPropagation()}
       >
-        {done ? (
-          <>
-            <p className="text-center text-5xl" aria-hidden="true">
-              ✅
-            </p>
-            <h2 className="text-center text-lg font-bold text-text">
-              {t('quickAdd.doneTitle', { name: done.name })}
-            </h2>
-            <p className="rounded-2xl bg-brand-soft px-4 py-3 text-center text-[15px] font-semibold text-brand">
-              {t('quickAdd.doneBody', {
-                balance: formatMoney(done.balance),
-                installment: formatMoney(done.installment),
-              })}
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setDone(null)
-                  setAmount('')
-                  void loadMovements(selectedId)
-                }}
-                className="flex-1"
-              >
-                {t('quickAdd.addAnother')}
-              </Button>
-              <Button onClick={onClose} className="flex-1">
-                {t('quickAdd.close')}
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
+        <>
             <h2 className="text-lg font-bold text-text">{t('quickAdd.title')}</h2>
 
             {error && (
@@ -238,7 +121,10 @@ function QuickAddSheet({ onClose }: { onClose: () => void }) {
                 <>
                   <select
                     value={selectedId}
-                    onChange={(ev) => setSelectedId(ev.target.value)}
+                    onChange={(ev) => {
+                      setSelectedId(ev.target.value)
+                      setDone(null)
+                    }}
                     aria-label={t('quickAdd.pickObligation')}
                     className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold text-text"
                   >
@@ -249,55 +135,18 @@ function QuickAddSheet({ onClose }: { onClose: () => void }) {
                     ))}
                   </select>
 
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step="any"
-                    value={amount}
-                    onChange={(ev) => {
-                      setAmount(ev.target.value)
-                      setConfirmSecond(false)
-                    }}
-                    placeholder={String(selected?.calc.monthlyInstallment ?? 0)}
-                    aria-label={t('quickAdd.amount')}
-                    className="num w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-lg font-bold text-text"
-                  />
-
-                  {monthly?.alreadyDepositedThisMonth && (
-                    <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] font-semibold text-text">
-                      {t('detail.depositedThisMonth', {
-                        amount: formatMoney(monthly.thisMonthTotal),
-                        count: monthly.thisMonthCount,
-                      })}
-                    </p>
+                  {selected && (
+                    <DepositField
+                      key={selected.obligation.id}
+                      item={selected}
+                      onDone={(result) => {
+                        setDone(result)
+                        refresh()
+                      }}
+                    />
                   )}
 
-                  {monthly?.alreadyDepositedThisMonth && confirmSecond ? (
-                    <div className="flex gap-2">
-                      <Button onClick={() => void submit()} loading={busy} className="flex-1">
-                        {t('detail.confirmSecond')}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setConfirmSecond(false)}
-                        disabled={busy}
-                      >
-                        {t('common.cancel')}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={() =>
-                        monthly?.alreadyDepositedThisMonth ? setConfirmSecond(true) : void submit()
-                      }
-                      disabled={draft <= 0 || busy}
-                      loading={busy}
-                      className="w-full"
-                    >
-                      {t('detail.depositAmount', { amount: formatMoney(draft) })}
-                    </Button>
-                  )}
+                  {done && <DepositResult done={done} />}
                 </>
               )}
             </section>
@@ -319,11 +168,10 @@ function QuickAddSheet({ onClose }: { onClose: () => void }) {
               ))}
             </ul>
 
-            <Button variant="ghost" onClick={onClose} className="w-full">
-              {t('common.cancel')}
-            </Button>
-          </>
-        )}
+          <Button variant="ghost" onClick={onClose} className="w-full">
+            {t('quickAdd.close')}
+          </Button>
+        </>
       </div>
     </div>
   )

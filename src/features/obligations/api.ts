@@ -172,6 +172,31 @@ export async function listDeposits(obligationId: string, limit = 24): Promise<Fu
 }
 
 /**
+ * إيداعات الشهر كلها بنداءٍ واحد.
+ *
+ * لوحة «ضلّ عليك» تسأل عن كل صندوق: هل استلم قسطه هذا الشهر؟ ونداءٌ لكل
+ * التزامٍ يجعل من عنده ستّة صناديق يدفع ستّة نداءات لسؤالٍ واحد على شبكة
+ * تلفون.
+ *
+ * وشهرٌ واحدٌ يكفي للجواب: `summarizeDeposits` تقيس منذ آخر تفريغٍ للصندوق،
+ * وأيُّ تفريغٍ وقع قبل هذا الشهر يقع قبل كل ما حُمّل — فالنتيجة واحدة.
+ */
+export async function listMonthDeposits(month: string): Promise<FundDeposit[]> {
+  const start = new Date(`${month}T00:00:00`)
+  const end = toDateKey(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+
+  const { data, error } = await supabase
+    .from('fund_deposits')
+    .select('*')
+    .gte('deposit_date', month)
+    .lte('deposit_date', end)
+    .order('deposit_date', { ascending: false })
+
+  if (error) throw error
+  return (data ?? []) as FundDeposit[]
+}
+
+/**
  * حذف إيداع — تصحيحُ إدخالٍ لا محوُ تاريخ.
  *
  * قاعدة «لا حذف» في هذا المشروع تحرس التاريخ المالي: الالتزام يُؤرشف، والصندوق

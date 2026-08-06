@@ -9,6 +9,27 @@ import { supabase } from '@/lib/supabase'
 
 export const BACKUP_VERSION = 1
 
+/**
+ * خطأ الملف برمزه لا بنصّه.
+ *
+ * كان النصّ العربي مكتوباً هنا ويصل الشاشة عبر `err.message` — فعمِل صدفةً،
+ * وخالف قاعدة «كل العربي في ar.ts». وبعد أن صار الفشل يمرّ على `failureText`
+ * صنّفه المصنّف «خللاً ما بنعرفه، جرّب كمان مرة» — ودعوةُ إعادةِ المحاولة على
+ * ملفٍ خاطئ تفشل في كل مرة. فالرمز هنا، والجملة في `ar.ts`.
+ */
+export class BackupFileError extends Error {
+  reason: 'badFile' | 'versionMismatch'
+  /** نسخة الملف كما وُجدت — تُعرض في جملة عدم التطابق. */
+  found: number
+
+  constructor(reason: 'badFile' | 'versionMismatch', found = 0) {
+    super(reason)
+    this.name = 'BackupFileError'
+    this.reason = reason
+    this.found = found
+  }
+}
+
 /** الترتيب مقصود: الأب قبل الابن حتى لا يفشل الاستيراد على مفتاح أجنبي. */
 const TABLES = [
   'obligation_groups',
@@ -62,7 +83,7 @@ export interface ImportSummary {
  */
 export async function importBackup(backup: Backup, userId: string): Promise<ImportSummary> {
   if (backup.version !== BACKUP_VERSION) {
-    throw new Error(`نسخة الملف ${backup.version} لا تطابق النسخة المدعومة ${BACKUP_VERSION}`)
+    throw new BackupFileError('versionMismatch', backup.version)
   }
 
   const inserted: Record<string, number> = {}
@@ -101,9 +122,16 @@ export function downloadBackup(backup: Backup): void {
 }
 
 export function parseBackup(text: string): Backup {
-  const parsed = JSON.parse(text) as Backup
+  let parsed: Backup
+  try {
+    parsed = JSON.parse(text) as Backup
+  } catch {
+    // ملفٌّ ليس JSON أصلاً هو نفس الغلط: اختار الملف الخطأ. و`SyntaxError`
+    // بنصّه الإنجليزي لا يقول له ذلك.
+    throw new BackupFileError('badFile')
+  }
   if (typeof parsed?.version !== 'number' || !parsed?.data) {
-    throw new Error('الملف مش نسخة احتياطية من سنوي')
+    throw new BackupFileError('badFile')
   }
   return parsed
 }

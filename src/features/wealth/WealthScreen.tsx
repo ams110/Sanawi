@@ -4,6 +4,7 @@ import { useAuth } from '@/features/auth/AuthProvider'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { useRefresh } from '@/lib/refresh'
 import { formatMoney } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { computeNetWorth } from '@/lib/wealth/networth'
 import { updateProfile } from '@/features/profile/api'
 import type { Profile } from '@/lib/db/types'
@@ -37,7 +38,7 @@ export function WealthScreen() {
       setError(null)
       setSources(await loadWealthSources())
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('wealth.loadFailed'))
+      setError(failureText(err, t, t('wealth.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -68,7 +69,7 @@ export function WealthScreen() {
         await updateProfile(user.id, patch)
       } catch (err) {
         patchLocal(before)
-        setError(err instanceof Error ? err.message : t('wealth.saveFailed'))
+        setError(failureText(err, t, t('wealth.saveFailed')))
       }
     },
     [user, profile, patchLocal, t],

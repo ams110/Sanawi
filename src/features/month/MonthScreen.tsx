@@ -2,8 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { summarizeMonth, type MonthlySummary } from '@/lib/budget/calc'
-import { listObligations } from '@/features/obligations/api'
+import { listMonthDeposits, listObligations, type ObligationWithCalc } from '@/features/obligations/api'
+import { listBills } from '@/features/bills/api'
+import { pendingThisMonth, type PendingResult } from '@/lib/month/pending'
+import { viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
+import { PendingPanel } from './PendingPanel'
 import { listFixedCommitments, listIncomes } from '@/features/money/api'
 import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
@@ -16,6 +21,7 @@ import { MonthPanel } from './MonthPanel'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { Button } from '@/components/ui/Button'
 import { useRefresh } from '@/lib/refresh'
+import { useNavigate } from 'react-router-dom'
 
 /**
  * لوحة الشهر — الشاشة التي تجيب على سؤال واحد:
@@ -25,8 +31,11 @@ export function MonthScreen() {
   const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { profile } = useProfile()
+  const navigate = useNavigate()
   const [summary, setSummary] = useState<MonthlySummary | null>(null)
   const [panel, setPanel] = useState<MonthPanelInput | null>(null)
+  const [pending, setPending] = useState<PendingResult | null>(null)
+  const [obligationRows, setObligationRows] = useState<ObligationWithCalc[]>([])
   const [hasIncome, setHasIncome] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -35,15 +44,84 @@ export function MonthScreen() {
     try {
       setError(null)
       const month = monthKey()
-      const [obligations, incomes, fixed, details, expenses, entries] = await Promise.all([
-        listObligations(),
-        listIncomes(),
-        listFixedCommitments(),
-        listCommitmentDetails(),
-        listExpenses(month),
-        listIncomeEntries(month),
-      ])
+      const [obligations, incomes, fixed, details, expenses, entries, deposits, bills] =
+        await Promise.all([
+          listObligations(),
+          listIncomes(),
+          listFixedCommitments(),
+          listCommitmentDetails(),
+          listExpenses(month),
+          listIncomeEntries(month),
+          listMonthDeposits(month),
+          listBills(month),
+        ])
       setHasIncome(incomes.length > 0)
+      setObligationRows(obligations)
+
+      /*
+       * «ضلّ عليك» — الشاشة تبدأ الكلام.
+       *
+       * المحرّك في src/lib/month/pending.ts، والشاشة تعطيه ما جلبته ولا تحسب
+       * سطراً واحداً بنفسها: هو نفسه الذي سيقوله كلود، فيتّفق الاثنان بنيةً
+       * لا انضباطاً.
+       */
+      const depositsByObligation = new Map<string, typeof deposits>()
+      for (const d of deposits) {
+        const list = depositsByObligation.get(d.obligation_id) ?? []
+        list.push(d)
+        depositsByObligation.set(d.obligation_id, list)
+      }
+
+      const receivedBySource = new Map<string, number>()
+      for (const entry of entries) {
+        if (!entry.source_id) continue
+        receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
+      }
+
+      setPending(
+        pendingThisMonth({
+          obligations: obligations.map((o) => ({
+            id: o.obligation.id,
+            name: o.obligation.name,
+            monthlyInstallment: o.calc.monthlyInstallment,
+            isOverdue: o.calc.isOverdue,
+            deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
+              id: d.id,
+              amount: Number(d.amount),
+              depositDate: d.deposit_date,
+              createdAt: d.created_at,
+              partnerId: d.partner_id,
+              note: d.note,
+            })),
+          })),
+          incomes: incomes.map((i) => ({
+            id: i.id,
+            name: i.name,
+            amount: Number(i.amount),
+            frequency: i.frequency,
+            isVariable: Boolean(i.is_variable),
+            receivedCount: receivedBySource.get(i.id) ?? 0,
+          })),
+          bills: bills.map((row) => {
+            const view = viewBillCommitment({
+              amount: Number(row.commitment.amount),
+              startsOn: row.commitment.starts_on,
+              endsOn: row.commitment.ends_on,
+              mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+            })
+            return {
+              id: row.commitment.id,
+              name: row.commitment.name,
+              // حصّتي لا المبلغ الكامل: من ينصّف الإنترنت لا يدفع كلّه.
+              amount: view.myAmount,
+              average: Number(row.average?.average_amount ?? 0),
+              isDueThisMonth: view.hasStarted && !view.isFinished,
+              isRecorded: row.payment !== null,
+              dayOfMonth: row.commitment.day_of_month,
+            }
+          }),
+        }),
+      )
 
       const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
       const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
@@ -106,7 +184,7 @@ export function MonthScreen() {
         daysInMonth: spending.daysInMonth,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('money.loadFailed'))
+      setError(failureText(err, t, t('money.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -143,6 +221,22 @@ export function MonthScreen() {
           {formatMoney(summary.mustLeaveAccount)}
         </p>
       </section>
+
+      {/*
+       * «ضلّ عليك» تسبق الأرقام كلها.
+       *
+       * من يفتح التطبيق يسأل «شو لازم أعمل»، لا «كم مجموع التزاماتي». والرقم
+       * الكبير فوقها يبقى لأنه جواب السؤال الثاني — لكنه لم يعد وحده في
+       * الصدارة.
+       */}
+      {pending && (
+        <PendingPanel
+          result={pending}
+          obligations={obligationRows}
+          onDone={load}
+          onGo={(kind) => navigate(kind === 'bill' ? '/bills' : '/money')}
+        />
+      )}
 
       {/*
        * اللوحة الموحّدة تسبق التفاصيل: هي جواب "كم بيدي" بعد كل شيء، بينما
@@ -183,28 +277,15 @@ export function MonthScreen() {
         </section>
       )}
 
-      {/* التفصيل: أين يذهب المال */}
-      <section className="rounded-3xl border border-border bg-surface p-5">
-        <h2 className="text-sm font-bold text-text-muted">{t('month.breakdownTitle')}</h2>
-        <dl className="mt-3 space-y-2">
-          {hasIncome && (
-            <Row label={t('month.income')} value={summary.monthlyIncome} tone="income" />
-          )}
-          <Row label={t('month.fixed')} value={summary.fixedTotal} />
-          <Row label={t('month.obligations')} value={summary.obligationsTotal} accent />
-          {summary.savingsTarget > 0 && (
-            <Row label={t('month.savings')} value={summary.savingsTarget} />
-          )}
-          {hasIncome && (
-            <Row
-              label={t('month.left')}
-              value={summary.availableToSpend}
-              tone={summary.isOverBudget ? 'danger' : 'income'}
-              strong
-            />
-          )}
-        </dl>
-      </section>
+      {/*
+       * التفصيل حُذف من هنا.
+       *
+       * كانت الشاشة تعرض «وين بتروح» مرّتين: واحدةً داخل اللوحة الموحّدة
+       * وأخرى تحتها — بعنوانٍ واحدٍ وأرقامٍ مختلفة، لأن الأولى تطرح المصاريف
+       * اليومية والثانية لا تطرحها. فيقرأ صاحبها رقمين لسؤالٍ واحد بفرق آلاف
+       * على بُعد سنتيمترين، ولا شيء يقول له لماذا اختلفا. وهذا هو «مخربط»
+       * بعينه. الباقي هو تفصيل اللوحة وحدها.
+       */}
 
       {/*
        * مدخل الثروة في آخر لوحة الشهر لا في أوّلها.
@@ -228,34 +309,6 @@ export function MonthScreen() {
           ←
         </span>
       </Link>
-    </div>
-  )
-}
-
-function Row({
-  label,
-  value,
-  accent = false,
-  strong = false,
-  tone,
-}: {
-  label: string
-  value: number
-  accent?: boolean
-  strong?: boolean
-  tone?: 'income' | 'danger'
-}) {
-  const color =
-    tone === 'danger' ? 'text-danger' : tone === 'income' ? 'text-brand' : accent ? 'text-accent' : 'text-text'
-
-  return (
-    <div
-      className={`flex items-baseline justify-between gap-3 rounded-xl px-3 py-2.5 ${
-        strong ? 'bg-surface-muted' : ''
-      }`}
-    >
-      <dt className={`text-sm ${strong ? 'font-bold text-text' : 'text-text-muted'}`}>{label}</dt>
-      <dd className={`num text-lg font-bold ${color}`}>{formatMoney(value)}</dd>
     </div>
   )
 }

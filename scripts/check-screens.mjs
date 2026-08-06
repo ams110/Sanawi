@@ -224,6 +224,26 @@ try {
     step(`${tab.name}: ليست فارغة`, body.trim().length > 80)
   }
 
+  /*
+   * لوحة «ضلّ عليك» تُفحص في حالتيها لا في واحدة.
+   *
+   * فحصٌ يرى القائمة مملوءةً وحدها يمرّ على لوحةٍ لا تختفي أبداً — وهي أسوأ
+   * من غيابها: تطلب ما تمّ فعلُه فيعيده صاحبها. والحالتان معاً هما الفحص.
+   */
+  await page.goto(`${BASE}/month`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+
+  const panel = page.locator('section', { hasText: 'ضلّ عليك' }).first()
+  step('اللوحة تظهر وفيها ما لم يُسجَّل', await panel.isVisible())
+
+  const rows = panel.locator('li')
+  const rowCount = await rows.count()
+  step('ولكل سطرٍ فيها زرّ فعل', rowCount > 0 && (await panel.getByRole('button').count()) >= rowCount)
+
+  // الصندوق الذي أُودع فيه هذا الشهر (تأمين السيارة في البذرة) لا يظهر.
+  const panelText = await panel.innerText()
+  step('وما تمّ لا يظهر فيها', !panelText.includes('تأمين السيارة'), panelText.replace(/\n/g, ' · '))
+
   /* الزرّ العائم: موجود على كل تبويب، ولا يغطّي محتوى الصفحة. */
   await page.goto(`${BASE}/obligations/o1`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
@@ -264,6 +284,61 @@ try {
     'الإيداع الثاني يسأل قبل أن يقع',
     await sheet.getByRole('button', { name: 'أيوه، حطّ كمان مرة' }).isVisible(),
   )
+
+  /*
+   * وحين لا يبقى شيء تختفي وتقول ذلك.
+   *
+   * نُسجّل إيداعاً لكل صندوقٍ باقٍ ودخلاً للراتب مباشرةً في القاعدة المزيّفة،
+   * ثم نعيد التحميل: يجب أن تُستبدل القائمة بحالة «كل اللي عليك انسجّل».
+   * فحصٌ لا يرى الحالتين معاً يمرّ على لوحةٍ لا تختفي أبداً.
+   */
+  const now = new Date()
+  const todayKey = iso(now)
+  for (const o of fake.db.obligations) {
+    fake.db.fund_deposits.push({
+      id: `seed-${o.id}`,
+      user_id: fake.userId,
+      obligation_id: o.id,
+      partner_id: null,
+      account_id: null,
+      amount: 100,
+      deposit_date: todayKey,
+      note: null,
+      created_at: new Date().toISOString(),
+    })
+  }
+  for (const source of fake.db.income_sources) {
+    fake.db.income_entries.push({
+      id: `seed-in-${source.id}`,
+      user_id: fake.userId,
+      source_id: source.id,
+      name: null,
+      amount: Number(source.amount),
+      received_at: todayKey,
+      note: null,
+      created_at: new Date().toISOString(),
+    })
+  }
+  for (const c of fake.db.fixed_commitments) {
+    fake.db.bill_payments.push({
+      id: `seed-bill-${c.id}`,
+      user_id: fake.userId,
+      commitment_id: c.id,
+      billing_month: `${todayKey.slice(0, 7)}-01`,
+      amount: Number(c.amount),
+      paid_at: todayKey,
+      note: null,
+      method_id: null,
+      created_at: new Date().toISOString(),
+    })
+  }
+
+  await page.goto(`${BASE}/month`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
+  await page.screenshot({ path: `${OUT}/month-clear.png`, fullPage: true })
+  const clearText = await page.locator('body').innerText()
+  step('وتختفي حين لا يبقى شيء', !clearText.includes('ضلّ عليك'))
+  step('وتقول إنه فرغ', clearText.includes('انسجّل'))
 
   step('لا استثناء في الطرفية', consoleErrors.length === 0, consoleErrors[0] ?? '')
 

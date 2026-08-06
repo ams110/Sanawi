@@ -58,6 +58,7 @@ const LIB_FILES = [
   'src/lib/obligations/calc.ts',
   'src/lib/obligations/renewal.ts',
   'src/lib/obligations/deposits.ts',
+  'src/lib/month/pending.ts',
   'src/lib/obligations/calendar.ts',
   'src/lib/budget/calc.ts',
   'src/lib/budget/month.ts',
