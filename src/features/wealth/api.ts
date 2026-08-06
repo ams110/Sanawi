@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { Account, Asset, AssetKind, NetWorthSnapshot } from '@/lib/db/types'
+import type { Asset, AssetKind, NetWorthSnapshot } from '@/lib/db/types'
 import { listObligations } from '@/features/obligations/api'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, shiftMonth, toCalcRows } from '@/features/expenses/api'
@@ -9,19 +9,12 @@ import { spendingBaseline } from '@/lib/wealth/baseline'
 import type { CashAccountInput, DebtInput, RestrictedFundInput } from '@/lib/wealth/networth'
 import type { AssetInput } from '@/lib/wealth/networth'
 import { debtBalanceFrom, type PayoffDebt } from '@/lib/commitments/payoff'
+import { listAccounts } from '@/features/accounts/api'
 
 /* ── الحسابات ──────────────────────────────────────────────── */
 
-export async function listAccounts(): Promise<Account[]> {
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('*')
-    // ‏`is` لا `eq`: `= NULL` لا يطابق شيئاً في Postgres، فيردّ قائمةً فارغة.
-    .is('archived_at', null)
-    .order('created_at', { ascending: true })
-  if (error) throw error
-  return (data ?? []) as Account[]
-}
+// القراءة انتقلت إلى `src/features/accounts/api.ts` مع الكتابة: مصدرٌ واحد
+// لجدولٍ واحد، فلا تفترق قراءةٌ عن كتابةٍ كما افترقتا بين التطبيق وكلود.
 
 /* ── الأصول ────────────────────────────────────────────────── */
 

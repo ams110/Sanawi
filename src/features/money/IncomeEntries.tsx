@@ -50,6 +50,9 @@ function EntryRow({
   const [sourceId, setSourceId] = useState(entry.source_id)
   const [receivedAt, setReceivedAt] = useState(entry.received_at)
   const [error, setError] = useState<string | null>(null)
+  // مستقلّة عن `error`: تلك لا تُعرض إلا داخل `InlineEdit` المفتوح، وزرّ الحذف
+  // لا يظهر إلا والنموذج مغلق — فرسالته كانت ستُبتلع.
+  const [removeError, setRemoveError] = useState<string | null>(null)
 
   const source = sources.find((s) => s.id === entry.source_id)
 
@@ -78,8 +81,13 @@ function EntryRow({
               type="button"
               aria-label={t('panel.removeIncome')}
               onClick={async () => {
-                await deleteIncomeEntry(entry.id)
-                await onChanged()
+                setRemoveError(null)
+                try {
+                  await deleteIncomeEntry(entry.id)
+                  await onChanged()
+                } catch (err) {
+                  setRemoveError(failureText(err, t, t('panel.removeFailed')))
+                }
               }}
               className="shrink-0 rounded-lg px-1.5 text-sm text-danger"
             >
@@ -88,6 +96,12 @@ function EntryRow({
           </>
         )}
       </div>
+
+      {removeError && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {removeError}
+        </p>
+      )}
 
       <InlineEdit
         open={editing}
@@ -172,7 +186,7 @@ export function IncomeEntries({
     try {
       setRows(await listIncomeEntries(monthKey()))
     } catch (err) {
-      setError(failureText(err, t, t('panel.incomeFailed')))
+      setError(failureText(err, t, t('panel.incomeLoadFailed')))
     }
   }, [t, refreshToken])
 

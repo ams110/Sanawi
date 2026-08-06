@@ -286,6 +286,54 @@ try {
   )
 
   /*
+   * الحسابات: تُنشأ وتُربط من التلفون.
+   *
+   * كان جدول `accounts` قابلاً للكتابة من كلود وحده، فالقسم يختفي لمن لا
+   * حساب له، والتحذير «اربطها بحساب» يظهر بلا زرٍّ في التطبيق كلّه. وهذا
+   * الفحص يمرّ على المسار كاملاً: أنشئ حساباً، اربط به صندوقاً، وتأكّد أن
+   * «المحجوز» صار رصيد الصندوق فعلاً.
+   */
+  await page.goto(`${BASE}/wealth`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
+
+  /*
+   * المحدِّد بالعنوان لا بالنصّ.
+   *
+   * `hasText` مطابقةٌ جزئية، و«بحساباتك» في ملخّص الثروة تحتوي «حساباتك» —
+   * فكان `.first()` يلتقط بطاقة الملخّص التي لا زرَّ فيها. وهذا بالضبط صنف
+   * الفحص الذي يفشل لسببٍ لا علاقة له بالمفحوص.
+   */
+  const accountsCard = page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'حساباتك', exact: true }) })
+    .first()
+  step('قسم الحسابات ظاهرٌ ولو بلا حساب', await accountsCard.isVisible())
+
+  await accountsCard.getByRole('button', { name: '+ ضيف حساب' }).click()
+  await page.waitForTimeout(400)
+  await accountsCard.getByLabel('اسم الحساب').fill('بنك الفحص')
+  await accountsCard.getByLabel('الرصيد الفعلي').first().fill('2000')
+  await accountsCard.getByRole('button', { name: 'احفظ' }).first().click()
+  await page.waitForTimeout(2000)
+
+  const afterAdd = await accountsCard.innerText()
+  step('الحساب أُنشئ من التلفون', afterAdd.includes('بنك الفحص'), afterAdd.slice(0, 120))
+
+  // الصندوق غير المربوط يظهر ومعه قائمة اختيار — لا تحذيراً بلا زرّ.
+  const link = accountsCard.getByLabel(/^اربط تأمين السيارة/)
+  step('والصندوق غير المربوط معه زرُّ ربطه', await link.isVisible())
+  await link.selectOption({ label: 'بنك الفحص' })
+  await page.waitForTimeout(2000)
+
+  const afterLink = await accountsCard.innerText()
+  await page.screenshot({ path: `${OUT}/accounts.png`, fullPage: true })
+  step(
+    'وبعد الربط صار «المحجوز» رصيد الصندوق',
+    /محجوز لصناديقك[\s\S]*?500/.test(afterLink),
+    afterLink.replace(/\n/g, ' · ').slice(0, 200),
+  )
+
+  /*
    * وحين لا يبقى شيء تختفي وتقول ذلك.
    *
    * نُسجّل إيداعاً لكل صندوقٍ باقٍ ودخلاً للراتب مباشرةً في القاعدة المزيّفة،

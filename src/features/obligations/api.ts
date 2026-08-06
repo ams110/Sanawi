@@ -7,7 +7,9 @@ import type {
   FundDeposit,
 } from '@/lib/db/types'
 import { calculateObligation, type ObligationCalcResult } from '@/lib/obligations/calc'
-import { renewAfterPayment, type RenewalResult } from '@/lib/obligations/renewal'
+import { planPayment } from '@/lib/obligations/payment'
+import type { RenewalResult } from '@/lib/obligations/renewal'
+import { moveBalance } from '@/features/accounts/api'
 
 /** التزام مع رصيده المحسوب ونتيجة المحرّك — ما تعرضه الشاشات فعلياً. */
 export interface ObligationWithCalc {
@@ -80,8 +82,28 @@ export interface ObligationDraft {
   next_due_date: string
   recurrence_months: number
   my_share_percent: number
-  group_id: string | null
-  notes: string | null
+  /**
+   * المجموعة والملاحظات والحساب الذي يحتفظ بالصندوق — اختيارية لا فارغة.
+   *
+   * والفرق ليس تجميلاً: حقلٌ مطلوبٌ يجبر كل نداءٍ على تمرير قيمة، ومن لا
+   * يعرض الحقل يمرّر `null` — فيمحو ما كتبه كلود عند كل تعديلٍ من الشاشة.
+   * وقع ذلك فعلاً في `group_id` و`notes`.
+   */
+  group_id?: string | null
+  notes?: string | null
+  account_id?: string | null
+}
+
+/** ربط صندوق التزامٍ بحساب، أو فكّه. تعديلٌ لا يمسّ شيئاً غيره. */
+export async function linkObligationAccount(
+  obligationId: string,
+  accountId: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('obligations')
+    .update({ account_id: accountId })
+    .eq('id', obligationId)
+  if (error) throw error
 }
 
 export async function createObligation(
@@ -114,11 +136,32 @@ export async function createObligation(
   return data as Obligation
 }
 
+/**
+ * التعديل الجزئي لا يمسّ ما لم يُرسَل — القاعدة نفسها المطبَّقة في `updateAsset`.
+ *
+ * الصفّ يُبنى من الحقول المُرسَلة وحدها، فتمريرُ الكائن كما جاء لا يكفي: نموذج
+ * الشاشة كان يضع فيه `group_id: null` و`notes: null` ثابتَين لأنه لا يعرض
+ * الحقلين، فمن كتب ملاحظته أو ضمّ التزامه إلى مجموعة من كلود يفقدهما عند أول
+ * تعديلٍ من التلفون بلا أن يُخبَره أحد.
+ */
 export async function updateObligation(
   id: string,
   patch: Partial<ObligationDraft>,
 ): Promise<void> {
-  const { error } = await supabase.from('obligations').update(patch).eq('id', id)
+  const row: Partial<Obligation> = {}
+  if (patch.name !== undefined) row.name = patch.name
+  if (patch.category !== undefined) row.category = patch.category
+  if (patch.total_amount !== undefined) row.total_amount = patch.total_amount
+  if (patch.next_due_date !== undefined) row.next_due_date = patch.next_due_date
+  if (patch.recurrence_months !== undefined) row.recurrence_months = patch.recurrence_months
+  if (patch.my_share_percent !== undefined) row.my_share_percent = patch.my_share_percent
+  // ‏`null` هنا قيمةٌ مقصودة (فكّ الربط أو مسح الملاحظة) لا غياب.
+  if (patch.group_id !== undefined) row.group_id = patch.group_id
+  if (patch.notes !== undefined) row.notes = patch.notes
+  if (patch.account_id !== undefined) row.account_id = patch.account_id
+
+  if (Object.keys(row).length === 0) return
+  const { error } = await supabase.from('obligations').update(row).eq('id', id)
   if (error) throw error
 }
 
@@ -242,18 +285,43 @@ export async function track(
  * يُسجَّل الدفع أولاً ثم يُحدَّث الالتزام: لو انقطع الاتصال بينهما بقي سجلّ
  * الدفعة موجوداً ويمكن تصحيح الالتزام يدوياً، والعكس يفقد الدفعة نهائياً.
  */
+/**
+ * نتيجة الدفع، ومعها هل تمّ أثره على الحساب.
+ *
+ * الدفعة تقع في البنك أولاً، فرميُ خطأٍ بعد تسجيلها يجعل المستخدم يعيد
+ * التسجيل فيُفرَّغ الصندوق مرّتين. لكن ابتلاع الفشل بصمت يترك رصيداً يكذب —
+ * فيُقال في الرد ويُعرض، ولا يُفشل الدفع.
+ */
+export interface PaymentResult extends RenewalResult {
+  /** لم يُنقص رصيد الحساب أو لم تُفتح التسوية — الرصيد يحتاج تصحيحاً يدوياً. */
+  accountUpdateFailed: boolean
+}
+
 export async function markPaid(
   item: ObligationWithCalc,
   userId: string,
-): Promise<RenewalResult> {
+  paidFromAccountId: string | null = null,
+): Promise<PaymentResult> {
   const o = item.obligation
-  const result = renewAfterPayment({
+
+  /*
+   * القرار من المحرّك، والتنفيذ هنا.
+   *
+   * كان هذا المسار يفرّغ الصندوق ويقدّم الموعد **ولا يمسّ رصيد حساب ولا يفتح
+   * تسوية**، بينما نظيره عند كلود يفعل الاثنين — فالعميلان يكتبان تاريخين
+   * ماليين مختلفين في قاعدةٍ واحدة، ويقفز «غير مخصّص» بعد أكبر دفعةٍ في السنة
+   * بمقدار ما خرج بالضبط. صار القرار واحداً في `planPayment`.
+   */
+  const plan = planPayment({
     totalAmount: Number(o.total_amount),
     mySharePercent: Number(o.my_share_percent),
     myFundBalance: Number(item.balance?.my_fund_balance ?? 0),
     nextDueDate: o.next_due_date,
     recurrenceMonths: o.recurrence_months,
+    fundAccountId: o.account_id,
+    paidFromAccountId,
   })
+  const result = plan.renewal
 
   const paidDate = toDateKey(result.cycleStartDate)
   const nextDue = result.nextDueDate ? toDateKey(result.nextDueDate) : o.next_due_date
@@ -264,6 +332,7 @@ export async function markPaid(
     amount_paid: result.amountPaid,
     paid_date: paidDate,
     next_due_date_after: nextDue,
+    paid_from_account_id: plan.chargeAccountId,
   })
   if (paymentError) throw paymentError
 
@@ -275,9 +344,42 @@ export async function markPaid(
       partner_id: null,
       amount: -result.amountPaid,
       deposit_date: paidDate,
+      account_id: o.account_id,
       note: 'سحب عند الدفع',
     })
     if (drawError) throw drawError
+  }
+
+  /*
+   * المال يخرج من حساب، والتسوية تُفتح إن خرج من غير حساب الصندوق.
+   *
+   * وفشلُ هذين لا يُفشل الدفع — الدفعة وقعت في البنك — لكنه **لا يُبتلع**:
+   * يخرج في `accountUpdateFailed` فتقوله الشاشة، وإلا بقي رصيدٌ يكذب بلا أن
+   * يعرف صاحبه أنه يكذب.
+   */
+  let accountUpdateFailed = false
+
+  if (plan.chargeAccountId) {
+    try {
+      await moveBalance(plan.chargeAccountId, -plan.withdrawn)
+    } catch (err) {
+      console.error('[sanawi] تعذّر إنقاص رصيد الحساب بعد الدفع', err)
+      accountUpdateFailed = true
+    }
+  }
+
+  if (plan.settlement) {
+    const { error: settlementError } = await supabase.from('account_settlements').insert({
+      user_id: userId,
+      debtor_account_id: plan.settlement.debtorAccountId,
+      creditor_account_id: plan.settlement.creditorAccountId,
+      amount: plan.settlement.amount,
+      obligation_id: o.id,
+    })
+    if (settlementError) {
+      console.error('[sanawi] تعذّر فتح التسوية', settlementError)
+      accountUpdateFailed = true
+    }
   }
 
   const { error: updateError } = await supabase
@@ -294,5 +396,5 @@ export async function markPaid(
     .eq('id', o.id)
   if (updateError) throw updateError
 
-  return result
+  return { ...result, accountUpdateFailed }
 }

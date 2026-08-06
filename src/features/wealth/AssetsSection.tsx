@@ -214,7 +214,21 @@ function AssetFields({
       }}
       extraAction={
         onArchive ? (
-          <Button type="button" variant="danger" className="w-full" onClick={onArchive}>
+          <Button
+            type="button"
+            variant="danger"
+            className="w-full"
+            onClick={async () => {
+              setError(null)
+              try {
+                await onArchive()
+              } catch (err) {
+                // نموذج التعديل مفتوحٌ وهو ما يعرض `error`، فالرسالة تقع فوق
+                // الزرّ نفسه بدل أن ينغلق النموذج والأصل باقٍ بلا خبر.
+                setError(failureText(err, t, t('wealth.removeFailed')))
+              }
+            }}
+          >
             {t('wealth.remove')}
           </Button>
         ) : undefined

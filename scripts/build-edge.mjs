@@ -57,6 +57,7 @@ const LIB_FILES = [
   'src/lib/db/types.ts',
   'src/lib/obligations/calc.ts',
   'src/lib/obligations/renewal.ts',
+  'src/lib/obligations/payment.ts',
   'src/lib/obligations/deposits.ts',
   'src/lib/month/pending.ts',
   'src/lib/obligations/calendar.ts',

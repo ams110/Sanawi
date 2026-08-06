@@ -13,6 +13,8 @@ import { FreedomPanel } from './FreedomPanel'
 import { PayoffPanel } from './PayoffPanel'
 import { NetWorthTrend } from './NetWorthTrend'
 import { loadWealthSources, saveSnapshot, toAssetInputs, type WealthSources } from './api'
+import { AccountsSection } from '@/features/accounts/AccountsSection'
+import { loadAccountsPicture, type AccountsPicture } from '@/features/accounts/api'
 
 /**
  * شاشة الثروة — النصف الغائب من التطبيق.
@@ -29,6 +31,7 @@ export function WealthScreen() {
   const { token: refreshToken, setBusy } = useRefresh()
 
   const [sources, setSources] = useState<WealthSources | null>(null)
+  const [accounts, setAccounts] = useState<AccountsPicture | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [snapshotSaved, setSnapshotSaved] = useState(false)
@@ -36,7 +39,13 @@ export function WealthScreen() {
   const load = useCallback(async () => {
     try {
       setError(null)
-      setSources(await loadWealthSources())
+      const [wealth, accountsPicture] = await Promise.all([
+        loadWealthSources(),
+        // فشل قراءة الحسابات لا يمنع صافي الثروة — القسم وحده يسقط.
+        loadAccountsPicture().catch(() => null),
+      ])
+      setSources(wealth)
+      setAccounts(accountsPicture)
     } catch (err) {
       setError(failureText(err, t, t('wealth.loadFailed')))
     } finally {
@@ -184,91 +193,23 @@ export function WealthScreen() {
       </section>
 
       {/*
-       * الحسابات ومظاريفها.
+       * الحسابات: عرضٌ **ومعه فعل**.
        *
-       * أهمّ رقمٍ هنا «غير مخصّص»: موجباً فالوضع مضبوط، وسالباً فالتطبيق يَعِد
-       * بمالٍ ليس في البنك. ولا يمكن اكتشافه من صندوقٍ واحد — كلٌّ منها يبدو
-       * سليماً، والمجموع وحده يفضح النقص.
+       * كان هذا القسم يعرض «غير مخصّص» ويختفي كلّه لمن لا حساب له — ولا سبيل
+       * في التطبيق إلى إنشاء حساب أصلاً. صار يُدخِل الرصيد ويربط الصندوق
+       * ويغلق التسوية، فلا يبقى في الشاشة رقمٌ لا يُنفَّذ عليه شيء.
        */}
-      {net.accounts.length > 0 && (
-        <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
-          <h2 className="text-sm font-bold text-text">{t('wealth.accountsTitle')}</h2>
-
-          <ul className="space-y-3">
-            {net.accounts.map((account) => (
-              <li key={account.name} className="space-y-1">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm font-semibold text-text">{account.name}</span>
-                  <span className="num text-sm font-bold text-text">
-                    {formatMoney(account.balance)}
-                  </span>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 text-[13px]">
-                  <span className="text-text-muted">{t('wealth.reserved')}</span>
-                  <span className="num text-text-muted">{formatMoney(account.reserved)}</span>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 text-[13px]">
-                  <span className={account.shortfall ? 'font-semibold text-danger' : 'text-text'}>
-                    {t('wealth.available')}
-                  </span>
-                  <span
-                    className={`num font-bold ${account.shortfall ? 'text-danger' : 'text-text'}`}
-                  >
-                    {formatMoney(account.available)}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          {net.accounts.some((account) => account.shortfall) && (
-            <p className="rounded-2xl bg-danger-soft px-4 py-3 text-[13px] font-semibold text-danger">
-              {t('wealth.shortfallNote')}
-            </p>
-          )}
-
-          <p className="text-[12px] leading-relaxed text-text-muted">
-            {t('wealth.accountsNote')}
-          </p>
-        </section>
+      {user && accounts && (
+        <AccountsSection picture={accounts} userId={user.id} onChanged={load} />
       )}
 
       {/*
-       * الصندوق غير المربوط يُحتسب ملكاً — وهو تخمينٌ يُقال لا يُخفى.
+       * تحذير «صناديق بلا حساب» انتقل إلى `AccountsSection` ومعه زرُّ الربط.
+       *
+       * كان هنا بلا زرّ — ولا سبيل في التطبيق كلّه إلى ربط صندوقٍ بحساب —
+       * فيظهر كل يوم ولا يُطفأ. وتحذيرٌ لا يُطفأ يدرّب صاحبه على تجاهل
+       * التحذيرات كلها، بما فيها ما سيهمّه يوماً.
        */}
-      {net.hasUnlinkedFunds && (
-        <section className="space-y-2 rounded-3xl border border-warning/30 bg-warning-soft p-5">
-          <h2 className="text-sm font-bold text-warning">{t('wealth.unlinkedTitle')}</h2>
-          <p className="text-[13px] leading-relaxed text-text">
-            {t('wealth.unlinkedNote', { amount: formatMoney(net.unlinkedRestrictedTotal) })}
-          </p>
-          <ul className="space-y-1">
-            {sources.unlinkedFunds.map((fund) => (
-              <li key={fund.name} className="text-xs text-text-muted">
-                {fund.name} — {formatMoney(fund.balance)}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/*
-       * القيم القديمة تُقال ولا تُبتلع: صافي ثروةٍ مبنيّ على رقمٍ عمره سنة
-       * ليس خطأً في الحساب بل خطأ في المُدخَل، ولا يصلحه إلا صاحبه.
-       */}
-      {net.staleAssets.length > 0 && (
-        <section className="space-y-2 rounded-3xl border border-warning/30 bg-warning-soft p-5">
-          <h2 className="text-sm font-bold text-warning">{t('wealth.staleTitle')}</h2>
-          <p className="text-[13px] leading-relaxed text-text">{t('wealth.staleNote')}</p>
-          <ul className="space-y-1">
-            {net.staleAssets.map((a) => (
-              <li key={a.name} className="text-xs text-text-muted">
-                {t('wealth.staleLine', { name: a.name, months: a.monthsSinceUpdate })}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       <EmergencyFundCard
         current={net.emergencyFund.current}

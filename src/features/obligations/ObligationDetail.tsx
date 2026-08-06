@@ -7,9 +7,10 @@ import { BridgeNotice } from '@/components/ui/BridgeNotice'
 import { Button } from '@/components/ui/Button'
 import { PartnerSettlements } from '@/features/partners/PartnerSettlements'
 import { listSettlements } from '@/features/partners/api'
-import type { PartnerSettlement } from '@/lib/db/types'
+import type { Account, PartnerSettlement } from '@/lib/db/types'
+import { listAccounts } from '@/features/accounts/api'
 import { PaymentDialog } from './PaymentDialog'
-import type { RenewalResult } from '@/lib/obligations/renewal'
+
 import { summarizeDeposits, type DepositView } from '@/lib/obligations/deposits'
 import { DepositField, DepositResult, type DepositDone } from '@/features/record/DepositField'
 import { failureText } from '@/lib/i18n/failure'
@@ -22,6 +23,7 @@ import {
   markPaid,
   track,
   type ObligationWithCalc,
+  type PaymentResult,
 } from './api'
 import { useTranslation } from 'react-i18next'
 
@@ -33,6 +35,9 @@ export function ObligationDetail() {
   const [item, setItem] = useState<ObligationWithCalc | null>(null)
   const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
   const [deposits, setDeposits] = useState<FundDeposit[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  /** فارغ = حساب الصندوق، وهو الافتراضي. */
+  const [paidFrom, setPaidFrom] = useState<string | null>(null)
   const [payerId, setPayerId] = useState<string | null>(null)
   /** آخر إيداعٍ وقع من هذه الشاشة — يُعرض تحت الحقل ثم يُستبدل بالتالي. */
   const [done, setDone] = useState<DepositDone | null>(null)
@@ -40,21 +45,23 @@ export function ObligationDetail() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [payOpen, setPayOpen] = useState(false)
-  const [payResult, setPayResult] = useState<RenewalResult | null>(null)
+  const [payResult, setPayResult] = useState<PaymentResult | null>(null)
   const [payError, setPayError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!id) return
     try {
-      const [found, shares, movements] = await Promise.all([
+      const [found, shares, movements, accountRows] = await Promise.all([
         getObligation(id),
         // فشل التسوية لا يمنع عرض الالتزام نفسه.
         listSettlements(id).catch(() => [] as PartnerSettlement[]),
         listDeposits(id).catch(() => [] as FundDeposit[]),
+        listAccounts().catch(() => [] as Account[]),
       ])
       setItem(found)
       setSettlements(shares)
       setDeposits(movements)
+      setAccounts(accountRows)
     } catch (err) {
       setError(failureText(err, t, t('form.loadFailed')))
     } finally {
@@ -91,7 +98,7 @@ export function ObligationDetail() {
     setBusy(true)
     setPayError(null)
     try {
-      const result = await markPaid(item, user.id)
+      const result = await markPaid(item, user.id, paidFrom)
       void track(user.id, 'obligation_paid', {
         obligation_id: item.obligation.id,
         had_shortfall: result.shortfall > 0,
@@ -297,6 +304,9 @@ export function ObligationDetail() {
       {payOpen && (
         <PaymentDialog
           item={item}
+          accounts={accounts}
+          paidFromAccountId={paidFrom}
+          onPaidFromChange={setPaidFrom}
           onConfirm={confirmPayment}
           onClose={closePayment}
           result={payResult}

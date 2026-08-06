@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import type { BillAverage, BillPayment, FixedCommitment } from '@/lib/db/types'
 import { toDateKey, toMonthKey } from '@/lib/date'
+import { viewCommitment } from '@/lib/commitments/calc'
 
 /**
  * مفتاح الشهر: أول يوم فيه بصيغة ISO.
@@ -103,16 +104,35 @@ export interface BillsSummary {
   outstanding: number
   /** عدد البنود التي لم تُسجَّل بعد. */
   missing: number
+  /**
+   * عدد البنود المستحقّة فعلاً هذا الشهر: بدأت دفعاتها، ولم تنتهِ، ولم تُسجَّل.
+   *
+   * غير `missing` عمداً: ذاك يعدّ كل بندٍ بلا صفّ فاتورة — ومنه ما تبدأ دفعته
+   * بعد شهرين وما انتهى قسطه — فيقيس تقصيراً في الإدخال لا مالاً يجب أن يخرج.
+   */
+  payable: number
 }
 
-export function summarizeBills(rows: BillRow[]): BillsSummary {
+export function summarizeBills(rows: BillRow[], today: Date = new Date()): BillsSummary {
   let recorded = 0
   let paid = 0
   let missing = 0
+  let payable = 0
 
   for (const row of rows) {
     if (!row.payment) {
       missing++
+      // الحكم من محرّك البنود نفسه لا من فحصٍ محلّي للتواريخ.
+      const view = viewCommitment(
+        {
+          amount: Number(row.commitment.amount),
+          startsOn: row.commitment.starts_on,
+          endsOn: row.commitment.ends_on,
+          mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+        },
+        today,
+      )
+      if (view.hasStarted && !view.isFinished) payable++
       continue
     }
     const amount = Number(row.payment.amount)
@@ -125,6 +145,7 @@ export function summarizeBills(rows: BillRow[]): BillsSummary {
     paid: round2(paid),
     outstanding: round2(recorded - paid),
     missing,
+    payable,
   }
 }
 

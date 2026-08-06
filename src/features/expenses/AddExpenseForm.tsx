@@ -68,6 +68,8 @@ export function AddExpenseForm({
       await addExpense(userId, {
         amount: amount.value,
         categoryId,
+        // الاسم مع المعرّف: كلود يرشّح بالنصّ، فبدونه لا يرى ما سجّلته الشاشة.
+        categoryName: categories.find((c) => c.id === categoryId)?.name_ar ?? null,
         spentAt,
         isUnexpected,
         note: note.trim() || null,
@@ -222,9 +224,16 @@ function NewCategoryFields({
   const [name, setName] = useState('')
   const [icon, setIcon] = useState(DEFAULT_ICON)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   return (
     <div className="space-y-2 rounded-2xl bg-surface-muted p-3">
+      {error && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
@@ -254,10 +263,14 @@ function NewCategoryFields({
         className="w-full"
         onClick={async () => {
           setBusy(true)
+          setError(null)
           try {
             const created = await addCategory(userId, { nameAr: name.trim(), icon })
+            // الاسم لا يُمسح إلا بعد نجاح الإنشاء، فمن فشل عنده لا يعيد كتابته.
             setName('')
             await onCreated(created.id)
+          } catch (err) {
+            setError(failureText(err, t, t('expenses.categoryFailed')))
           } finally {
             setBusy(false)
           }

@@ -109,10 +109,16 @@ export function SharesEditor({
           variant="secondary"
           disabled={!newPartner.trim()}
           onClick={async () => {
-            const created = await addPartner(userId, newPartner.trim())
-            setNewPartner('')
-            setDraft((d) => ({ ...d, [created.id]: 0 }))
-            await onPartnerAdded()
+            setError(null)
+            try {
+              const created = await addPartner(userId, newPartner.trim())
+              // الاسم لا يُمسح إلا بعد نجاح الإضافة، فمن فشل عنده لا يعيد كتابته.
+              setNewPartner('')
+              setDraft((d) => ({ ...d, [created.id]: 0 }))
+              await onPartnerAdded()
+            } catch (err) {
+              setError(failureText(err, t, t('bills.addPartnerFailed')))
+            }
           }}
         >
           {t('bills.addPartner')}
