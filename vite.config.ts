@@ -6,6 +6,18 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   /*
+   * بصمة البناء — لأن التطبيق قشرةٌ تفتح الموقع لا أصولاً محزومة.
+   *
+   * حين ينشر التدفّق نسخةً جديدة، من كان تطبيقه في الخلفية يستأنفه فيرى
+   * الصفحة نفسها المحمَّلة قبل النشر: لا تحميل يقع عند الاستئناف، فتبقى
+   * الشيفرة القديمة تعمل ويظنّ صاحبها أن شيئاً لم يتغيّر. وقع هذا فعلاً.
+   *
+   * فيُحقن رقم البناء في الحزمة، ويُكتب مثله في ملفٍ صغير بجانبها، فيصير
+   * سؤال «هل عندي الأحدث؟» قابلاً للجواب من داخل التطبيق.
+   */
+  const buildId = (process.env.GITHUB_SHA || env.GITHUB_SHA || '').slice(0, 7) || 'dev'
+
+  /*
    * تمرير نداءات Supabase عبر خادم التطوير عند الحاجة.
    *
    * في بيئة تمرّ بوكيل شبكة يفكّ TLS بشهادة موقّعة محلياً، يرفض المتصفح
@@ -22,7 +34,22 @@ export default defineConfig(({ mode }) => {
     // الموقع على GitHub Pages يُخدَم من /Sanawi/ لا من الجذر، وداخل التطبيق
     // المغلَّف من الجذر. المتغيّر يفصل الحالتين بلا شرطٍ في الكود.
     base: env.VITE_BASE_PATH || '/',
-    plugins: [react(), tailwindcss()],
+    define: { __BUILD_ID__: JSON.stringify(buildId) },
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        // ‏`version.json` بجانب الحزمة: أصغر ملفٍ يُسأل عنه بلا تحميل التطبيق كلّه.
+        name: 'sanawi-build-id',
+        generateBundle() {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: `${JSON.stringify({ build: buildId })}\n`,
+          })
+        },
+      },
+    ],
     resolve: {
       alias: { '@': new URL('./src', import.meta.url).pathname },
     },

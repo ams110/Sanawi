@@ -47,6 +47,17 @@ jobs:
           VITE_SUPABASE_URL: https://check.supabase.co
           VITE_SUPABASE_ANON_KEY: check-anon-key
 
+      # ‏`version.json` هو ما يعرف به التطبيق المفتوح أن نسخةً أحدث نُشرت.
+      # اختفاؤه لا يكسر بناءً ولا يُسقط فحصاً — يُسكِت التحديث وحده، فيبقى
+      # الناس على نسخةٍ قديمة بلا أن يقول لهم شيء. فيُتحقّق منه صراحةً.
+      - name: بصمة البناء منشورة
+        run: |
+          test -s dist/version.json || {
+            echo "::error::dist/version.json مفقود — التطبيق لن يعرف أن نسخةً جديدة نُشرت"
+            exit 1
+          }
+          cat dist/version.json
+
       - name: اختبارات محرّك الحساب
         run: npx vitest run
 
