@@ -19,10 +19,17 @@ import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
+import {
+  summarizeAccounts,
+  type AccountsSummary,
+  type AccountView,
+} from '../src/lib/accounts/calc.js'
 import { spendingBaseline } from '../src/lib/wealth/baseline.js'
 import { projectFreedom, type FreedomInput, type FreedomResult } from '../src/lib/wealth/freedom.js'
 import { debtBalanceFrom, type PayoffDebt } from '../src/lib/commitments/payoff.js'
 import type {
+  Account,
+  AccountSettlement,
   Asset,
   CommitmentDetail,
   Expense,
@@ -42,12 +49,24 @@ export interface ObligationView {
   obligation: Obligation
   balance: ObligationBalance | null
   calc: ObligationCalcResult
+  /**
+   * الحساب الذي يحتفظ بصندوق هذا الالتزام.
+   *
+   * فارغ = صندوقٌ غير مربوط: التطبيق لا يعرف أين ماله، فيُحتسب ملكاً في
+   * صافي الثروة (الحالة الانتقالية) ويُحذَّر منه.
+   */
+  account: Account | null
 }
 
-function attachCalc(obligation: Obligation, balance: ObligationBalance | undefined): ObligationView {
+function attachCalc(
+  obligation: Obligation,
+  balance: ObligationBalance | undefined,
+  account: Account | undefined,
+): ObligationView {
   return {
     obligation,
     balance: balance ?? null,
+    account: account ?? null,
     calc: calculateObligation({
       totalAmount: Number(obligation.total_amount),
       mySharePercent: Number(obligation.my_share_percent),
@@ -61,16 +80,20 @@ function attachCalc(obligation: Obligation, balance: ObligationBalance | undefin
 }
 
 export async function loadObligations(
-  { db }: Connection,
+  connection: Connection,
   options: { includeArchived?: boolean } = {},
 ): Promise<ObligationView[]> {
-  // نداءان متوازيان بدل join: المشهد لا يُضمّ عبر PostgREST بعلاقة مفتاح.
+  const { db } = connection
+  // نداءات متوازية بدل join: المشهد لا يُضمّ عبر PostgREST بعلاقة مفتاح.
   const query = db.from('obligations').select('*').order('next_due_date', { ascending: true })
   if (!options.includeArchived) query.eq('is_active', true)
 
-  const [obligationsRes, balancesRes] = await Promise.all([
+  const [obligationsRes, balancesRes, accounts] = await Promise.all([
     query,
     db.from('obligation_balances').select('*'),
+    // المؤرشفة أيضاً: التزامٌ مربوطٌ بحسابٍ أُرشف يبقى اسمُ حسابه مقروءاً،
+    // وإخفاؤه يجعل الصندوق يبدو غير مربوط وهو مربوط.
+    loadAccounts(connection, { includeArchived: true }),
   ])
 
   if (obligationsRes.error) throw obligationsRes.error
@@ -79,7 +102,15 @@ export async function loadObligations(
   const balances = new Map(
     (balancesRes.data ?? []).map((b) => [b.obligation_id, b as ObligationBalance]),
   )
-  return (obligationsRes.data ?? []).map((o) => attachCalc(o as Obligation, balances.get(o.id)))
+  const accountsById = new Map(accounts.map((account) => [account.id, account]))
+
+  return (obligationsRes.data ?? []).map((o) =>
+    attachCalc(
+      o as Obligation,
+      balances.get(o.id),
+      o.account_id ? accountsById.get(o.account_id as string) : undefined,
+    ),
+  )
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -536,6 +567,150 @@ export function monthKey(input?: string): string {
   return `${year}-${month}-01`
 }
 
+/* ── الحسابات ──────────────────────────────────────────────── */
+
+export async function loadAccounts(
+  { db }: Connection,
+  options: { includeArchived?: boolean } = {},
+): Promise<Account[]> {
+  const query = db.from('accounts').select('*').order('created_at', { ascending: true })
+  // المؤرشف يُستثنى بـ`is` لا بـ`eq`: `= NULL` لا يطابق شيئاً في Postgres.
+  if (!options.includeArchived) query.is('archived_at', null)
+
+  const { data, error } = await query
+  if (error) throw error
+  return (data ?? []) as Account[]
+}
+
+/** حسابٌ بمعرّفه أو باسمه — بنفس منطق الالتزامات ولنفس السبب. */
+export async function findAccount(
+  connection: Connection,
+  reference: string,
+  options: { includeArchived?: boolean } = {},
+): Promise<Account> {
+  const accounts = await loadAccounts(connection, options)
+  return pickByReference(
+    accounts,
+    reference,
+    (row) => row.name,
+    (row) => row.id,
+    { singular: 'حساب', empty: 'لا حسابات بعد — أضِف واحداً بـ sanawi_save_account.' },
+  )
+}
+
+export interface OpenSettlement {
+  id: string
+  amount: number
+  debtorName: string
+  creditorName: string
+  obligationName: string | null
+  note: string | null
+  createdAt: string
+}
+
+export interface AccountsPicture {
+  summary: AccountsSummary
+  accounts: AccountView[]
+  /**
+   * صناديق بلا حساب — الحالة الانتقالية.
+   *
+   * تُذكر في كل قائمة حسابات لا في صافي الثروة وحده: من يقرأ «المتاح» يجب
+   * أن يعرف أن مالاً خارج هذه اللوحة كلّها.
+   */
+  unlinked: { name: string; balance: number }[]
+  unlinkedTotal: number
+  settlements: OpenSettlement[]
+}
+
+/**
+ * الحسابات ومظاريفها — بنفس المحرّك الذي تعرضه شاشة الثروة.
+ *
+ * الصندوق يُنسب إلى حسابه، والحساب يُحسب عليه `reserved` و`available`.
+ * والحساب هنا يقرأ الالتزامات مرّةً ويوزّعها، ولا يسأل عن كل حسابٍ وحده:
+ * استعلامٌ لكل حساب يجعل من عنده ثلاثة حسابات يدفع ثلاثة نداءات لسؤالٍ واحد.
+ */
+export async function loadAccountsPicture(connection: Connection): Promise<AccountsPicture> {
+  const [accounts, obligations, settlements] = await Promise.all([
+    loadAccounts(connection),
+    loadObligations(connection),
+    loadOpenSettlements(connection),
+  ])
+
+  const envelopes = new Map<string, { name: string; balance: number; obligationId: string }[]>()
+  const unlinked: { name: string; balance: number }[] = []
+
+  for (const item of obligations) {
+    const balance = Number(item.balance?.my_fund_balance ?? 0)
+    // الصندوق الفارغ ليس مظروفاً: صفرٌ لا يخصّص شيئاً، وإظهاره يزحم القائمة
+    // بأسماء كل التزامٍ لم يبدأ صاحبه بتمويله بعد.
+    if (balance === 0) continue
+
+    const accountId = item.obligation.account_id
+    if (!accountId) {
+      unlinked.push({ name: item.obligation.name, balance })
+      continue
+    }
+
+    const list = envelopes.get(accountId) ?? []
+    list.push({ name: item.obligation.name, balance, obligationId: item.obligation.id })
+    envelopes.set(accountId, list)
+  }
+
+  const summary = summarizeAccounts(
+    accounts.map((account) => ({
+      id: account.id,
+      name: account.name,
+      kind: account.kind,
+      balance: Number(account.balance),
+      balanceUpdatedAt: account.balance_updated_at,
+      envelopes: envelopes.get(account.id) ?? [],
+    })),
+  )
+
+  const accountsById = new Map(accounts.map((a) => [a.id, a]))
+
+  return {
+    summary,
+    accounts: summary.accounts,
+    unlinked,
+    unlinkedTotal: Math.round(unlinked.reduce((sum, u) => sum + u.balance, 0) * 100) / 100,
+    settlements: settlements.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      debtorName: accountsById.get(row.debtor_account_id)?.name ?? '—',
+      creditorName: accountsById.get(row.creditor_account_id)?.name ?? '—',
+      obligationName:
+        obligations.find((o) => o.obligation.id === row.obligation_id)?.obligation.name ?? null,
+      note: row.note,
+      createdAt: row.created_at,
+    })),
+  }
+}
+
+/** التسويات المعلّقة وحدها — المغلقة تاريخٌ لا عملٌ مطلوب. */
+export async function loadOpenSettlements({ db }: Connection): Promise<AccountSettlement[]> {
+  const { data, error } = await db
+    .from('account_settlements')
+    .select('*')
+    .is('settled_at', null)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as AccountSettlement[]
+}
+
+/** مجموع ما خصّصته الصناديق على كل حساب — مفتاحه معرّف الحساب. */
+export function reservedByAccount(obligations: readonly ObligationView[]): Map<string, number> {
+  const reserved = new Map<string, number>()
+  for (const item of obligations) {
+    const accountId = item.obligation.account_id
+    if (!accountId) continue
+    // الصندوق السالب لا ينقص التخصيص — الشرح في src/lib/accounts/calc.ts.
+    const balance = Math.max(0, Number(item.balance?.my_fund_balance ?? 0))
+    reserved.set(accountId, (reserved.get(accountId) ?? 0) + balance)
+  }
+  return reserved
+}
+
 /* ── الثروة ────────────────────────────────────────────────── */
 
   /*
@@ -549,6 +724,8 @@ const DEFAULT_RETURN = 7
 
 export interface WealthPicture {
   net: NetWorthResult
+  /** الحسابات ومظاريفها — نفس الأرقام التي تردّها sanawi_list_accounts. */
+  accounts: AccountsPicture
   freedom: FreedomResult
   /** مدخلات الحرية كما حُسبت — ليعيد المستدعي استعمالها بلا أن يبنيها ناقصة. */
   freedomInput: FreedomInput
@@ -583,11 +760,12 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
   // ثلاثة شهورٍ مكتملة خلف الجاري — نفس نافذة الشاشة بالضبط.
   const completedKeys = [1, 2, 3].map((back) => monthsBack(back))
 
-  const [assets, month, profile, details, ...completed] = await Promise.all([
+  const [assets, month, profile, details, accountsPicture, ...completed] = await Promise.all([
     loadAssets(connection),
     loadMonth(connection),
     loadProfile(connection),
     loadCommitmentDetails(connection),
+    loadAccountsPicture(connection),
     ...completedKeys.map((key) => loadMonthExpenses(connection, key)),
   ])
 
@@ -652,7 +830,22 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
       annualReturnPercent: Number(a.annual_return_percent),
       updatedAt: a.updated_at,
     })),
-    restrictedFunds: month.obligations.map((o) => Number(o.balance?.my_fund_balance ?? 0)),
+    /*
+     * النقد من الحسابات وحدها، والصناديق تخصيصاتٌ عليها.
+     *
+     * `isLinked` هي كل الفرق: الصندوق المربوط مالُه معدودٌ في رصيد حسابه
+     * فلا يُجمع ثانيةً، وغير المربوط يبقى ملكاً كما كان قبل الحسابات لئلّا
+     * يهبط الرقم كذباً. الشرح كاملاً في src/lib/wealth/networth.ts.
+     */
+    accounts: accountsPicture.accounts.map((a) => ({
+      name: a.name,
+      balance: a.balance,
+      reserved: a.reserved,
+    })),
+    restrictedFunds: month.obligations.map((o) => ({
+      amount: Number(o.balance?.my_fund_balance ?? 0),
+      isLinked: o.obligation.account_id !== null,
+    })),
     debts: live.map(({ row, view }) => ({
       name: row.name,
       monthlyAmount: view.myAmount,
@@ -674,6 +867,7 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
 
   return {
     net,
+    accounts: accountsPicture,
     freedom,
     freedomInput,
     assets,

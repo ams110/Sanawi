@@ -54,6 +54,51 @@ export type Asset = {
   created_at: string
 }
 
+/** الجاري يُصرف منه، والادخار يُجمَّع فيه — وأيّ تصنيفٍ أدقّ لا يغيّر رقماً. */
+export type AccountKind = 'checking' | 'savings'
+
+export type Account = {
+  id: string
+  user_id: string
+  name: string
+  kind: AccountKind
+  /** الرصيد الفعلي كما في كشف البنك — يُدخَل يدوياً. */
+  balance: number
+  /** متى أُدخل الرصيد — رصيدٌ قديم يجعل «غير مخصّص» يكذب بثقة. */
+  balance_updated_at: string
+  /** فارغ = نشط. لا حذف: التحويلات تشير إليه. */
+  archived_at: string | null
+  created_at: string
+}
+
+export type AccountTransfer = {
+  id: string
+  user_id: string
+  from_account_id: string
+  to_account_id: string
+  amount: number
+  transferred_at: string
+  note: string | null
+  created_at: string
+}
+
+/** دفعةٌ خرجت من حسابٍ غير حساب صندوقها — تُعلَّم ولا تُرفض. */
+export type AccountSettlement = {
+  id: string
+  user_id: string
+  /** الحساب الذي تحرّر ماله — حساب الصندوق. */
+  debtor_account_id: string
+  /** الحساب الذي خرج منه الدفع فعلاً. */
+  creditor_account_id: string
+  amount: number
+  obligation_id: string | null
+  note: string | null
+  /** فارغ = معلّقة. */
+  settled_at: string | null
+  settled_by_transfer_id: string | null
+  created_at: string
+}
+
 export type NetWorthSnapshot = {
   id: string
   user_id: string
@@ -79,6 +124,8 @@ export type Obligation = {
   id: string
   user_id: string
   group_id: string | null
+  /** الحساب الذي يحتفظ بصندوق هذا الالتزام — فارغ = صندوق غير مربوط. */
+  account_id: string | null
   name: string
   category: string | null
   total_amount: number
@@ -116,6 +163,8 @@ export type FundDeposit = {
   partner_id: string | null
   amount: number
   deposit_date: string
+  /** الحساب الذي دخله المبلغ فعلاً. */
+  account_id: string | null
   note: string | null
   created_at: string
 }
@@ -127,6 +176,8 @@ export type ObligationPayment = {
   amount_paid: number
   paid_date: string
   next_due_date_after: string
+  /** الحساب الذي خرج منه الدفع — إن خالف حساب الصندوق نشأت تسوية معلّقة. */
+  paid_from_account_id: string | null
   created_at: string
 }
 
@@ -159,6 +210,8 @@ export type FixedCommitment = {
   /** الفائدة السنوية — صفر للفاتورة، وغير صفر للقرض؛ عليها يُرتَّب السداد. */
   annual_interest_percent: number
   my_share_percent: number
+  /** حساب الدفع الافتراضي لهذا البند. */
+  account_id: string | null
   is_active: boolean
   created_at: string
 }
@@ -219,6 +272,8 @@ export type Expense = {
   note: string | null
   created_at: string
   method_id: string | null
+  /** الحساب الذي خرج منه المصروف. */
+  account_id: string | null
 }
 
 export type IncomeEntry = {
@@ -340,6 +395,9 @@ export type Database = {
       bill_payments: Table<BillPayment>
       assets: Table<Asset>
       net_worth_snapshots: Table<NetWorthSnapshot>
+      accounts: Table<Account>
+      account_transfers: Table<AccountTransfer>
+      account_settlements: Table<AccountSettlement>
     }
     Views: {
       obligation_balances: View<ObligationBalance>

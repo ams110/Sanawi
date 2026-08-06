@@ -6,9 +6,14 @@ import { differenceInCalendarMonths } from 'date-fns'
  * كل ما بناه التطبيق حتى الآن يعرف ما يخرج من الجيب. هذا الملف يعرف ما بقي
  * فيه. والصعب هنا ليس الجمع والطرح — بل التعاريف، ولذلك يدافع الملف عنها:
  *
- * • أرصدة صناديق الالتزامات أصولٌ لا شكّ فيها. المال موجودٌ فعلاً، اقتطعه
- *   صاحبه من دخله ولم ينفقه؛ وكونه محجوزاً لبندٍ بعينه يقيّد صرفه ولا ينفي
- *   ملكيّته. نسمّيه «مقيّداً» ونعدّه في الملك، ولا نخلطه بالسائل.
+ * • **المال يعيش في الحسابات، والصناديق مظاريف فوقه لا بجانبه.** صندوق
+ *   الالتزام ليس مالاً — هو تخصيصٌ على مالٍ موجودٍ في حساب. وجمعُه على رصيد
+ *   الحساب يعدّ نفس الشيكل مرّتين ويخرج بضعف الثروة الحقيقية. فمصدر النقد
+ *   الوحيد هو أرصدة الحسابات، والصناديق تُعرَض تخصيصاتٍ ولا تُجمع أبداً.
+ *
+ * • ويبقى استثناءٌ واحد انتقالي: صندوقٌ غير مربوطٍ بحساب. ماله موجودٌ في
+ *   مكانٍ ما لم يقله صاحبه، وإسقاطه يهبط بصافي الثروة كذباً. فيُحتسب ملكاً
+ *   كما كان قبل الحسابات، ويخرج معه تحذيرٌ صريح: اربطه ليصحّ الحساب.
  *
  * • ما لم يُجمع بعدُ من الالتزام ليس ديناً. هو مصروفٌ مستقبليّ: لم يقترضه
  *   أحد ولا يطالب به أحد اليوم. لو عددناه ديناً لظهر كل مستخدمٍ مُعسِراً
@@ -45,10 +50,34 @@ export interface DebtInput {
   paymentsLeft: number
 }
 
+/** حسابٌ بنكي — الرصيد الفعلي، وكم منه مخصَّصٌ لصناديق مربوطة به. */
+export interface CashAccountInput {
+  name: string
+  balance: number
+  /** مجموع أرصدة الصناديق المربوطة بهذا الحساب. */
+  reserved?: number
+}
+
+/**
+ * رصيد صندوق التزام.
+ *
+ * رقمٌ مجرّد = صندوقٌ غير مربوط بحساب، فيُحتسب ملكاً (الحالة الانتقالية).
+ * والشكل الكامل يقول صراحةً هل هو مربوط: المربوط ماله معدودٌ أصلاً في رصيد
+ * حسابه، فعدُّه ثانيةً يضاعف نفس الشيكل.
+ */
+export type RestrictedFundInput = number | { amount: number; isLinked: boolean }
+
 export interface NetWorthInput {
   assets: readonly AssetInput[]
+  /**
+   * الحسابات البنكية — مصدر النقد الوحيد.
+   *
+   * غيابها يعني مستخدماً لم يسجّل حساباً بعد، وعندها تبقى الصناديق غير
+   * المربوطة هي كل ما يُعرف عن نقده.
+   */
+  accounts?: readonly CashAccountInput[]
   /** أرصدة صناديق الالتزامات — مالي أنا، محجوزٌ لبندٍ بعينه. */
-  restrictedFunds: readonly number[]
+  restrictedFunds: readonly RestrictedFundInput[]
   debts: readonly DebtInput[]
   /** المصروف الشهري الأساسي — عليه يُقاس صندوق الطوارئ. */
   monthlyEssentials: number
@@ -89,11 +118,34 @@ export interface StaleAsset {
   monthsSinceUpdate: number
 }
 
+export interface AccountLine {
+  name: string
+  balance: number
+  reserved: number
+  /** الرصيد ناقص المخصَّص. سالب = وعدٌ بمالٍ ليس في البنك. */
+  available: number
+  shortfall: boolean
+}
+
 export interface NetWorthResult {
   assetsTotal: number
   liquidTotal: number
   restrictedTotal: number
-  /** كل ما أملك: الأصول المسجّلة + صناديق الالتزامات. */
+  /** مجموع أرصدة الحسابات — النقد كما هو في البنك، مرّةً واحدة. */
+  accountsTotal: number
+  accountsReserved: number
+  accountsAvailable: number
+  /** توزيع النقد على الحسابات، مرتّباً تنازلياً. */
+  accounts: AccountLine[]
+  /**
+   * صناديق بلا حساب — تُحتسب ملكاً بالحالة الانتقالية.
+   *
+   * وجودها يعني أن الرقم أعلاه مبنيّ على تخمينٍ لمكان المال، ولذلك يخرج
+   * معه `hasUnlinkedFunds` ليُقال صراحةً لا ليُستنتج.
+   */
+  unlinkedRestrictedTotal: number
+  hasUnlinkedFunds: boolean
+  /** كل ما أملك: الأصول المسجّلة + أرصدة الحسابات + الصناديق غير المربوطة. */
   ownedTotal: number
   debtsTotal: number
   netWorth: number
@@ -197,7 +249,48 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
     }))
     .sort((a, b) => b.total - a.total)
 
-  const restrictedTotal = input.restrictedFunds.reduce((sum, v) => sum + atLeastZero(v), 0)
+  /*
+   * الحسابات: مصدر النقد الوحيد.
+   *
+   * الرصيد لا يُقصّ عند الصفر — حسابٌ مكشوف حقيقةٌ تحدث، وقصُّه يخفي أسوأ ما
+   * يمكن أن يكون فيه صاحبه. أمّا المخصَّص فيُقصّ: تخصيصٌ سالب يرفع «المتاح»
+   * فوق رصيد البنك.
+   */
+  const accountsRaw = input.accounts ?? []
+  const accountsTotal = accountsRaw.reduce((sum, a) => sum + finiteOr(a.balance, 0), 0)
+  const accountsReserved = accountsRaw.reduce((sum, a) => sum + atLeastZero(a.reserved ?? 0), 0)
+
+  const accounts: AccountLine[] = accountsRaw
+    .map((a) => {
+      const balance = finiteOr(a.balance, 0)
+      const reserved = atLeastZero(a.reserved ?? 0)
+      const rounded = round2(balance - reserved)
+      const available = rounded === 0 ? 0 : rounded
+      return {
+        name: a.name,
+        balance: round2(balance),
+        reserved: round2(reserved),
+        available,
+        shortfall: available < 0,
+      }
+    })
+    .sort((a, b) => b.balance - a.balance)
+
+  /*
+   * الصندوق المربوط لا يُجمع، وغير المربوط يُجمع.
+   *
+   * هذا هو الإصلاح كلّه في سطرين: مالُ الصندوق المربوط معدودٌ في رصيد حسابه،
+   * فجمعُه ثانيةً يضاعف نفس الشيكل — وهو العطل الذي كان يُخرج ثروةً ضعف
+   * الحقيقة. وغير المربوط لا يعرف التطبيق أين هو، فيبقى على السلوك القديم
+   * لئلّا يهبط الرقم كذباً، ويُقال ذلك صراحةً.
+   */
+  let restrictedTotal = 0
+  let unlinkedRestrictedTotal = 0
+  for (const fund of input.restrictedFunds) {
+    const amount = atLeastZero(typeof fund === 'number' ? fund : fund.amount)
+    restrictedTotal += amount
+    if (typeof fund === 'number' || !fund.isLinked) unlinkedRestrictedTotal += amount
+  }
 
   // الجمع خام والتقريب عند الحدّ — هنا كما في الأصول. جمعُ `debtBalance`
   // يقرّب كل دَينٍ وحده، فيجتمع تقريبان على قرشٍ لا وجود له، ويصير مجموع
@@ -207,7 +300,7 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
     0,
   )
 
-  const ownedTotal = assetsTotal + restrictedTotal
+  const ownedTotal = assetsTotal + accountsTotal + unlinkedRestrictedTotal
 
   /**
    * التقريب قبل الحكم لا بعده.
@@ -225,8 +318,15 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
 
   return {
     assetsTotal: round2(assetsTotal),
-    liquidTotal: round2(liquidTotal),
+    // النقد في الحساب سائلٌ بحكم تعريفه — هو ما يُسحب من الصرّاف اليوم.
+    liquidTotal: round2(liquidTotal + accountsTotal),
     restrictedTotal: round2(restrictedTotal),
+    accountsTotal: round2(accountsTotal),
+    accountsReserved: round2(accountsReserved),
+    accountsAvailable: round2(accountsTotal - accountsReserved),
+    accounts,
+    unlinkedRestrictedTotal: round2(unlinkedRestrictedTotal),
+    hasUnlinkedFunds: unlinkedRestrictedTotal > 0,
     ownedTotal: round2(ownedTotal),
     debtsTotal: round2(debtsTotal),
     // لا يُقصّ عند الصفر: صافي ثروةٍ سالب حقيقةٌ جاء التطبيق ليريها.

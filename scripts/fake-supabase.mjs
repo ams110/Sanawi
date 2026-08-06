@@ -96,6 +96,9 @@ function seed() {
     income_entries: [],
     assets: [],
     net_worth_snapshots: [],
+    accounts: [],
+    account_transfers: [],
+    account_settlements: [],
     commitment_partner_shares: [],
     commitment_templates: [
       {
@@ -277,10 +280,28 @@ function applyFilters(rows, params) {
   for (const [key, raw] of params) {
     if (['select', 'order', 'limit', 'offset', 'on_conflict'].includes(key)) continue
 
-    const match = /^(eq|gte|lte|gt|lt|neq)\.(.*)$/s.exec(raw)
+    /*
+     * ‏`is` و`in` ليسا زينة.
+     *
+     * ‏`archived_at is null` لا يُكتب `eq.null`: في Postgres `= NULL` لا يطابق
+     * شيئاً أبداً، فالمرشّح الخطأ يردّ قائمةً فارغة بدل الحسابات كلها — ويمرّ
+     * صامتاً. و`in` يستعمله إغلاق التسويات بنداءٍ واحد.
+     */
+    const match = /^(eq|gte|lte|gt|lt|neq|is|in)\.(.*)$/s.exec(raw)
     if (!match) throw new Error(`مرشّح غير مدعوم في الفحص: ${key}=${raw}`)
 
     const [, op, value] = match
+
+    if (op === 'in') {
+      const wanted = new Set(
+        value
+          .replace(/^\(|\)$/g, '')
+          .split(',')
+          .map((v) => v.replace(/^"|"$/g, '')),
+      )
+      result = result.filter((row) => wanted.has(String(row[key])))
+      continue
+    }
     const parse = (v) => (v === 'null' ? null : v === 'true' ? true : v === 'false' ? false : v)
     const target = parse(value)
 
@@ -290,6 +311,9 @@ function applyFilters(rows, params) {
       const a = actual === null || actual === undefined ? null : actual
       const b = target
       switch (op) {
+        // ‏`is` تقارن بالهوية لا بالنصّ: null هي null وليست السلسلة "null".
+        case 'is':
+          return b === null ? a === null : a === b
         case 'eq':
           return typeof b === 'boolean' ? Boolean(a) === b : String(a) === String(b)
         case 'neq':
@@ -505,7 +529,19 @@ export async function startFakeSupabase() {
         const rows = db[table]
         if (!rows) return send(404, { message: `جدول غير معروف في الفحص: ${table}` })
         const targets = applyFilters(scoped(rows), url.searchParams)
-        for (const row of targets) Object.assign(row, body)
+        for (const row of targets) {
+          /*
+           * مُشغِّل `accounts_touch_balance` يُحاكى هنا.
+           *
+           * القاعدة تضبط `balance_updated_at` عند كل تغيير رصيد، والخادم يعتمد
+           * على ذلك ولا يضبطه بنفسه. فقاعدةٌ مزيّفة بلا المُشغِّل تجعل فحص
+           * «الرصيد صار قديماً» يقيس تاريخ الإنشاء لا تاريخ الرصيد.
+           */
+          if (table === 'accounts' && body?.balance !== undefined && body.balance !== row.balance) {
+            row.balance_updated_at = new Date().toISOString()
+          }
+          Object.assign(row, body)
+        }
         return respond(targets)
       }
 
@@ -549,11 +585,20 @@ export async function startFakeSupabase() {
 function defaultsFor(table) {
   switch (table) {
     case 'obligations':
-      return { is_active: true, notes: null, category: null, group_id: null, recurrence_months: 12 }
+      return {
+        is_active: true,
+        notes: null,
+        category: null,
+        group_id: null,
+        account_id: null,
+        recurrence_months: 12,
+      }
     case 'fund_deposits':
-      return { partner_id: null, note: null, deposit_date: today() }
+      return { partner_id: null, note: null, account_id: null, deposit_date: today() }
+    case 'obligation_payments':
+      return { paid_from_account_id: null }
     case 'expenses':
-      return { group_id: null, category: null, note: null, spent_at: today() }
+      return { group_id: null, category: null, account_id: null, note: null, spent_at: today() }
     case 'bill_payments':
       return { paid_at: null, note: null }
     case 'income_sources':
@@ -568,9 +613,21 @@ function defaultsFor(table) {
         my_share_percent: 100,
         icon: null,
         default_method_id: null,
+        account_id: null,
       }
     case 'income_entries':
       return { note: null, source_id: null, received_at: today() }
+    case 'accounts':
+      return {
+        kind: 'checking',
+        balance: 0,
+        balance_updated_at: new Date().toISOString(),
+        archived_at: null,
+      }
+    case 'account_transfers':
+      return { note: null, transferred_at: today() }
+    case 'account_settlements':
+      return { note: null, obligation_id: null, settled_at: null, settled_by_transfer_id: null }
     default:
       return {}
   }

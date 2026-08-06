@@ -27,6 +27,7 @@ import {
   calendarFrom,
   findGroup,
   findObligation,
+  loadAccountsPicture,
   loadExpensesFor,
   loadGroups,
   loadMonth,
@@ -48,11 +49,13 @@ import {
   recurrenceLabel,
 } from '../format.js'
 import {
+  accountOut,
   billRowOut,
   calendarMonthOut,
   obligationOut,
   partnerSettlementOut,
   payoffPlanOut,
+  toAccountOut,
   toBillRowOut,
   toCalendarMonthOut,
   toObligationOut,
@@ -84,6 +87,8 @@ function obligationLine(item: ObligationView, currency: string): string {
     `  القسط: ${money(calc.monthlyInstallment, currency)}/شهر · ` +
     `الصندوق: ${money(Number(item.balance?.my_fund_balance ?? 0), currency)} من ${money(calc.myTotal, currency)} ` +
     `(${Math.round(calc.progress * 100)}٪)` +
+    // مكان الصندوق جزءٌ من حاله: صندوقٌ بلا حساب مالٌ لا يُعرف أين هو.
+    `\n  الحساب: ${item.account ? item.account.name : 'غير مربوط ⚠️'}` +
     (flags.length > 0 ? `\n  ${flags.join(' · ')}` : '')
   )
 }
@@ -276,7 +281,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   - include_archived (boolean): يشمل الملغى/المكتمل، افتراضياً false
   - limit (number): 1..100، افتراضياً 50
 
-المخرجات: count و obligations[] وفيه لكل التزام id و name و monthly_installment و my_fund_balance و remaining و status و is_overdue و is_bridge وغيرها.
+المخرجات: count و obligations[] وفيه لكل التزام id و name و monthly_installment و my_fund_balance و remaining و status و is_overdue و is_bridge و account_name وغيرها.
+
+و account_name فارغاً يعني صندوقاً غير مربوط بحساب: ماله يُحتسب ملكاً لكنه لا يدخل حساب «غير المخصّص» لأي حساب. اقترح ربطه بـ sanawi_update_obligation.
 
 استعمل sanawi_get_obligation حين تريد الإيداعات وتسوية الشركاء لالتزامٍ واحد.`,
       inputSchema: {
@@ -1073,6 +1080,132 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
     }),
   )
 
+  /* ── الحسابات ───────────────────────────────────────────── */
+
+  server.registerTool(
+    'sanawi_list_accounts',
+    {
+      title: 'الحسابات ومظاريفها',
+      description: `كل حساب برصيده الفعلي، وكم منه مخصَّص لصناديق الالتزامات، وكم بقي **غير مخصّص**.
+
+هذه لوحة السؤال «قدّيش معي فعلاً؟». والنموذج المعروض هنا هو نموذج التطبيق كلّه:
+
+    حساب الالتزامات        الرصيد الفعلي ₪2,000
+      ├─ مظروف: تأمين السيارة        ₪2,000
+      └─ غير مخصّص                       ₪0
+
+المظروف يوضع **فوق** المال لا بجانبه، فلا يُجمع الاثنان.
+
+**available (غير المخصّص) هو أهمّ رقم هنا.** موجباً أو صفراً فالوضع مضبوط،
+وسالباً (shortfall) فالتطبيق يَعِد بمالٍ ليس في البنك — قُلها صراحةً ولا تخفّفها.
+
+وانتبه لحقلين آخرين:
+  - balance_is_stale: مضى على الرصيد أكثر من أسبوعين. الرصيد يُدخَل يدوياً، فالقديم منه يجعل كل ما تحته تخميناً — اطلب تحديثه.
+  - unlinked: صناديق بلا حساب. مالها خارج هذه اللوحة كلّها، واقتراح ربطها يصحّح الأرقام.
+
+والتسويات المعلّقة (settlements) دفعاتٌ خرجت من حسابٍ غير حساب صندوقها: كلٌّ منها
+تحويلٌ لم يقع بعد، ويُغلقها sanawi_transfer_between_accounts.
+
+المخرجات: accounts[] ولكلٍّ balance و reserved و available و shortfall و envelopes[]، ومعها المجاميع، والصناديق غير المربوطة، والتسويات المعلّقة.`,
+      inputSchema: {},
+      outputSchema: {
+        currency: z.string(),
+        accounts: z.array(z.object(accountOut)),
+        balance_total: z.number(),
+        reserved_total: z.number(),
+        available_total: z.number(),
+        has_shortfall: z.boolean(),
+        unlinked_funds: z.array(z.object({ name: z.string(), balance: z.number() })),
+        unlinked_total: z.number(),
+        settlements: z.array(
+          z.object({
+            id: z.string(),
+            amount: z.number(),
+            debtor: z.string(),
+            creditor: z.string(),
+            obligation: z.string().nullable(),
+          }),
+        ),
+      },
+      annotations: READ_ONLY,
+    },
+    guard(async () => {
+      const connection = await connect()
+      const currency = connection.currency
+      const picture = await loadAccountsPicture(connection)
+      const { summary } = picture
+
+      const structured = {
+        currency,
+        accounts: picture.accounts.map(toAccountOut),
+        balance_total: summary.balanceTotal,
+        reserved_total: summary.reservedTotal,
+        available_total: summary.availableTotal,
+        has_shortfall: summary.hasShortfall,
+        unlinked_funds: picture.unlinked,
+        unlinked_total: picture.unlinkedTotal,
+        settlements: picture.settlements.map((s) => ({
+          id: s.id,
+          amount: s.amount,
+          debtor: s.debtorName,
+          creditor: s.creditorName,
+          obligation: s.obligationName,
+        })),
+      }
+
+      if (picture.accounts.length === 0) {
+        return ok(
+          'لا حسابات مسجّلة بعد. سجّل حساباتك بـ sanawi_save_account — بدونها لا يعرف التطبيق أين يعيش مالك،' +
+            ' ولا يستطيع أن يقول لك كم منه غير مخصّص.' +
+            (picture.unlinkedTotal > 0
+              ? `\nوعندك ${money(picture.unlinkedTotal, currency)} في صناديق التزامات بلا حساب.`
+              : ''),
+          structured,
+        )
+      }
+
+      const text = [
+        `## الحسابات — ${money(summary.balanceTotal, currency)}`,
+        '',
+        ...picture.accounts.flatMap((account) => [
+          `**${account.name}** — الرصيد الفعلي ${money(account.balance, currency)}` +
+            (account.balanceIsStale
+              ? ` ⚠️ آخر تحديث قبل ${account.daysSinceBalanceUpdate} يوماً`
+              : ''),
+          ...account.envelopes.map(
+            (envelope) => `  ├─ مظروف: ${envelope.name} — ${money(envelope.balance, currency)}`,
+          ),
+          `  └─ **غير مخصّص: ${money(account.available, currency)}**` +
+            (account.shortfall ? ' ⚠️ ناقص' : ''),
+        ]),
+        '',
+        `المجموع: ${money(summary.balanceTotal, currency)} · مخصَّص ${money(summary.reservedTotal, currency)} · ` +
+          `**غير مخصّص ${money(summary.availableTotal, currency)}**`,
+        summary.hasShortfall
+          ? '\n⚠️ صناديقك تعِد بمالٍ أكثر ممّا في حساباتها. حوِّل بين حساباتك أو راجع صناديقك.'
+          : null,
+        picture.unlinked.length > 0
+          ? `\n⚠️ صناديق بلا حساب (${money(picture.unlinkedTotal, currency)}): ` +
+            `${picture.unlinked.map((u) => u.name).join('، ')}. اربطها بـ sanawi_update_obligation.`
+          : null,
+        picture.settlements.length > 0
+          ? '\n### تسويات معلّقة\n' +
+            picture.settlements
+              .map(
+                (s) =>
+                  `- ${s.debtorName} مدين لـ ${s.creditorName} بـ ${money(s.amount, currency)}` +
+                  (s.obligationName ? ` (دفع ${s.obligationName})` : ''),
+              )
+              .join('\n')
+          : null,
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
+
+      return ok(text, structured)
+    }),
+  )
+
   server.registerTool(
     'sanawi_net_worth',
     {
@@ -1080,13 +1213,17 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       description: `كل ما يملكه المستخدم ناقص كل ما عليه، وحالة صندوق الطوارئ.
 
 التعريفات المستعملة — اقتبسها كما هي ولا تعِد تفسيرها:
-  - أرصدة صناديق الالتزامات تُحتسب ملكاً (مالٌ حقيقيّ جُمع ولم يُنفق بعد).
+  - **مصدر النقد الوحيد أرصدة الحسابات.** صندوق الالتزام ليس مالاً — هو تخصيصٌ
+    على مالٍ موجود في حساب، فلا يُجمع على رصيد حسابه أبداً: الشيكل يُعدّ مرّة.
+  - ويبقى استثناءٌ واحد: صندوقٌ **غير مربوط** بحساب. التطبيق لا يعرف أين ماله،
+    فيُحتسب ملكاً كما كان قبل الحسابات — و has_unlinked_funds يقول ذلك صراحةً.
+    حين تراها صحيحة، اقترح ربط الصناديق ليصحّ الرقم.
   - ما تبقّى من التزامٍ ولم يُموَّل ليس ديناً: هو مصروفٌ قادم لا اقتراض.
   - الأقساط التي لها تاريخ نهاية ديونٌ؛ الفواتير الدائمة مصروفٌ لا دين.
 
 استعمله لأسئلة «كم صار معي؟» و«هل ثروتي بتزيد؟» و«صندوق الطوارئ كافي؟».
 
-المخرجات: صافي الثروة وتفصيله، وتوزيع الأصول، وصندوق الطوارئ، وأصولٌ صارت قيمتها قديمة.`,
+المخرجات: صافي الثروة وتفصيله، وتوزيع النقد على الحسابات، وتوزيع الأصول، وصندوق الطوارئ، وأصولٌ صارت قيمتها قديمة.`,
       inputSchema: {},
       outputSchema: {
         currency: z.string(),
@@ -1095,6 +1232,20 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         assets_total: z.number(),
         restricted_total: z.number(),
         liquid_total: z.number(),
+        accounts_total: z.number(),
+        accounts_reserved: z.number(),
+        accounts_available: z.number(),
+        accounts: z.array(
+          z.object({
+            name: z.string(),
+            balance: z.number(),
+            reserved: z.number(),
+            available: z.number(),
+            shortfall: z.boolean(),
+          }),
+        ),
+        unlinked_restricted_total: z.number(),
+        has_unlinked_funds: z.boolean(),
         debts_total: z.number(),
         is_underwater: z.boolean(),
         weighted_return_percent: z.number(),
@@ -1124,6 +1275,12 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         assets_total: net.assetsTotal,
         restricted_total: net.restrictedTotal,
         liquid_total: net.liquidTotal,
+        accounts_total: net.accountsTotal,
+        accounts_reserved: net.accountsReserved,
+        accounts_available: net.accountsAvailable,
+        accounts: net.accounts,
+        unlinked_restricted_total: net.unlinkedRestrictedTotal,
+        has_unlinked_funds: net.hasUnlinkedFunds,
         debts_total: net.debtsTotal,
         is_underwater: net.isUnderwater,
         weighted_return_percent: net.weightedReturnPercent,
@@ -1150,9 +1307,36 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         `## صافي الثروة: ${money(net.netWorth, currency)}`,
         net.isUnderwater ? '⚠️ الديون أكبر من الملك.' : null,
         '',
-        `- ما يملكه: ${money(net.ownedTotal, currency)} — منها ${money(net.assetsTotal, currency)} أصولاً مسجّلة و${money(net.restrictedTotal, currency)} في صناديق الالتزامات`,
+        `- ما يملكه: ${money(net.ownedTotal, currency)} — منها ${money(net.accountsTotal, currency)} في الحسابات ` +
+          `و${money(net.assetsTotal, currency)} أصولاً مسجّلة`,
         `- منها سائل: ${money(net.liquidTotal, currency)}`,
+        /*
+         * الصناديق تُعرَض ولا تُجمع.
+         *
+         * هذا هو السطر الذي كان يضاعف الثروة: كان يقول «ومنها كذا في صناديق
+         * الالتزامات» وهي نفسها المعدودة في رصيد الحساب. صار يُعرض تخصيصاً
+         * على النقد لا زيادةً عليه.
+         */
+        net.restrictedTotal > 0
+          ? `- مخصَّص لصناديق الالتزامات: ${money(net.restrictedTotal, currency)} — تخصيصٌ على النقد أعلاه لا زيادةٌ عليه`
+          : null,
         `- الديون: ${money(net.debtsTotal, currency)}`,
+        ...(net.accounts.length > 0
+          ? [
+              '',
+              '### الحسابات',
+              ...net.accounts.map(
+                (a) =>
+                  `- ${a.name}: ${money(a.balance, currency)} · مخصَّص ${money(a.reserved, currency)} · ` +
+                  `**غير مخصّص ${money(a.available, currency)}**${a.shortfall ? ' ⚠️ ناقص' : ''}`,
+              ),
+            ]
+          : []),
+        net.hasUnlinkedFunds
+          ? `\n⚠️ ${money(net.unlinkedRestrictedTotal, currency)} في صناديق غير مربوطة بحساب — ` +
+            'حُسبت ملكاً على أنها موجودة في مكانٍ ما. اربطها بحساباتها ليصحّ الرقم ' +
+            '(sanawi_update_obligation مع account).'
+          : null,
         '',
         `### صندوق الطوارئ`,
         net.emergencyFund.isFunded
