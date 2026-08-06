@@ -62,6 +62,33 @@ step('بند عادي يصير قسطاً', toLoan.row?.ends_on === endsOn, ends
 const backToPlain = await patchAndRead('fixed_commitments', bill.id, { ends_on: null })
 step('والقسط يرجع بنداً بلا نهاية', backToPlain.row?.ends_on === null)
 
+// تاريخ البدء: يُضبط، ثم يُمسح — و`null` قيمةٌ مقصودة لا غياب.
+//
+// كان هذا المسار غير قابل للاختبار أصلاً لأن أي شاشة لم تكن تكتب العمود،
+// فبقيت فروع `startsOn` في طبقة البيانات كوداً ميتاً لا يمرّ به أحد.
+const start = new Date()
+start.setMonth(start.getMonth() + 2)
+const startsOn = start.toISOString().slice(0, 10)
+const toDeferred = await patchAndRead('fixed_commitments', bill.id, { starts_on: startsOn })
+step('بندٌ يكتسب تاريخ بدء', toDeferred.row?.starts_on === startsOn, startsOn)
+
+// والعرض يتبع الجدول: has_started تُشتقّ لا تُخزَّن.
+const deferredView = rowsOf(
+  await supabase.from('commitment_details').select('*').eq('commitment_id', bill.id),
+  'قراءة العرض بعد تأجيل البدء',
+  step,
+)
+step('العرض يعلن أنه لم يبدأ', deferredView?.[0]?.has_started === false, `${deferredView?.[0]?.has_started}`)
+
+const startCleared = await patchAndRead('fixed_commitments', bill.id, { starts_on: null })
+step('ومسحُ التاريخ يعيده مبتدئاً', startCleared.row?.starts_on === null)
+const startedView = rowsOf(
+  await supabase.from('commitment_details').select('*').eq('commitment_id', bill.id),
+  'قراءة العرض بعد مسح البدء',
+  step,
+)
+step('والعرض يوافق', startedView?.[0]?.has_started === true, `${startedView?.[0]?.has_started}`)
+
 // القاعدة تحرس الموعد حتى في التعديل لا الإنشاء وحده.
 const badDay = await patchAndRead('fixed_commitments', bill.id, { day_of_month: 99 })
 step('التعديل ليوم 99 مرفوض', Boolean(badDay.error), badDay.error ? 'مرفوض' : 'قُبل!')
@@ -141,6 +168,14 @@ step(
 
 const badFreq = await patchAndRead('income_sources', src.id, { frequency: 'daily' })
 step('تكرار غير مدعوم مرفوض', Boolean(badFreq.error), badFreq.error ? 'مرفوض' : 'قُبل!')
+
+// صفة التغيّر: تُرفع وتُنزَل، ولا يمسّها تعديلٌ جزئي لا يذكرها.
+const toVariable = await patchAndRead('income_sources', src.id, { is_variable: true })
+step('المصدر يصير متغيّراً', toVariable.row?.is_variable === true)
+const renamed = await patchAndRead('income_sources', src.id, { name: 'مصدر متغيّر' })
+step('والتعديل الجزئي لا يمسّ الصفة', renamed.row?.is_variable === true, `${renamed.row?.is_variable}`)
+const backToFixed = await patchAndRead('income_sources', src.id, { is_variable: false })
+step('وتُنزَل عنه', backToFixed.row?.is_variable === false)
 
 // ── تنظيف ───────────────────────────────────────────────────────────────
 await supabase.from('income_entries').delete().eq('id', entry.id)

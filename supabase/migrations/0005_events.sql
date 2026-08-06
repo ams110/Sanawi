@@ -19,7 +19,9 @@ create index if not exists events_name_idx
 alter table public.events enable row level security;
 
 -- الكتابة والقراءة للمستخدم نفسه فقط. لا حذف ولا تعديل: سجلّ لا يُنقّح.
+drop policy if exists "events_insert_own" on public.events;
 create policy "events_insert_own" on public.events
   for insert with check ((select auth.uid()) = user_id);
+drop policy if exists "events_select_own" on public.events;
 create policy "events_select_own" on public.events
   for select using ((select auth.uid()) = user_id);

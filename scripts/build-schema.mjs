@@ -23,10 +23,15 @@ const target = join(root, 'supabase', 'all-in-one.sql')
 const HEADER = `-- ============================================================
 -- سنوي — سكيما قاعدة البيانات كاملة
 -- الصق هذا الملف كله في Supabase → SQL Editor واضغط Run.
--- آمن للتكرار: تشغيله مرتين لا يفقد بياناتك.
--- لا يحتوي أي DELETE ولا TRUNCATE ولا DROP TABLE.
--- فيه drop واحد فقط: drop trigger if exists، يُعاد إنشاؤه فوراً بعده،
--- وهو ضروري لتشغيل الملف أكثر من مرة. لا يمسّ أي صف بيانات.
+--
+-- آمن للتكرار فعلاً لا وعداً: كل جدول \`if not exists\`، وكل عمود
+-- \`add column if not exists\`، وكل سياسة يسبقها \`drop policy if exists\`.
+-- الأخيرة كانت ناقصة: تسعٌ وعشرون سياسة بلا حارس تعني أن تشغيل الملف
+-- مرّةً ثانية يُجهض عند أول \`create policy\` — والترويسة تقول «آمن للتكرار».
+--
+-- لا يحتوي أي DELETE ولا TRUNCATE ولا DROP TABLE، ولا يمسّ أي صف بيانات.
+-- وحذفُ السياسة ثم إعادة إنشائها فوراً لا يفتح ثغرة: RLS تبقى مفعّلة،
+-- وجدولٌ بلا سياسة يُغلق لا ينفتح.
 --
 -- مولَّد: node scripts/build-schema.mjs — لا تعدّله يدوياً، عدّل الهجرة.
 -- ============================================================
@@ -61,6 +66,31 @@ const offending = files.filter((name) =>
 )
 if (offending.length > 0) {
   console.error(`✗ هجرات فيها أمرٌ متلِف: ${offending.join('، ')}`)
+  process.exit(1)
+}
+
+/*
+ * وحارسٌ ثانٍ: كل `create policy` يسبقها `drop policy if exists`.
+ *
+ * ‏Postgres لا يعرف `create policy if not exists`، فسياسةٌ بلا حارس تجعل
+ * الهجرة تُجهض عند إعادة تشغيلها — ويكفي أن ينساها كاتبُ هجرةٍ واحدة ليعود
+ * الملف الموحَّد إلى الكذب. القاعدة تُفحص هنا لا تُترك للذاكرة.
+ */
+const unguarded = []
+for (const name of files) {
+  const lines = readFileSync(join(migrationsDir, name), 'utf8').split('\n')
+  lines.forEach((line, i) => {
+    const match = /^create policy "([^"]+)"/.exec(line)
+    if (!match) return
+    const before = lines[i - 1] ?? ''
+    if (!before.includes(`drop policy if exists "${match[1]}"`)) {
+      unguarded.push(`${name}: ${match[1]}`)
+    }
+  })
+}
+if (unguarded.length > 0) {
+  console.error('✗ سياسات بلا `drop policy if exists` قبلها:')
+  for (const item of unguarded) console.error(`  - ${item}`)
   process.exit(1)
 }
 

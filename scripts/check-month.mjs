@@ -6,6 +6,7 @@
  */
 import { createClient } from '@supabase/supabase-js'
 import { buildMonthPanel, dailyAllowance } from '../src/lib/budget/month.ts'
+import { monthlyIncomeFrom } from '../src/lib/budget/calc.ts'
 import { createReporter, readEnv, requireTables, rowsOf, signInTestAccount } from './lib/checks.mjs'
 
 const env = readEnv(import.meta.url)
@@ -31,6 +32,35 @@ const { data: source, error: srcErr } = await supabase
   .single()
 step('مصدر دخل أسبوعي', !srcErr && Boolean(source?.id), srcErr?.message ?? '')
 
+// 1ب) مصدر متغيّر — الشغل الجانبي الذي لا رقم ثابت له.
+//
+// هذا هو الفرق الذي يعيش من أجله العمود: مصدرٌ يظهر في القائمة ويستقبل
+// دفعات، ولا يدخل «المتوقَّع» بشيء. وبلا العمود كان صاحبه مضطراً لاختراع
+// رقم، فيتضخّم المتوقَّع ويصير «الباقي للصرف» وعداً لا يفي به الشهر.
+const { data: gig, error: gigErr } = await supabase
+  .from('income_sources')
+  .insert({ user_id: userId, name: 'شغل حرّ فحص', amount: 0, is_variable: true })
+  .select()
+  .single()
+step('مصدر متغيّر بلا مبلغ', !gigErr && gig?.is_variable === true, gigErr?.message ?? '')
+
+// المحرّك نفسه الذي تستعمله الشاشة والخادم — لا حساب موازٍ هنا.
+const sources = rowsOf(
+  await supabase.from('income_sources').select('*').eq('is_active', true),
+  'قراءة مصادر الدخل',
+  step,
+)
+if (!sources) finish()
+const expectedFromEngine = monthlyIncomeFrom(
+  sources.map((r) => ({
+    amount: Number(r.amount),
+    frequency: r.frequency,
+    isVariable: Boolean(r.is_variable),
+  })),
+)
+// ‏1000 × 52 ÷ 12 = 4333.33، والمتغيّر يضيف صفراً لا أكثر.
+step('المتغيّر خارج الدخل المتوقَّع', expectedFromEngine === 4333.33, `${expectedFromEngine} ₪`)
+
 // 2) دفعتا دخل وصلتا فعلاً.
 const { data: entries, error: entErr } = await supabase
   .from('income_entries')
@@ -41,6 +71,14 @@ const { data: entries, error: entErr } = await supabase
   .select()
 step('تسجيل دفعتَي دخل', !entErr && entries?.length === 2, entErr?.message ?? '')
 step('دخل بلا مصدر مقبول', entries?.some((e) => e.source_id === null) === true)
+
+// والمتغيّر يدخل «ما وصل» رغم أنه خارج «المتوقَّع» — وهذا كل المقصود منه.
+const { data: gigEntry, error: gigEntErr } = await supabase
+  .from('income_entries')
+  .insert({ user_id: userId, source_id: gig.id, amount: 700, received_at: day(7) })
+  .select()
+  .single()
+step('دفعة من مصدر متغيّر', !gigEntErr && gigEntry?.source_id === gig.id, gigEntErr?.message ?? '')
 
 // 3) القاعدة ترفض دخلاً صفرياً أو سالباً.
 const { error: zeroErr } = await supabase
@@ -62,7 +100,7 @@ const fetched = rowsOf(
 )
 if (!fetched) finish()
 const received = fetched.reduce((s, r) => s + Number(r.amount), 0)
-step('مجموع الدخل الواصل', received === 1500, `${received} ₪`)
+step('مجموع الدخل الواصل', received === 2200, `${received} ₪`)
 
 // 5) اللوحة الموحّدة: الواصل يغلب المقدَّر.
 const expected = 1000 * (52 / 12) // 4333.33
@@ -77,15 +115,24 @@ const panel = buildMonthPanel({
   daysElapsed: 10,
   daysInMonth: 30,
 })
-step('اللوحة تعتمد الواصل لا المقدَّر', panel.incomeIsActual && panel.income === 1500)
+step('اللوحة تعتمد الواصل لا المقدَّر', panel.incomeIsActual && panel.income === 2200)
 step('الفجوة تكشف شهراً أضعف', panel.incomeGap < 0, `${panel.incomeGap} ₪`)
 step('مجموع الملتزَم به', panel.committed === 1400, `${panel.committed} ₪`)
-step('المتبقي = دخل − كل شي', panel.remaining === -500, `${panel.remaining} ₪`)
-step('التجاوز مُعلَن لا مخفي', panel.isOverspent === true)
+// ‏2,200 واصل − (1,400 ملتزَم + 600 مصروف) = 200 فائضاً حتى الآن.
+step('المتبقي = دخل − كل شي', panel.remaining === 200, `${panel.remaining} ₪`)
+step('ولا تجاوز ما دام فائضاً', panel.isOverspent === false)
 
-// 6) الإسقاط: 600 في 10 أيام → 1,800 في 30.
-step('الإسقاط يمدّ الوتيرة', panel.projectedRemaining === -1700, `${panel.projectedRemaining} ₪`)
-step('مصروف اليوم صفر لمن تجاوز', dailyAllowance(panel.remaining, 10, 30) === 0)
+/*
+ * 6) الإسقاط: هنا تكمن قيمة اللوحة.
+ *
+ * الرصيد اليوم موجب (200) والوتيرة تقول إن الشهر سينتهي بعجز: 600 في عشرة
+ * أيام تعني 1,800 في ثلاثين، فيصير 2,200 − 1,400 − 1,800 = −1,000. وهذا
+ * بالضبط ما لا يراه من ينظر إلى رصيده وحده.
+ */
+step('الإسقاط يمدّ الوتيرة', panel.projectedRemaining === -1000, `${panel.projectedRemaining} ₪`)
+step('والتحذير مُعلَن قبل وقوعه', panel.projectedIsOverspent === true)
+// خاصيّة في الدالّة نفسها لا في أرقام هذه التجربة: المتجاوز لا يُمنَح مصروفاً.
+step('مصروف اليوم صفر لمن تجاوز', dailyAllowance(-500, 10, 30) === 0)
 
 // 7) اللوحة بلا دخل مسجّل تقع على المقدَّر.
 const noLog = buildMonthPanel({
@@ -110,7 +157,7 @@ step('لا تسرّب للدخل بلا جلسة', (leaked ?? []).length === 0, 
 // 9) تنظيف.
 await supabase.auth.signInWithPassword(creds)
 await supabase.from('income_entries').delete().eq('user_id', userId)
-await supabase.from('income_sources').delete().eq('id', source.id)
+await supabase.from('income_sources').delete().in('id', [source.id, gig.id])
 step('تنظيف', true)
 
 finish()

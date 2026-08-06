@@ -24,9 +24,18 @@ jobs:
     name: الفحص
     uses: ./.github/workflows/ci.yml
 
+  # السكيما تسبق الكود: النشر لا يبدأ ما لم تكن هجرات المستودع مطبَّقة على
+  # الإنتاج. بدونها كنّا ننشر شيفرةً تسأل عن أعمدة لا وجود لها — وقع ذلك مع
+  # الهجرة 0015 ولم يوقفه شيء.
+  schema:
+    name: بوّابة السكيما
+    needs: ci
+    uses: ./.github/workflows/schema.yml
+    secrets: inherit
+
   pages:
     name: الواجهة
-    needs: ci
+    needs: schema
     uses: ./.github/workflows/pages.yml
     # التدفّق المستدعى لا يرث الأسرار من تلقائه — بدونها يُبنى الموقع بمفاتيح
     # فارغة فيُنشر تطبيقٌ لا يتصل بقاعدته.
@@ -38,6 +47,6 @@ jobs:
 
   mcp:
     name: خادم MCP
-    needs: ci
+    needs: schema
     uses: ./.github/workflows/mcp.yml
     secrets: inherit

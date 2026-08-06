@@ -5,7 +5,7 @@
  * التشغيل: npm run check:commitments
  */
 import { createClient } from '@supabase/supabase-js'
-import { summarizeMonthlyLoad, validateShares } from '../src/lib/commitments/calc.ts'
+import { summarizeMonthlyLoad, validateShares, viewCommitment } from '../src/lib/commitments/calc.ts'
 import { allOf, createReporter, readEnv, requireTables, rowsOf, signInTestAccount } from './lib/checks.mjs'
 
 const env = readEnv(import.meta.url)
@@ -80,6 +80,63 @@ const billDetail = details.find((d) => d.commitment_id === bill?.id)
 step('الدفعات المتبقية للقسط', loanDetail?.payments_left === 4, `${loanDetail?.payments_left}`)
 step('البند المتكرّر بلا عدّاد', billDetail?.payments_left === null, `${billDetail?.payments_left}`)
 
+// 4ب) قسط لم تبدأ دفعاته بعد.
+//
+// الحالة التي وُلد منها `starts_on`: بندٌ يُسجَّل اليوم وأول دفعة له بعد
+// شهرين. بلا العمود كان العرض يعدّ من هذا الشهر فيزيد دفعتين، ويُحمَّل على
+// شهرٍ لا دفعة فيه. هنا نتحقّق من العرض نفسه لا من المحرّك — النسختان
+// تُصانان معاً أو تنحرفان.
+const startMonth = new Date(now.getFullYear(), now.getMonth() + 2, 15)
+const startsOn = startMonth.toISOString().slice(0, 10)
+const { data: deferred, error: defErr } = await supabase
+  .from('fixed_commitments')
+  .insert({
+    user_id: userId,
+    name: 'قسط مؤجَّل فحص',
+    amount: 500,
+    starts_on: startsOn,
+    ends_on: endsOn,
+    my_share_percent: 100,
+  })
+  .select()
+  .single()
+step('قسط بتاريخ بدء', !defErr && deferred?.starts_on === startsOn, defErr?.message ?? startsOn)
+
+const withDeferred = rowsOf(
+  await supabase.from('commitment_details').select('*').eq('commitment_id', deferred?.id ?? ''),
+  'قراءة العرض للمؤجَّل',
+  step,
+)
+const defDetail = withDeferred?.[0]
+// من شهر البدء (+2) إلى شهر النهاية (+3) شاملاً الطرفين = دفعتان.
+step('العرض يعدّ من شهر البدء', defDetail?.payments_left === 2, `${defDetail?.payments_left}`)
+step('والعرض يعلن أنه لم يبدأ', defDetail?.has_started === false, `${defDetail?.has_started}`)
+step('والبند الذي بلا تاريخ بدء يكون بدأ', loanDetail?.has_started === true, `${loanDetail?.has_started}`)
+
+// والمحرّك يوافق العرض على الرقم نفسه — لا نسختان تفترقان.
+const deferredView = viewCommitment({
+  amount: Number(defDetail?.amount ?? 0),
+  startsOn: defDetail?.starts_on,
+  endsOn: defDetail?.ends_on,
+  mySharePercent: Number(defDetail?.my_share_percent ?? 100),
+})
+step(
+  'المحرّك والعرض يتفقان على الدفعات',
+  deferredView.paymentsLeft === defDetail?.payments_left,
+  `${deferredView.paymentsLeft} مقابل ${defDetail?.payments_left}`,
+)
+
+// والحمل الشهري يتخطّاه: شهرٌ قبل أول دفعة لا دفعة فيه.
+const loadWithDeferred = summarizeMonthlyLoad([
+  {
+    amount: Number(defDetail?.amount ?? 0),
+    startsOn: defDetail?.starts_on,
+    endsOn: defDetail?.ends_on,
+    mySharePercent: Number(defDetail?.my_share_percent ?? 100),
+  },
+])
+step('المؤجَّل خارج حمل هذا الشهر', loadWithDeferred.total === 0, `${loadWithDeferred.total} ₪`)
+
 // 5) حصص الشركاء.
 const { data: partner, error: pErr } = await supabase
   .from('obligation_partners')
@@ -119,6 +176,7 @@ const load = summarizeMonthlyLoad(
     .filter((d) => d.commitment_id === bill.id || d.commitment_id === loan.id)
     .map((d) => ({
       amount: Number(d.amount),
+      startsOn: d.starts_on,
       endsOn: d.ends_on,
       mySharePercent: Number(d.my_share_percent),
     })),
@@ -138,7 +196,7 @@ step('لا تسرّب للتفاصيل بلا جلسة', (leakedDetails ?? []).l
 // 9) تنظيف.
 await supabase.auth.signInWithPassword(creds)
 await supabase.from('commitment_partner_shares').delete().eq('user_id', userId)
-await supabase.from('fixed_commitments').delete().in('id', [bill.id, loan.id])
+await supabase.from('fixed_commitments').delete().in('id', [bill.id, loan.id, deferred.id])
 await supabase.from('obligation_partners').delete().eq('id', partner.id)
 step('تنظيف', true)
 

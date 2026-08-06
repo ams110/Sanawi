@@ -36,11 +36,11 @@ export async function addIncome(
 
 export async function addFixedCommitment(
   userId: string,
-  input: Pick<FixedCommitment, 'name' | 'amount'>,
+  input: Pick<FixedCommitment, 'name' | 'amount'> & { starts_on?: string | null },
 ): Promise<FixedCommitment> {
   const { data, error } = await supabase
     .from('fixed_commitments')
-    .insert({ ...input, user_id: userId, is_active: true })
+    .insert({ starts_on: null, ...input, user_id: userId, is_active: true })
     .select()
     .single()
   if (error) throw error
@@ -70,11 +70,12 @@ export async function updateIncomeSource(
 
 export async function updateFixedCommitment(
   id: string,
-  patch: { name?: string; amount?: number },
+  patch: { name?: string; amount?: number; startsOn?: string | null },
 ): Promise<void> {
   const row: Partial<FixedCommitment> = {}
   if (patch.name !== undefined) row.name = patch.name
   if (patch.amount !== undefined) row.amount = patch.amount
+  if (patch.startsOn !== undefined) row.starts_on = patch.startsOn
 
   if (Object.keys(row).length === 0) return
   const { error } = await supabase.from('fixed_commitments').update(row).eq('id', id)

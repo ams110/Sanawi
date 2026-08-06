@@ -1,10 +1,15 @@
 -- ============================================================
 -- سنوي — سكيما قاعدة البيانات كاملة
 -- الصق هذا الملف كله في Supabase → SQL Editor واضغط Run.
--- آمن للتكرار: تشغيله مرتين لا يفقد بياناتك.
--- لا يحتوي أي DELETE ولا TRUNCATE ولا DROP TABLE.
--- فيه drop واحد فقط: drop trigger if exists، يُعاد إنشاؤه فوراً بعده،
--- وهو ضروري لتشغيل الملف أكثر من مرة. لا يمسّ أي صف بيانات.
+--
+-- آمن للتكرار فعلاً لا وعداً: كل جدول `if not exists`، وكل عمود
+-- `add column if not exists`، وكل سياسة يسبقها `drop policy if exists`.
+-- الأخيرة كانت ناقصة: تسعٌ وعشرون سياسة بلا حارس تعني أن تشغيل الملف
+-- مرّةً ثانية يُجهض عند أول `create policy` — والترويسة تقول «آمن للتكرار».
+--
+-- لا يحتوي أي DELETE ولا TRUNCATE ولا DROP TABLE، ولا يمسّ أي صف بيانات.
+-- وحذفُ السياسة ثم إعادة إنشائها فوراً لا يفتح ثغرة: RLS تبقى مفعّلة،
+-- وجدولٌ بلا سياسة يُغلق لا ينفتح.
 --
 -- مولَّد: node scripts/build-schema.mjs — لا تعدّله يدوياً، عدّل الهجرة.
 -- ============================================================
@@ -73,14 +78,18 @@ create index if not exists obligation_groups_user_idx
 alter table public.profiles enable row level security;
 alter table public.obligation_groups enable row level security;
 
+drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles
   for select using ((select auth.uid()) = id);
+drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
   for update using ((select auth.uid()) = id)
   with check ((select auth.uid()) = id);
+drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own" on public.profiles
   for insert with check ((select auth.uid()) = id);
 
+drop policy if exists "groups_all_own" on public.obligation_groups;
 create policy "groups_all_own" on public.obligation_groups
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -180,22 +189,27 @@ alter table public.obligation_partner_shares enable row level security;
 alter table public.fund_deposits enable row level security;
 alter table public.obligation_payments enable row level security;
 
+drop policy if exists "obligations_all_own" on public.obligations;
 create policy "obligations_all_own" on public.obligations
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "partners_all_own" on public.obligation_partners;
 create policy "partners_all_own" on public.obligation_partners
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "partner_shares_all_own" on public.obligation_partner_shares;
 create policy "partner_shares_all_own" on public.obligation_partner_shares
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "fund_deposits_all_own" on public.fund_deposits;
 create policy "fund_deposits_all_own" on public.fund_deposits
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "obligation_payments_all_own" on public.obligation_payments;
 create policy "obligation_payments_all_own" on public.obligation_payments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -259,14 +273,17 @@ alter table public.income_sources enable row level security;
 alter table public.fixed_commitments enable row level security;
 alter table public.expenses enable row level security;
 
+drop policy if exists "income_sources_all_own" on public.income_sources;
 create policy "income_sources_all_own" on public.income_sources
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "fixed_commitments_all_own" on public.fixed_commitments;
 create policy "fixed_commitments_all_own" on public.fixed_commitments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expenses_all_own" on public.expenses;
 create policy "expenses_all_own" on public.expenses
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -300,6 +317,7 @@ create index if not exists obligation_templates_country_idx
 alter table public.obligation_templates enable row level security;
 
 -- قراءة فقط ولكل المستخدمين المسجّلين. لا سياسة كتابة: الصفوف تُدار بالهجرات.
+drop policy if exists "templates_read_all" on public.obligation_templates;
 create policy "templates_read_all" on public.obligation_templates
   for select to authenticated using (true);
 
@@ -350,8 +368,10 @@ create index if not exists events_name_idx
 alter table public.events enable row level security;
 
 -- الكتابة والقراءة للمستخدم نفسه فقط. لا حذف ولا تعديل: سجلّ لا يُنقّح.
+drop policy if exists "events_insert_own" on public.events;
 create policy "events_insert_own" on public.events
   for insert with check ((select auth.uid()) = user_id);
+drop policy if exists "events_select_own" on public.events;
 create policy "events_select_own" on public.events
   for select using ((select auth.uid()) = user_id);
 
@@ -465,6 +485,7 @@ create index if not exists bill_payments_commitment_idx
 
 alter table public.bill_payments enable row level security;
 
+drop policy if exists "bill_payments_all_own" on public.bill_payments;
 create policy "bill_payments_all_own" on public.bill_payments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -520,19 +541,23 @@ alter table public.expense_categories enable row level security;
 
 -- القراءة تشمل الافتراضي والخاص. الكتابة على الخاص وحده: الافتراضي
 -- تُديره الهجرات، فلا يستطيع مستخدم حذف تصنيف يراه غيره.
+drop policy if exists "expense_categories_read" on public.expense_categories;
 create policy "expense_categories_read" on public.expense_categories
   for select to authenticated
   using (user_id is null or (select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_write_own" on public.expense_categories;
 create policy "expense_categories_write_own" on public.expense_categories
   for insert to authenticated
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_update_own" on public.expense_categories;
 create policy "expense_categories_update_own" on public.expense_categories
   for update to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_delete_own" on public.expense_categories;
 create policy "expense_categories_delete_own" on public.expense_categories
   for delete to authenticated
   using ((select auth.uid()) = user_id);
@@ -629,6 +654,7 @@ create index if not exists commitment_shares_commitment_idx
 
 alter table public.commitment_partner_shares enable row level security;
 
+drop policy if exists "commitment_partner_shares_all_own" on public.commitment_partner_shares;
 create policy "commitment_partner_shares_all_own" on public.commitment_partner_shares
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -656,6 +682,7 @@ create index if not exists commitment_templates_country_idx
 
 alter table public.commitment_templates enable row level security;
 
+drop policy if exists "commitment_templates_read_all" on public.commitment_templates;
 create policy "commitment_templates_read_all" on public.commitment_templates
   for select to authenticated using (true);
 
@@ -770,6 +797,7 @@ create index if not exists income_entries_user_date_idx
 
 alter table public.income_entries enable row level security;
 
+drop policy if exists "income_entries_all_own" on public.income_entries;
 create policy "income_entries_all_own" on public.income_entries
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -807,18 +835,22 @@ create index if not exists payment_methods_user_idx
 
 alter table public.payment_methods enable row level security;
 
+drop policy if exists "payment_methods_read" on public.payment_methods;
 create policy "payment_methods_read" on public.payment_methods
   for select to authenticated
   using (user_id is null or (select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_insert_own" on public.payment_methods;
 create policy "payment_methods_insert_own" on public.payment_methods
   for insert to authenticated with check ((select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_update_own" on public.payment_methods;
 create policy "payment_methods_update_own" on public.payment_methods
   for update to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_delete_own" on public.payment_methods;
 create policy "payment_methods_delete_own" on public.payment_methods
   for delete to authenticated using ((select auth.uid()) = user_id);
 
@@ -1054,10 +1086,12 @@ comment on column public.profiles.inflation_percent is
 alter table public.assets enable row level security;
 alter table public.net_worth_snapshots enable row level security;
 
+drop policy if exists "assets_all_own" on public.assets;
 create policy "assets_all_own" on public.assets
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "net_worth_snapshots_all_own" on public.net_worth_snapshots;
 create policy "net_worth_snapshots_all_own" on public.net_worth_snapshots
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

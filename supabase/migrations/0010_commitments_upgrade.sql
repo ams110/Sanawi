@@ -53,6 +53,7 @@ create index if not exists commitment_shares_commitment_idx
 
 alter table public.commitment_partner_shares enable row level security;
 
+drop policy if exists "commitment_partner_shares_all_own" on public.commitment_partner_shares;
 create policy "commitment_partner_shares_all_own" on public.commitment_partner_shares
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
@@ -80,6 +81,7 @@ create index if not exists commitment_templates_country_idx
 
 alter table public.commitment_templates enable row level security;
 
+drop policy if exists "commitment_templates_read_all" on public.commitment_templates;
 create policy "commitment_templates_read_all" on public.commitment_templates
   for select to authenticated using (true);
 
