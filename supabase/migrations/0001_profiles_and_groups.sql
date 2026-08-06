@@ -59,14 +59,18 @@ create index if not exists obligation_groups_user_idx
 alter table public.profiles enable row level security;
 alter table public.obligation_groups enable row level security;
 
+drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles
   for select using ((select auth.uid()) = id);
+drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
   for update using ((select auth.uid()) = id)
   with check ((select auth.uid()) = id);
+drop policy if exists "profiles_insert_own" on public.profiles;
 create policy "profiles_insert_own" on public.profiles
   for insert with check ((select auth.uid()) = id);
 
+drop policy if exists "groups_all_own" on public.obligation_groups;
 create policy "groups_all_own" on public.obligation_groups
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

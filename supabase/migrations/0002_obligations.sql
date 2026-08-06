@@ -90,22 +90,27 @@ alter table public.obligation_partner_shares enable row level security;
 alter table public.fund_deposits enable row level security;
 alter table public.obligation_payments enable row level security;
 
+drop policy if exists "obligations_all_own" on public.obligations;
 create policy "obligations_all_own" on public.obligations
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "partners_all_own" on public.obligation_partners;
 create policy "partners_all_own" on public.obligation_partners
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "partner_shares_all_own" on public.obligation_partner_shares;
 create policy "partner_shares_all_own" on public.obligation_partner_shares
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "fund_deposits_all_own" on public.fund_deposits;
 create policy "fund_deposits_all_own" on public.fund_deposits
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "obligation_payments_all_own" on public.obligation_payments;
 create policy "obligation_payments_all_own" on public.obligation_payments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

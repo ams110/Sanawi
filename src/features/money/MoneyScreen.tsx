@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { updateProfile } from '@/features/profile/api'
-import { formatMoney } from '@/lib/format'
+import { formatMoney, formatMonthYear } from '@/lib/format'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
+import { hasStarted } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
 import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
 import { IncomeEntries } from './IncomeEntries'
@@ -133,9 +134,9 @@ export function MoneyScreen() {
         )}
 
         <AddFixedForm
-          onAdd={async (name, amount) => {
+          onAdd={async (name, amount, startsOn) => {
             if (!user) return
-            await addFixedCommitment(user.id, { name, amount })
+            await addFixedCommitment(user.id, { name, amount, starts_on: startsOn })
             await load()
           }}
         />
@@ -168,12 +169,14 @@ function IncomeRow({
   const [name, setName] = useState(income.name)
   const [amount, setAmount] = useState(Number(income.amount))
   const [frequency, setFrequency] = useState<IncomeFrequency>(income.frequency)
+  const [isVariable, setIsVariable] = useState(Boolean(income.is_variable))
   const [error, setError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(income.name)
     setAmount(Number(income.amount))
     setFrequency(income.frequency)
+    setIsVariable(Boolean(income.is_variable))
     setError(null)
     setEditing(false)
   }
@@ -217,13 +220,26 @@ function IncomeRow({
       <InlineEdit
         open={editing}
         onCancel={cancel}
-        canSave={name.trim().length > 0 && amount > 0}
+        /*
+         * المتغيّر يُحفَظ بلا مبلغ — وإلا حُبس عن التعديل كلّه.
+         *
+         * الشرط كان `amount > 0` وحده، ونموذج الإضافة يقبل صفراً للمتغيّر
+         * عمداً. فمصدرٌ متغيّر بلا مبلغ كان يُفتح للتعديل ويبقى زرّ الحفظ
+         * مطفأً إلى الأبد: لا إعادة تسمية ولا تغيير دورية ولا حتى إلغاء
+         * صفة التغيّر عنه.
+         */
+        canSave={name.trim().length > 0 && (amount > 0 || isVariable)}
         error={error}
         title={t('money.editSource')}
         onSave={async () => {
           setError(null)
           try {
-            await updateIncomeSource(income.id, { name: name.trim(), amount, frequency })
+            await updateIncomeSource(income.id, {
+              name: name.trim(),
+              amount,
+              frequency,
+              isVariable,
+            })
             setEditing(false)
             await onChanged()
           } catch (err) {
@@ -257,6 +273,15 @@ function IncomeRow({
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-2 rounded-lg bg-bg px-2 py-1.5">
+          <input
+            type="checkbox"
+            checked={isVariable}
+            onChange={(e) => setIsVariable(e.target.checked)}
+            className="size-4 accent-brand"
+          />
+          <span className="text-[11px] font-semibold text-text">{t('money.isVariable')}</span>
+        </label>
       </InlineEdit>
     </li>
   )
@@ -273,14 +298,20 @@ function FixedRow({
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(item.name)
   const [amount, setAmount] = useState(Number(item.amount))
+  const [startsOn, setStartsOn] = useState(item.starts_on ?? '')
   const [error, setError] = useState<string | null>(null)
 
   const cancel = () => {
     setName(item.name)
     setAmount(Number(item.amount))
+    setStartsOn(item.starts_on ?? '')
     setError(null)
     setEditing(false)
   }
+
+  // البند المؤجَّل يظهر هنا بمبلغه الكامل بلا أن يخرج من الشهر — والشارة هي
+  // ما يمنع قراءته «مستحقّ الآن»، تماماً كما في شاشة الفواتير.
+  const notStarted = !hasStarted(item.starts_on)
 
   return (
     <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
@@ -288,6 +319,11 @@ function FixedRow({
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
           {item.icon && <span className="me-1" aria-hidden="true">{item.icon}</span>}
           {item.name}
+          {notStarted && (
+            <span className="ms-1.5 rounded-full bg-bg px-1.5 py-0.5 text-[10px] font-bold text-text-muted">
+              {t('bills.notStarted', { date: formatMonthYear(item.starts_on!) })}
+            </span>
+          )}
         </span>
         <span className="num text-sm font-bold text-text">{formatMoney(Number(item.amount))}</span>
         {!editing && (
@@ -313,7 +349,11 @@ function FixedRow({
         onSave={async () => {
           setError(null)
           try {
-            await updateFixedCommitment(item.id, { name: name.trim(), amount })
+            await updateFixedCommitment(item.id, {
+              name: name.trim(),
+              amount,
+              startsOn: startsOn || null,
+            })
             setEditing(false)
             await onChanged()
           } catch (err) {
@@ -331,6 +371,16 @@ function FixedRow({
             className={`num ${editInputClass}`}
           />
         </div>
+        {/* بلا هذا الحقل كان تاريخ بدءٍ مكتوبٌ خطأً لا يُصحَّح من أي شاشة. */}
+        <label className="block space-y-1">
+          <span className="text-[11px] font-semibold text-text-muted">{t('bills.startsOn')}</span>
+          <input
+            type="date"
+            value={startsOn}
+            onChange={(e) => setStartsOn(e.target.value)}
+            className={`num ${editInputClass}`}
+          />
+        </label>
       </InlineEdit>
     </li>
   )
@@ -451,10 +501,15 @@ function AddIncomeForm({
   )
 }
 
-function AddFixedForm({ onAdd }: { onAdd: (name: string, amount: number) => Promise<void> }) {
+function AddFixedForm({
+  onAdd,
+}: {
+  onAdd: (name: string, amount: number, startsOn: string | null) => Promise<void>
+}) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
   const [amount, setAmount] = useState(0)
+  const [startsOn, setStartsOn] = useState('')
   const [busy, setBusy] = useState(false)
 
   const submit = async (e: FormEvent) => {
@@ -462,9 +517,10 @@ function AddFixedForm({ onAdd }: { onAdd: (name: string, amount: number) => Prom
     if (!name.trim() || amount <= 0) return
     setBusy(true)
     try {
-      await onAdd(name.trim(), amount)
+      await onAdd(name.trim(), amount, startsOn || null)
       setName('')
       setAmount(0)
+      setStartsOn('')
     } finally {
       setBusy(false)
     }
@@ -488,6 +544,24 @@ function AddFixedForm({ onAdd }: { onAdd: (name: string, amount: number) => Prom
           className={`num ${inputClass}`}
         />
       </div>
+      {/*
+       * تاريخ البدء هنا أيضاً، لا في شاشة الفواتير وحدها.
+       *
+       * هذه هي الشاشة التي يُضاف منها البند الثابت أول مرة، وبلا الحقل كان
+       * كل بندٍ يُنشأ منها عاجزاً عن حمل تاريخ بدءٍ في أي طبقة — فيُحمَّل
+       * على شهرٍ لا دفعة فيه، وهو الخطأ نفسه الذي أُصلح في المحرّك.
+       */}
+      <label className="block space-y-1">
+        <span className="text-xs font-semibold text-text-muted">
+          {t('bills.startsOn')} — {t('bills.startsOnHint')}
+        </span>
+        <input
+          type="date"
+          value={startsOn}
+          onChange={(e) => setStartsOn(e.target.value)}
+          className={`num ${inputClass}`}
+        />
+      </label>
       <Button type="submit" variant="secondary" loading={busy} className="w-full">
         {t('money.addFixed')}
       </Button>

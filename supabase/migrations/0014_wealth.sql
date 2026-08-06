@@ -199,10 +199,12 @@ comment on column public.profiles.inflation_percent is
 alter table public.assets enable row level security;
 alter table public.net_worth_snapshots enable row level security;
 
+drop policy if exists "assets_all_own" on public.assets;
 create policy "assets_all_own" on public.assets
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "net_worth_snapshots_all_own" on public.net_worth_snapshots;
 create policy "net_worth_snapshots_all_own" on public.net_worth_snapshots
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

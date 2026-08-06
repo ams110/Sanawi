@@ -25,19 +25,23 @@ alter table public.expense_categories enable row level security;
 
 -- القراءة تشمل الافتراضي والخاص. الكتابة على الخاص وحده: الافتراضي
 -- تُديره الهجرات، فلا يستطيع مستخدم حذف تصنيف يراه غيره.
+drop policy if exists "expense_categories_read" on public.expense_categories;
 create policy "expense_categories_read" on public.expense_categories
   for select to authenticated
   using (user_id is null or (select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_write_own" on public.expense_categories;
 create policy "expense_categories_write_own" on public.expense_categories
   for insert to authenticated
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_update_own" on public.expense_categories;
 create policy "expense_categories_update_own" on public.expense_categories
   for update to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expense_categories_delete_own" on public.expense_categories;
 create policy "expense_categories_delete_own" on public.expense_categories
   for delete to authenticated
   using ((select auth.uid()) = user_id);

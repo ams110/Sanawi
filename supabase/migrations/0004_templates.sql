@@ -24,6 +24,7 @@ create index if not exists obligation_templates_country_idx
 alter table public.obligation_templates enable row level security;
 
 -- قراءة فقط ولكل المستخدمين المسجّلين. لا سياسة كتابة: الصفوف تُدار بالهجرات.
+drop policy if exists "templates_read_all" on public.obligation_templates;
 create policy "templates_read_all" on public.obligation_templates
   for select to authenticated using (true);
 

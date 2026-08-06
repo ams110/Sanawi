@@ -54,14 +54,17 @@ alter table public.income_sources enable row level security;
 alter table public.fixed_commitments enable row level security;
 alter table public.expenses enable row level security;
 
+drop policy if exists "income_sources_all_own" on public.income_sources;
 create policy "income_sources_all_own" on public.income_sources
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "fixed_commitments_all_own" on public.fixed_commitments;
 create policy "fixed_commitments_all_own" on public.fixed_commitments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "expenses_all_own" on public.expenses;
 create policy "expenses_all_own" on public.expenses
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

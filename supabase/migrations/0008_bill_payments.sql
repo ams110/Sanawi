@@ -32,6 +32,7 @@ create index if not exists bill_payments_commitment_idx
 
 alter table public.bill_payments enable row level security;
 
+drop policy if exists "bill_payments_all_own" on public.bill_payments;
 create policy "bill_payments_all_own" on public.bill_payments
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);

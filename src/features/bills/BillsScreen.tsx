@@ -293,6 +293,7 @@ function BillCard({
   const [editAmount, setEditAmount] = useState(budgeted)
   const [editDay, setEditDay] = useState<number | null>(row.commitment.day_of_month)
   const [editMethod, setEditMethod] = useState<string | null>(row.commitment.default_method_id)
+  const [editStartsOn, setEditStartsOn] = useState(row.commitment.starts_on ?? '')
   const [editEndsOn, setEditEndsOn] = useState(row.commitment.ends_on ?? '')
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -301,6 +302,7 @@ function BillCard({
     setEditAmount(budgeted)
     setEditDay(row.commitment.day_of_month)
     setEditMethod(row.commitment.default_method_id)
+    setEditStartsOn(row.commitment.starts_on ?? '')
     setEditEndsOn(row.commitment.ends_on ?? '')
     setEditError(null)
     setEditing(false)
@@ -364,12 +366,18 @@ function BillCard({
         title={t('bills.editTitle')}
         onSave={async () => {
           setEditError(null)
+          // نفس حارس نموذج الإضافة: أول دفعة بعد آخرها ليست خطأً يُصحَّح بصمت.
+          if (editStartsOn && editEndsOn && editStartsOn > editEndsOn) {
+            setEditError(t('bills.startsAfterEnds'))
+            return
+          }
           try {
             await updateCommitment(row.commitment.id, {
               name: editName.trim(),
               amount: editAmount,
               dayOfMonth: editDay,
               defaultMethodId: editMethod,
+              startsOn: editStartsOn || null,
               endsOn: editEndsOn || null,
             })
             setEditing(false)
@@ -446,16 +454,31 @@ function BillCard({
           ))}
         </div>
 
-        {/* تاريخ النهاية يظهر دائماً في التعديل: قد يتحوّل بندٌ عادي إلى قسط. */}
-        <label className="block space-y-1">
-          <span className="text-[11px] font-semibold text-text-muted">{t('bills.endsOn')}</span>
-          <input
-            type="date"
-            value={editEndsOn}
-            onChange={(e) => setEditEndsOn(e.target.value)}
-            className={`num ${editInputClass}`}
-          />
-        </label>
+        {/*
+         * التاريخان يظهران دائماً في التعديل: قد يتحوّل بندٌ عادي إلى قسط،
+         * وقد يُكتب تاريخ البدء خطأً. وكانت الشاشة تعرض شارة «بتبلّش كذا»
+         * ولا تعطي أي سبيلٍ لتغييرها — تُري العطب ولا تُصلحه.
+         */}
+        <div className="flex gap-2">
+          <label className="block flex-1 space-y-1">
+            <span className="text-[11px] font-semibold text-text-muted">{t('bills.startsOn')}</span>
+            <input
+              type="date"
+              value={editStartsOn}
+              onChange={(e) => setEditStartsOn(e.target.value)}
+              className={`num ${editInputClass}`}
+            />
+          </label>
+          <label className="block flex-1 space-y-1">
+            <span className="text-[11px] font-semibold text-text-muted">{t('bills.endsOn')}</span>
+            <input
+              type="date"
+              value={editEndsOn}
+              onChange={(e) => setEditEndsOn(e.target.value)}
+              className={`num ${editInputClass}`}
+            />
+          </label>
+        </div>
       </InlineEdit>
 
       <p className="text-xs text-text-muted">

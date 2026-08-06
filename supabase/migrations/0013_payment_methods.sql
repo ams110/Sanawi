@@ -28,18 +28,22 @@ create index if not exists payment_methods_user_idx
 
 alter table public.payment_methods enable row level security;
 
+drop policy if exists "payment_methods_read" on public.payment_methods;
 create policy "payment_methods_read" on public.payment_methods
   for select to authenticated
   using (user_id is null or (select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_insert_own" on public.payment_methods;
 create policy "payment_methods_insert_own" on public.payment_methods
   for insert to authenticated with check ((select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_update_own" on public.payment_methods;
 create policy "payment_methods_update_own" on public.payment_methods
   for update to authenticated
   using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
 
+drop policy if exists "payment_methods_delete_own" on public.payment_methods;
 create policy "payment_methods_delete_own" on public.payment_methods
   for delete to authenticated using ((select auth.uid()) = user_id);
 

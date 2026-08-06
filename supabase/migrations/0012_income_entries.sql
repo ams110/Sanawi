@@ -29,6 +29,7 @@ create index if not exists income_entries_user_date_idx
 
 alter table public.income_entries enable row level security;
 
+drop policy if exists "income_entries_all_own" on public.income_entries;
 create policy "income_entries_all_own" on public.income_entries
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
