@@ -105,6 +105,29 @@ export const ar = {
     insights: 'تحليل',
   },
 
+  /*
+   * محلٌّ واحد للإضافة — النصوص كلها هنا لا في المكوّن.
+   */
+  quickAdd: {
+    open: 'ضيف إشي',
+    title: 'شو بدك تسجّل؟',
+    depositTitle: 'حطّ بصندوق التزام',
+    pickObligation: 'أي التزام',
+    amount: 'المبلغ',
+    noObligations: 'ما عندك التزامات لسا.',
+    expense: 'مصروف صرفته',
+    bill: 'فاتورة الشهر',
+    income: 'دخل وصلك',
+    obligation: 'التزام جديد',
+    balance: 'رصيد حساب',
+    doneTitle: 'انحفظ بصندوق {{name}} ✓',
+    doneBody: 'صار بالصندوق {{balance}}، وقسطك الجديد {{installment}} بالشهر.',
+    addAnother: 'سجّل كمان',
+    close: 'تمام',
+    loadFailed: 'ما قدرنا نجيب التزاماتك',
+    depositFailed: 'ما قدرنا نحفظ الإيداع',
+  },
+
   expenses: {
     title: 'مصاريف الشهر',
     subtitle: 'الصغيرة اللي ما بتحسّ فيها — لحتى تتجمّع',
@@ -430,8 +453,17 @@ export const ar = {
     remaining: 'باقي عليك',
     sharedNote:
       'مشترك: حصتك {{percent}}% من {{total}}. مجموع الصندوق من الكل {{fund}}.',
-    depositAmount: 'أودعت {{amount}} ✓',
+    depositTitle: 'حطّ بصندوقك',
+    depositAmount: 'حطّ {{amount}}',
+    depositedThisMonth: 'حطّيت هالشهر {{amount}} على {{count}} مرة',
+    confirmSecond: 'أيوه، حطّ كمان مرة',
     whoDeposits: 'مين بيودع؟',
+    historyTitle: 'حركات الصندوق',
+    historyEmpty: 'ما في ولا حركة لهلأ. أول مبلغ بتحطه بيبيّن هون.',
+    deposit: 'إيداع',
+    withdrawal: 'سحب عند الدفع',
+    undo: 'تراجع عن الإيداع',
+    undoFailed: 'ما قدرنا نتراجع',
     archiveFailed: 'ما قدرنا نأرشفه',
   },
 

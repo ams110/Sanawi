@@ -346,6 +346,8 @@ expect('الرصيد بعد إيداعي', afterMine?.obligation.my_fund_balance
 // ‏(6000 − 1500) ÷ 12 = 375
 expect('القسط بعد الإيداع', afterMine?.obligation.monthly_installment, 375)
 
+expect('الإيداع الأول لا يُنذر', afterMine?.already_deposited_this_month, false)
+
 // شريك بلا حصة على الالتزام يُرفض: إيداعه كان يدخل الصندوق بلا أن يُنسب لأحد.
 await expectError(
   'sanawi_add_deposit',
@@ -970,6 +972,57 @@ expect(
   Math.round((netBeforeDebts.net_worth - netAfterDebts.net_worth) * 100) / 100,
   400 * 24 + 300 * 12,
 )
+
+/* ─── الإيداع المكرّر في الشهر الواحد ─── */
+
+/*
+ * قاعدةٌ نظيفة: الإيداع الثاني يزحزح الصندوق والقسط، وكل فحصٍ بعده في
+ * التجربة الطويلة كان سيقرأ رقماً غير الذي يتوقّع — لا لأن شيئاً انكسر.
+ *
+ * والعطل الذي يحرسه: نداءٌ يُعاد بعد انقطاع، أو نموذجٌ لا يذكر أنه أودع أول
+ * الشهر، فيصير لقسطٍ واحد إيداعان — صندوقٌ أكبر من الحقيقة وقسطٌ أصغر منها،
+ * والتطبيق يقول «ملحّق ✅» لمن ليس كذلك. ولا يُمنع: من يدفع قسطه على دفعتين
+ * له حقٌّ في ذلك، والفرق بينه وبين الغلطة سؤالٌ واحد.
+ */
+{
+  const twiceFake = await startFakeSupabase()
+  const twice = await connect({
+    SANAWI_SUPABASE_URL: twiceFake.url,
+    SANAWI_SUPABASE_ANON_KEY: twiceFake.anonKey,
+    SANAWI_EMAIL: twiceFake.email,
+    SANAWI_PASSWORD: twiceFake.password,
+    SANAWI_READ_ONLY: '0',
+  })
+
+  await call(
+    'sanawi_create_obligation',
+    { name: 'تأمين', total_amount: 6000, next_due_date: inMonths(12) },
+    twice,
+  )
+
+  const first = await call('sanawi_add_deposit', { obligation: 'تأمين', amount: 500 }, twice)
+  expect('الأول لا يُنذر', first?.already_deposited_this_month, false)
+  expect('ومجموع الشهر بعده', first?.deposited_this_month, 500)
+
+  const second = await callRaw(
+    'sanawi_add_deposit',
+    { obligation: 'تأمين', amount: 500 },
+    twice,
+  )
+  expect('والثاني يُنذر', second.data?.already_deposited_this_month, true)
+  expect('ومجموع الشهر يشمل الاثنين', second.data?.deposited_this_month, 1000)
+  if (!second.text.includes('الإيداع رقم 2')) {
+    fail('الإيداع المكرّر لم يُعلَن في نصّ الرد')
+  }
+
+  // والسحب عند الدفع ليس إيداعاً: أول إيداع في الدورة الجديدة لا يُنذر.
+  await call('sanawi_mark_paid', { obligation: 'تأمين' }, twice)
+  const afterPayment = await call('sanawi_add_deposit', { obligation: 'تأمين', amount: 200 }, twice)
+  expect('السحب لا يُعدّ إيداعاً', afterPayment?.already_deposited_this_month, false)
+
+  await twice.close()
+  await twiceFake.stop()
+}
 
 /* ─── الحسابات: المظاريف فوق المال لا بجانبه ─── */
 

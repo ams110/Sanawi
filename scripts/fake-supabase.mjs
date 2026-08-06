@@ -379,9 +379,29 @@ export async function startFakeSupabase() {
     const body = await readBody(req)
     calls.push(`${req.method} ${url.pathname}${url.search}`)
 
+    /*
+     * ترويسات CORS: القاعدة المزيّفة تُستدعى من المتصفّح أيضاً.
+     *
+     * كانت تُنادى من Node وحده (فحص خادم MCP)، فلم تحتج إليها. ومع تشغيل
+     * الواجهة عليها لفحص الشاشات — تسجيل دخولٍ حقيقي وبياناتٍ مزروعة بلا حساب
+     * ولا شبكة — يردّ المتصفّح كلَّ نداءٍ بلا هذه الترويسات، فتبدو الشاشة
+     * معطّلة لسببٍ لا علاقة له بها.
+     */
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': '*',
+      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+      'access-control-expose-headers': 'content-range',
+    }
+
     const send = (status, payload) => {
-      res.writeHead(status, { 'content-type': 'application/json' })
+      res.writeHead(status, { 'content-type': 'application/json', ...cors })
       res.end(JSON.stringify(payload))
+    }
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, cors)
+      return res.end()
     }
 
     if (nextFailure && url.pathname.startsWith('/rest/v1/')) {

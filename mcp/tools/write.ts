@@ -16,6 +16,7 @@ import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
 import { viewAccount } from '../../src/lib/accounts/calc.js'
+import { summarizeDeposits } from '../../src/lib/obligations/deposits.js'
 import type {
   Account,
   AccountSettlement,
@@ -37,6 +38,7 @@ import {
   findIncomeSource,
   findObligation,
   loadAccounts,
+  loadDeposits,
   loadIncomeEntries,
   loadObligations,
   loadOpenSettlements,
@@ -583,6 +585,11 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
 
 المخرجات: deposit و obligation بعد الإيداع (رصيد جديد وقسط جديد)، و transfer إن وقع.
 
+**وانتبه لـ\`already_deposited_this_month\`:** يخرج صحيحاً حين كان في الصندوق إيداعٌ
+سابق هذا الشهر. الإيداع المكرّر بالغلط يرفع الصندوق ويخفض القسط ويجعل التطبيق
+يقول «ملحّق» لمن ليس كذلك — فإن ظهر ولم يكن المستخدم قد قال صراحةً إنه يودع
+دفعةً ثانية، قُل له كم أودع هذا الشهر واسأله قبل أن تكرّر.
+
 ملاحظة: هذا ليس تسجيل دفع الالتزام نفسه — لذلك sanawi_mark_paid.`,
       inputSchema: {
         obligation: z.string().min(1).describe('معرّف الالتزام أو اسمه'),
@@ -604,6 +611,10 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           partner_id: z.string().nullable(),
           account_id: z.string().nullable(),
         }),
+        /** كان في الصندوق إيداعٌ آخر هذا الشهر قبل هذا النداء. */
+        already_deposited_this_month: z.boolean(),
+        /** ما أُودع هذا الشهر شاملاً هذا الإيداع. */
+        deposited_this_month: z.number(),
         /** فارغ = لم ينتقل مالٌ بين حسابين، إنما خُصّص مالٌ موجود. */
         transfer: z
           .object({
@@ -622,6 +633,26 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       const connection = await connect()
       const target = await findObligation(connection, input.obligation)
       const depositDate = input.date ? requireDate(input.date, 'date') : isoDate()
+
+      /*
+       * ما أُودع هذا الشهر يُقرأ قبل الكتابة.
+       *
+       * نداءٌ يُعاد بعد انقطاعٍ — أو نموذجٌ لا يذكر أنه أودع أول الشهر — يصنع
+       * إيداعين لقسطٍ واحد: صندوقٌ أكبر من الحقيقة وقسطٌ أصغر منها، والتطبيق
+       * يقول «ملحّق ✅» لمن ليس كذلك. ولا نمنع — من يدفع قسطه على دفعتين له
+       * حقٌّ في ذلك — إنما نقول ما وقع بدل أن يقع صامتاً.
+       */
+      const before = summarizeDeposits(
+        (await loadDeposits(connection, target.obligation.id)).map((row) => ({
+          id: row.id,
+          amount: Number(row.amount),
+          depositDate: row.deposit_date,
+          createdAt: row.created_at,
+          partnerId: row.partner_id,
+          note: row.note,
+        })),
+      )
+
       const partnerId = input.partner_name
         ? await resolvePartner(connection, target.obligation.id, input.partner_name)
         : null
@@ -723,6 +754,10 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           ? `⚠️ **${after.obligation.name}** غير مربوط بحساب، فلم يتحرّك مال — ` +
             `سُجّل الإيداع على **${fromAccount.name}**. اربطه بـ sanawi_update_obligation.`
           : null,
+        before.alreadyDepositedThisMonth
+          ? `⚠️ وهذا **الإيداع رقم ${before.thisMonthCount + 1}** هذا الشهر — سبقه ` +
+            `${money(before.thisMonthTotal, currency)}. إن لم يكن مقصوداً فالحركة تُحذف من شاشة الالتزام.`
+          : null,
         `الصندوق الآن: ${money(Number(after.balance?.my_fund_balance ?? 0), currency)} من ${money(after.calc.myTotal, currency)} ` +
           `(${Math.round(after.calc.progress * 100)}٪) · الباقي ${money(after.calc.remainingAmount, currency)}`,
         `**القسط الجديد: ${money(after.calc.monthlyInstallment, currency)}/شهر**` +
@@ -742,6 +777,8 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           partner_id: deposit.partner_id,
           account_id: deposit.account_id ?? null,
         },
+        already_deposited_this_month: before.alreadyDepositedThisMonth,
+        deposited_this_month: Math.round((before.thisMonthTotal + input.amount) * 100) / 100,
         transfer,
         obligation: toObligationOut(after),
       })

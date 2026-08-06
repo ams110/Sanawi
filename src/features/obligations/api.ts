@@ -133,6 +133,7 @@ export async function addDeposit(
   userId: string,
   amount: number,
   partnerId: string | null = null,
+  accountId: string | null = null,
 ): Promise<FundDeposit> {
   const { data, error } = await supabase
     .from('fund_deposits')
@@ -141,6 +142,7 @@ export async function addDeposit(
       user_id: userId,
       partner_id: partnerId,
       amount,
+      account_id: accountId,
       deposit_date: toDateKey(),
     })
     .select()
@@ -148,6 +150,41 @@ export async function addDeposit(
 
   if (error) throw error
   return data as FundDeposit
+}
+
+/**
+ * حركات صندوق التزام — الإيداعات والسحوبات معاً.
+ *
+ * الشاشة كانت لا تعرضها إطلاقاً: يودع المستخدم ولا يرى ما أودع، فلا يعرف
+ * أنه أودع هذا الشهر ولا يستطيع أن يتراجع عن غلطة. والخادم يعرضها منذ البداية
+ * (`sanawi_get_obligation` ← «آخر الحركات») — فالنقص كان في الواجهة وحدها.
+ */
+export async function listDeposits(obligationId: string, limit = 24): Promise<FundDeposit[]> {
+  const { data, error } = await supabase
+    .from('fund_deposits')
+    .select('*')
+    .eq('obligation_id', obligationId)
+    .order('deposit_date', { ascending: false })
+    .limit(limit)
+
+  if (error) throw error
+  return (data ?? []) as FundDeposit[]
+}
+
+/**
+ * حذف إيداع — تصحيحُ إدخالٍ لا محوُ تاريخ.
+ *
+ * قاعدة «لا حذف» في هذا المشروع تحرس التاريخ المالي: الالتزام يُؤرشف، والصندوق
+ * يُفرَّغ بقيدٍ سالب لا بحذف إيداعاته. وهي لا تشمل إيداعاً لم يقع أصلاً — ضغطة
+ * زرٍّ بالغلط ليست تاريخاً، وإبقاؤها يجعل الصندوق يكذب إلى الأبد. ونظائرها
+ * كلها تُحذف من الشاشة منذ زمن: المصروف والفاتورة والدخل الواصل والأصل، وبقي
+ * الإيداع وحده بلا رجعة — وهو أكثرها وقوعاً.
+ *
+ * والسحب لا يُحذف من الشاشة (لا زرّ له): حذفه يعيد إلى الصندوق مالاً خرج فعلاً.
+ */
+export async function deleteDeposit(id: string): Promise<void> {
+  const { error } = await supabase.from('fund_deposits').delete().eq('id', id)
+  if (error) throw error
 }
 
 export async function listTemplates(country = 'IL'): Promise<ObligationTemplate[]> {

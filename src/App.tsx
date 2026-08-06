@@ -15,6 +15,7 @@ import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { BillsScreen } from '@/features/bills/BillsScreen'
 import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
 import { WealthScreen } from '@/features/wealth/WealthScreen'
+import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
@@ -76,8 +77,15 @@ function Shell() {
   // فشل جلب الملف لا يحبس المستخدم: نكمل إلى التطبيق بدل شاشة عالقة.
   if (profile && !profile.onboarding_completed) return <OnboardingScreen />
 
+  /*
+   * الهامش السفلي يتّسع للزرّ العائم لا لشريط التبويبات وحده.
+   *
+   * ‏`pb-24` كان يكفي الشريط، والزرّ فوقه يمتدّ إلى 128px فيغطّي آخر سطرٍ في
+   * الصفحة — و«آخر سطر» في شاشة الالتزام هو زرّ التراجع عن آخر إيداع، أي
+   * أقربُ ما يحتاجه المستخدم بعد غلطة.
+   */
   return (
-    <div className="min-h-dvh bg-bg pb-24">
+    <div className="min-h-dvh bg-bg pb-36">
       <Header />
       <main className="mx-auto max-w-lg">
         <Routes>
@@ -104,6 +112,7 @@ function Shell() {
           <Route path="*" element={<Navigate to="/month" replace />} />
         </Routes>
       </main>
+      <QuickAdd />
       <BottomNav />
     </div>
   )
