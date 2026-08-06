@@ -15,7 +15,11 @@ import { z } from 'zod'
 import { renewAfterPayment } from '../../src/lib/obligations/renewal.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
+import { viewAccount } from '../../src/lib/accounts/calc.js'
 import type {
+  Account,
+  AccountSettlement,
+  AccountTransfer,
   Asset,
   BillPayment,
   FixedCommitment,
@@ -27,12 +31,17 @@ import type {
 } from '../../src/lib/db/types.js'
 import type { Connection } from '../session.js'
 import {
+  findAccount,
   findCommitment,
   findGroup,
   findIncomeSource,
   findObligation,
+  loadAccounts,
   loadIncomeEntries,
+  loadObligations,
+  loadOpenSettlements,
   monthKey,
+  reservedByAccount,
 } from '../data.js'
 import {
   CADENCE,
@@ -44,7 +53,7 @@ import {
   ok,
   recurrenceLabel,
 } from '../format.js'
-import { obligationOut, toObligationOut } from '../schemas.js'
+import { accountOut, obligationOut, toAccountOut, toObligationOut } from '../schemas.js'
 
 const WRITES = {
   readOnlyHint: false,
@@ -242,6 +251,80 @@ async function resolvePartner(
   )
 }
 
+/**
+ * تحريك رصيد حساب بمقدارٍ موجبٍ أو سالب.
+ *
+ * قراءةٌ ثم كتابة، لا `balance = balance + x` في القاعدة: PostgREST لا يكتب
+ * تعبيراً على عمود. والفارق نظريّ هنا — المستخدم واحد وناداتُه متسلسلة —
+ * ولو صار للتطبيق كتابةٌ متزامنة فمكان الإصلاح دالّةٌ في القاعدة لا حلقةٌ
+ * هنا. و`balance_updated_at` لا يُضبط: مُشغِّلٌ في القاعدة يتكفّل به، وضبطه
+ * من ثلاثة مسارات يجعل أحدها ينساه يوماً.
+ */
+async function moveBalance(
+  connection: Connection,
+  accountId: string,
+  delta: number,
+): Promise<number> {
+  const { data: current, error: readError } = await connection.db
+    .from('accounts')
+    .select('balance')
+    .eq('id', accountId)
+    .single()
+  if (readError) throw readError
+
+  const next = Math.round((Number(current.balance) + delta) * 100) / 100
+  const { error } = await connection.db
+    .from('accounts')
+    .update({ balance: next })
+    .eq('id', accountId)
+  if (error) throw error
+
+  return next
+}
+
+/**
+ * إغلاق التسويات التي سدّدها هذا التحويل.
+ *
+ * التسوية تقول «A مدين لـ B بكذا»، والتحويل A→B بالمبلغ نفسه أو أكثر يسدّدها.
+ * والإغلاق كاملٌ لا جزئي: تسويةٌ نصف مسدّدة رقمٌ لا يعرف صاحبه ماذا يفعل به،
+ * وتحويلٌ أصغر منها يبقيها كما هي حتى يكتمل.
+ *
+ * والأقدم أولاً: من عليه تسويتان يسدّد أولاهما بأول تحويل.
+ */
+async function closeSettlements(
+  connection: Connection,
+  transfer: { fromAccountId: string; toAccountId: string; amount: number; transferId: string },
+): Promise<AccountSettlement[]> {
+  const open = (await loadOpenSettlements(connection)).filter(
+    (row) =>
+      row.debtor_account_id === transfer.fromAccountId &&
+      row.creditor_account_id === transfer.toAccountId,
+  )
+
+  let budget = transfer.amount
+  const closed: AccountSettlement[] = []
+
+  for (const row of open) {
+    const amount = Number(row.amount)
+    if (amount > budget) continue
+    budget = Math.round((budget - amount) * 100) / 100
+    closed.push(row)
+  }
+
+  if (closed.length > 0) {
+    const { error } = await connection.db
+      .from('account_settlements')
+      .update({
+        settled_at: new Date().toISOString(),
+        settled_by_transfer_id: transfer.transferId,
+      })
+      .in('id', closed.map((row) => row.id))
+    if (error) throw error
+  }
+
+  return closed
+}
+
 export function registerWriteTools(server: McpServer, connect: () => Promise<Connection>): void {
   /* ── إنشاء التزام ───────────────────────────────────────── */
 
@@ -262,6 +345,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
   - recurrence_months (number): 12 سنوي، 6 نصف سنوي، 3 ربع سنوي، 0 مرة واحدة. افتراضياً 12
   - my_share_percent (number): حصتي، 1..100، افتراضياً 100
   - group (string): معرّف مجموعة أو اسمها، اختياري
+  - account (string): الحساب الذي يحتفظ بصندوق هذا الالتزام، اختياري لكن مهمّ — بدونه لا يعرف التطبيق أين يعيش مال الصندوق، ويخرج «غير مخصّص» ناقصاً
   - category (string): اختياري
   - notes (string): اختياري
 
@@ -279,6 +363,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           .describe('دورية التكرار بالشهور، 0 = مرة واحدة'),
         my_share_percent: z.number().min(1).max(100).default(100).describe('حصتي بالنسبة المئوية'),
         group: z.string().optional().describe('معرّف المجموعة أو اسمها'),
+        account: z.string().optional().describe('الحساب الذي يحتفظ بصندوق هذا الالتزام'),
         category: z.string().max(60).optional(),
         notes: z.string().max(500).optional(),
       },
@@ -290,6 +375,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const connection = await connect()
       const dueDate = requireDate(input.next_due_date, 'next_due_date')
       const groupId = input.group ? (await findGroup(connection, input.group)).id : null
+      const accountId = input.account ? (await findAccount(connection, input.account)).id : null
 
       const myTotal = (input.total_amount * input.my_share_percent) / 100
       const baseline =
@@ -308,6 +394,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           recurrence_months: input.recurrence_months,
           my_share_percent: input.my_share_percent,
           group_id: groupId,
+          account_id: accountId,
           notes: input.notes ?? null,
           cycle_start_date: isoDate(),
           baseline_installment: baseline,
@@ -327,7 +414,10 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           (created.calc.isBridge
             ? `\n⚠️ وضع جسر: الدورة الأولى مضغوطة (${created.calc.monthsRemaining} شهر). ` +
               `القسط الطبيعي بعد التجديد ${money(created.calc.normalInstallment, currency)}.`
-            : ''),
+            : '') +
+          (created.account
+            ? `\nصندوقه في **${created.account.name}**.`
+            : '\nصندوقه غير مربوط بحساب — مرّر account ليُحسب «غير المخصّص» صحيحاً.'),
         { obligation: toObligationOut(created), currency },
       )
     }),
@@ -345,7 +435,10 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 المدخلات:
   - obligation (string): المعرّف أو الاسم
-  - name / total_amount / next_due_date / recurrence_months / my_share_percent / group / category / notes: كلها اختيارية
+  - name / total_amount / next_due_date / recurrence_months / my_share_percent / group / account / category / notes: كلها اختيارية
+
+و\`account\` هو ما يربط صندوق الالتزام بالحساب الذي يعيش فيه ماله — استعمله لربط
+الصناديق القديمة، أو لنقل صندوق من حساب إلى آخر قبل أرشفة الأول.
 
 المخرجات: obligation بعد التعديل، بحسابه الجديد.`,
       inputSchema: {
@@ -356,6 +449,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         recurrence_months: z.number().int().min(0).max(120).optional(),
         my_share_percent: z.number().min(1).max(100).optional(),
         group: z.string().optional().describe('معرّف المجموعة أو اسمها'),
+        account: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('الحساب الذي يحتفظ بصندوقه، أو null لفكّ الربط'),
         category: z.string().max(60).optional(),
         notes: z.string().max(500).optional(),
       },
@@ -378,6 +476,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       if (input.category !== undefined) patch.category = input.category
       if (input.notes !== undefined) patch.notes = input.notes
       if (input.group !== undefined) patch.group_id = (await findGroup(connection, input.group)).id
+      // ‏`null` قيمةٌ مقصودة (فكّ الربط) لا غياب، فلا تصلح `??` هنا.
+      if (input.account !== undefined) {
+        patch.account_id =
+          input.account === null ? null : (await findAccount(connection, input.account)).id
+      }
 
       if (Object.keys(patch).length === 0) {
         throw new Error('لا حقل للتعديل — مرّر حقلاً واحداً على الأقل غير obligation.')
@@ -396,7 +499,12 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         `عُدِّل **${updated.obligation.name}**.\n` +
           `المبلغ ${money(Number(updated.obligation.total_amount), currency)} · ` +
           `الموعد ${longDate(updated.obligation.next_due_date)} · ` +
-          `**القسط ${money(updated.calc.monthlyInstallment, currency)}/شهر**`,
+          `**القسط ${money(updated.calc.monthlyInstallment, currency)}/شهر**` +
+          (input.account !== undefined
+            ? updated.account
+              ? `\nصندوقه صار في **${updated.account.name}**.`
+              : '\nفُكّ ربط صندوقه بالحساب.'
+            : ''),
         { obligation: toObligationOut(updated), currency },
       )
     }),
@@ -458,19 +566,31 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 هذه أكثر أداة تُستعمل: «حطّيت 500 على تأمين السيارة». الإيداع باسم شريك يُنسب إليه في تسوية الشركاء، ويُرفض إن لم تكن له حصة على هذا الالتزام.
 
+**الإيداع تخصيصٌ لا نقل.** المال موجودٌ أصلاً في حسابٍ ما، والإيداع يضع عليه
+مظروفاً باسم الالتزام: لا يغيّر رصيد أي حساب، ولا يغيّر صافي الثروة.
+
+ومن حوّل فعلاً من حسابٍ إلى حساب صندوقه («حوّلت 2,000 للتأمين») يمرّر
+from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداءٍ واحد: ينقص رصيد الحساب
+المُرسِل ويزيد رصيد حساب الصندوق، ويرتفع المظروف بالمبلغ نفسه.
+
 المدخلات:
   - obligation (string): المعرّف أو الاسم
   - amount (number): المبلغ، أكبر من 0
+  - from_account (string): الحساب الذي خرج منه المال. مرّره فقط إن انتقل المال فعلاً بين حسابين — واتركه فارغاً حين يكون المال في حساب الصندوق أصلاً.
   - partner_name (string): اسم شريك **له حصة مضبوطة في هذا الالتزام**، اختياري. اتركه فارغاً حين يودع المستخدم بنفسه — وهو الغالب. الشركاء وحصصهم يُضبطون من شاشة الالتزام في التطبيق لا من هنا.
   - date (string): YYYY-MM-DD، افتراضياً اليوم
   - note (string): اختياري
 
-المخرجات: deposit و obligation بعد الإيداع (رصيد جديد وقسط جديد).
+المخرجات: deposit و obligation بعد الإيداع (رصيد جديد وقسط جديد)، و transfer إن وقع.
 
 ملاحظة: هذا ليس تسجيل دفع الالتزام نفسه — لذلك sanawi_mark_paid.`,
       inputSchema: {
         obligation: z.string().min(1).describe('معرّف الالتزام أو اسمه'),
         amount: z.number().positive().describe('مبلغ الإيداع'),
+        from_account: z
+          .string()
+          .optional()
+          .describe('الحساب الذي خرج منه المال — يُنشئ تحويلاً مع الإيداع'),
         partner_name: z.string().min(1).max(80).optional().describe('اسم الشريك المودِع إن وُجد'),
         date: z.string().optional().describe('تاريخ الإيداع YYYY-MM-DD، افتراضياً اليوم'),
         note: z.string().max(200).optional(),
@@ -482,7 +602,18 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           amount: z.number(),
           deposit_date: z.string(),
           partner_id: z.string().nullable(),
+          account_id: z.string().nullable(),
         }),
+        /** فارغ = لم ينتقل مالٌ بين حسابين، إنما خُصّص مالٌ موجود. */
+        transfer: z
+          .object({
+            id: z.string(),
+            from: z.string(),
+            to: z.string(),
+            from_balance: z.number(),
+            to_balance: z.number(),
+          })
+          .nullable(),
         obligation: z.object(obligationOut),
       },
       annotations: WRITES,
@@ -495,6 +626,72 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         ? await resolvePartner(connection, target.obligation.id, input.partner_name)
         : null
 
+      const fundAccount = target.account
+      const fromAccount = input.from_account
+        ? await findAccount(connection, input.from_account)
+        : null
+
+      /*
+       * ثلاث حالات لا واحدة:
+       *
+       * 1. المال في حساب الصندوق أصلاً (لا from_account، أو هو نفسه حساب
+       *    الصندوق) → إيداعٌ وحده. لا شيء تحرّك.
+       * 2. المال جاء من حسابٍ آخر وللصندوق حسابٌ معلوم → تحويل + إيداع.
+       * 3. المال جاء من حسابٍ آخر والصندوق غير مربوط → المال لم يتحرّك، لأن
+       *    الصندوق ليس مكاناً. يُسجَّل الإيداع على الحساب المُرسِل ويُقال
+       *    صراحةً إن الالتزام غير مربوط — ورفضُه هنا كان سيمنع تسجيل إيداعٍ
+       *    وقع فعلاً لأجل حقلٍ ناقص.
+       */
+      const movesMoney = Boolean(fromAccount && fundAccount && fromAccount.id !== fundAccount.id)
+      const depositAccountId = movesMoney
+        ? fundAccount!.id
+        : (fundAccount?.id ?? fromAccount?.id ?? null)
+
+      let transfer: {
+        id: string
+        from: string
+        to: string
+        from_balance: number
+        to_balance: number
+      } | null = null
+
+      if (movesMoney) {
+        // التحويل قبل الإيداع: الأول ينقل مالاً والثاني يخصّصه. ولو انقطع
+        // الاتصال بينهما بقي المال في مكانه الصحيح بلا تخصيص — وهو أهون من
+        // تخصيصٍ على مالٍ لم يصل بعد.
+        const { data, error } = await connection.db
+          .from('account_transfers')
+          .insert({
+            user_id: connection.userId,
+            from_account_id: fromAccount!.id,
+            to_account_id: fundAccount!.id,
+            amount: input.amount,
+            transferred_at: depositDate,
+            note: input.note ?? `تمويل صندوق ${target.obligation.name}`,
+          })
+          .select()
+          .single()
+        if (error) throw error
+
+        const fromBalance = await moveBalance(connection, fromAccount!.id, -input.amount)
+        const toBalance = await moveBalance(connection, fundAccount!.id, input.amount)
+
+        await closeSettlements(connection, {
+          fromAccountId: fromAccount!.id,
+          toAccountId: fundAccount!.id,
+          amount: input.amount,
+          transferId: (data as AccountTransfer).id,
+        })
+
+        transfer = {
+          id: (data as AccountTransfer).id,
+          from: fromAccount!.name,
+          to: fundAccount!.name,
+          from_balance: fromBalance,
+          to_balance: toBalance,
+        }
+      }
+
       const { data, error } = await connection.db
         .from('fund_deposits')
         .insert({
@@ -503,6 +700,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           partner_id: partnerId,
           amount: input.amount,
           deposit_date: depositDate,
+          account_id: depositAccountId,
           note: input.note ?? null,
         })
         .select()
@@ -513,14 +711,27 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const currency = connection.currency
       const deposit = data as FundDeposit
 
-      const text =
+      const text = [
         `أُودع ${money(input.amount, currency)} في صندوق **${after.obligation.name}**` +
-        (input.partner_name ? ` باسم ${input.partner_name}` : '') +
-        '.\n' +
+          (input.partner_name ? ` باسم ${input.partner_name}` : '') +
+          '.',
+        transfer
+          ? `حُوّل من **${transfer.from}** (${money(transfer.from_balance, currency)}) ` +
+            `إلى **${transfer.to}** (${money(transfer.to_balance, currency)}).`
+          : null,
+        fromAccount && !fundAccount
+          ? `⚠️ **${after.obligation.name}** غير مربوط بحساب، فلم يتحرّك مال — ` +
+            `سُجّل الإيداع على **${fromAccount.name}**. اربطه بـ sanawi_update_obligation.`
+          : null,
         `الصندوق الآن: ${money(Number(after.balance?.my_fund_balance ?? 0), currency)} من ${money(after.calc.myTotal, currency)} ` +
-        `(${Math.round(after.calc.progress * 100)}٪) · الباقي ${money(after.calc.remainingAmount, currency)}\n` +
+          `(${Math.round(after.calc.progress * 100)}٪) · الباقي ${money(after.calc.remainingAmount, currency)}`,
         `**القسط الجديد: ${money(after.calc.monthlyInstallment, currency)}/شهر**` +
-        (after.calc.status === 'on_track' ? ' — ملحّق ✅' : ` — الفجوة ${money(after.calc.gap, currency)}`)
+          (after.calc.status === 'on_track'
+            ? ' — ملحّق ✅'
+            : ` — الفجوة ${money(after.calc.gap, currency)}`),
+      ]
+        .filter((line) => line !== null)
+        .join('\n')
 
       return ok(text, {
         currency,
@@ -529,7 +740,9 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           amount: Number(deposit.amount),
           deposit_date: deposit.deposit_date,
           partner_id: deposit.partner_id,
+          account_id: deposit.account_id ?? null,
         },
+        transfer,
         obligation: toObligationOut(after),
       })
     }),
@@ -547,11 +760,23 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 الصندوق يُفرَّغ بقيدٍ سالب لا بحذف الإيداعات: تاريخ من دفع ماذا يبقى محفوظاً.
 
+**والمال يخرج من حساب.** رصيد الحساب الذي دُفع منه ينقص بما خرج فعلاً (ما في
+الصندوق + ما غُطّي من الجيب). والدفع من حسابٍ غير حساب الصندوق **مقبول ويُعلَّم**:
+تُنشأ تسوية معلّقة تقول «حساب الصندوق مدين للحساب الذي دفع»، وتُغلق تلقائياً حين
+يقع التحويل المقابل بـ sanawi_transfer_between_accounts.
+
 المدخلات:
   - obligation (string): المعرّف أو الاسم
+  - paid_from_account (string): الحساب الذي خرج منه الدفع. الافتراضي حساب صندوق الالتزام.
 
-المخرجات: amount_paid (ما خرج من الصندوق) و carried_balance (الفائض المرحَّل) و shortfall (النقص الذي غُطّي من الجيب) و next_due_date و new_installment و is_finished.`,
-      inputSchema: { obligation: z.string().min(1).describe('معرّف الالتزام أو اسمه') },
+المخرجات: amount_paid (ما خرج من الصندوق) و carried_balance (الفائض المرحَّل) و shortfall (النقص الذي غُطّي من الجيب) و next_due_date و new_installment و is_finished، ومعها الحساب الذي دُفع منه ورصيده والتسوية إن نشأت.`,
+      inputSchema: {
+        obligation: z.string().min(1).describe('معرّف الالتزام أو اسمه'),
+        paid_from_account: z
+          .string()
+          .optional()
+          .describe('الحساب الذي خرج منه الدفع — الافتراضي حساب صندوق الالتزام'),
+      },
       outputSchema: {
         currency: z.string(),
         obligation_id: z.string(),
@@ -562,14 +787,30 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         next_due_date: z.string().nullable(),
         new_installment: z.number(),
         is_finished: z.boolean(),
+        paid_from: z
+          .object({ id: z.string(), name: z.string(), balance: z.number(), withdrawn: z.number() })
+          .nullable(),
+        settlement: z
+          .object({
+            id: z.string(),
+            amount: z.number(),
+            debtor: z.string(),
+            creditor: z.string(),
+          })
+          .nullable(),
       },
       annotations: { ...WRITES, destructiveHint: true },
     },
-    guard(async ({ obligation }) => {
+    guard(async ({ obligation, paid_from_account }) => {
       const connection = await connect()
       const target = await findObligation(connection, obligation)
       const o = target.obligation
       const currency = connection.currency
+
+      // الافتراضي حساب الصندوق: من لم يقل من أين دفع دفع من حيث جمع.
+      const payingAccount = paid_from_account
+        ? await findAccount(connection, paid_from_account)
+        : target.account
 
       const result = renewAfterPayment({
         totalAmount: Number(o.total_amount),
@@ -590,6 +831,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         amount_paid: result.amountPaid,
         paid_date: paidDate,
         next_due_date_after: nextDue,
+        paid_from_account_id: payingAccount?.id ?? null,
       })
       if (paymentError) throw paymentError
 
@@ -600,9 +842,68 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           partner_id: null,
           amount: -result.amountPaid,
           deposit_date: paidDate,
+          account_id: target.account?.id ?? null,
           note: 'سحب عند الدفع',
         })
         if (drawError) throw drawError
+      }
+
+      /*
+       * الرصيد ينقص بما خرج فعلاً، لا بما كان في الصندوق.
+       *
+       * ما خرج من البنك هو حصّتي كاملةً: ما جمعه الصندوق زائد ما غُطّي من
+       * الجيب. وخصمُ `amountPaid` وحده كان يترك الرصيد أعلى من الحقيقة بمقدار
+       * النقص — أي أن التطبيق يَعِد بمالٍ أُنفق فعلاً.
+       */
+      const withdrawn = Math.round((result.amountPaid + result.shortfall) * 100) / 100
+      let accountBalance: number | null = null
+      if (payingAccount && withdrawn > 0) {
+        accountBalance = await moveBalance(connection, payingAccount.id, -withdrawn)
+      }
+
+      /*
+       * الدفع من حسابٍ غير حساب الصندوق: يُقبل، ويُعلَّم.
+       *
+       * هذا ما يحدث فعلاً حين تكون البطاقة في جيبٍ والصندوق في حسابٍ آخر،
+       * ورفضُه يجبر المستخدم على الكذب. والأثر حقيقيّ: حساب الصندوق تحرّر منه
+       * ‏`amountPaid` بلا أن ينقص رصيده، والحساب الدافع نقص. فالمدين هو الأول
+       * بمقدار ما تحرّر عنده — والنقص المغطّى من الجيب لا يدخل التسوية لأنه
+       * لم يكن في الصندوق أصلاً.
+       */
+      let settlement: {
+        id: string
+        amount: number
+        debtor: string
+        creditor: string
+      } | null = null
+
+      const fundAccount = target.account
+      if (
+        payingAccount &&
+        fundAccount &&
+        payingAccount.id !== fundAccount.id &&
+        result.amountPaid > 0
+      ) {
+        const { data: settlementRow, error: settlementError } = await connection.db
+          .from('account_settlements')
+          .insert({
+            user_id: connection.userId,
+            debtor_account_id: fundAccount.id,
+            creditor_account_id: payingAccount.id,
+            amount: result.amountPaid,
+            obligation_id: o.id,
+            note: `دفع ${o.name} من ${payingAccount.name} وصندوقه في ${fundAccount.name}`,
+          })
+          .select()
+          .single()
+        if (settlementError) throw settlementError
+
+        settlement = {
+          id: (settlementRow as AccountSettlement).id,
+          amount: result.amountPaid,
+          debtor: fundAccount.name,
+          creditor: payingAccount.name,
+        }
       }
 
       const { error: updateError } = await connection.db
@@ -628,6 +929,17 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         result.carriedBalance > 0
           ? `- رُحّل للدورة القادمة: ${money(result.carriedBalance, currency)}`
           : '',
+        payingAccount && accountBalance !== null
+          ? `- خرج من **${payingAccount.name}**: ${money(withdrawn, currency)} — رصيده الآن ${money(accountBalance, currency)}`
+          : '',
+        !payingAccount
+          ? '- ℹ️ لم يُذكر حسابٌ للدفع، فلم يتغيّر رصيد أي حساب. مرّر paid_from_account أو اربط الالتزام بحساب.'
+          : '',
+        settlement
+          ? `\n⚠️ **تسوية معلّقة:** ${settlement.debtor} مدين لـ ${settlement.creditor} بـ ${money(settlement.amount, currency)}.\n` +
+            `صندوقك في ${settlement.debtor} تحرّر والمال خرج من ${settlement.creditor} — ` +
+            `حوِّل بينهما بـ sanawi_transfer_between_accounts لتضبط الأرصدة، وتُغلق التسوية تلقائياً.`
+          : '',
         result.isFinished
           ? '- التزام لمرة واحدة — أُرشف.'
           : `- الموعد القادم: ${longDate(nextDue)}\n- **القسط الجديد: ${money(result.newInstallment, currency)}/شهر**`,
@@ -645,6 +957,16 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         next_due_date: result.isFinished ? null : nextDue,
         new_installment: result.newInstallment,
         is_finished: result.isFinished,
+        paid_from:
+          payingAccount && accountBalance !== null
+            ? {
+                id: payingAccount.id,
+                name: payingAccount.name,
+                balance: accountBalance,
+                withdrawn,
+              }
+            : null,
+        settlement,
       })
     }),
   )
@@ -850,8 +1172,9 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
   - ends_on (YYYY-MM-DD): شهر آخر دفعة، بديلٌ عن installments لمن يعرف التاريخ لا العدد
   - total_amount (number): المبلغ الكلّي — للسياق لا للحساب، ويُتحقَّق من اتساقه مع القسط
   - day_of_month (number): يوم الاستحقاق 1..31، اختياري
+  - account (string): حساب الدفع الافتراضي لهذا البند، اختياري
 
-المخرجات: id و name و amount و starts_on و ends_on و payments_left و day_of_month.`,
+المخرجات: id و name و amount و starts_on و ends_on و payments_left و day_of_month و account_name.`,
       inputSchema: {
         name: z.string().min(1).max(80),
         amount: z.number().min(0).describe('القسط الشهري لا سعر الشراء'),
@@ -875,6 +1198,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           .default(0)
           .describe('الفائدة السنوية على القرض — عليها يُرتَّب سداد الديون'),
         day_of_month: z.number().int().min(1).max(31).optional(),
+        account: z.string().optional().describe('حساب الدفع الافتراضي لهذا البند'),
       },
       outputSchema: {
         currency: z.string(),
@@ -888,6 +1212,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         remaining_total: z.number().nullable(),
         total_amount: z.number().nullable(),
         day_of_month: z.number().nullable(),
+        account_name: z.string().nullable(),
       },
       annotations: WRITES,
     },
@@ -895,6 +1220,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const connection = await connect()
       const today = new Date()
       const startsOn = input.starts_on ? requireDate(input.starts_on, 'starts_on') : null
+      const account = input.account ? await findAccount(connection, input.account) : null
 
       /*
        * عددُ الدفعات يصير تاريخاً، ولا يُخزَّن.
@@ -938,6 +1264,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           total_amount: input.total_amount ?? null,
           annual_interest_percent: input.annual_interest_percent,
           day_of_month: input.day_of_month ?? null,
+          account_id: account?.id ?? null,
           is_active: true,
         })
         .select()
@@ -967,6 +1294,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           (view.hasStarted
             ? ''
             : `\nأول دفعة ${monthYear(data.starts_on!)} — فلا يدخل حمل هذا الشهر.`) +
+          (account ? `\nيُدفع من **${account.name}**.` : '') +
           totalAmountWarning(
             input.amount,
             endsOn ? totalPayments(startsOn, endsOn, today) : 0,
@@ -985,6 +1313,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           remaining_total: view.remainingForMe,
           total_amount: data.total_amount === null ? null : Number(data.total_amount),
           day_of_month: data.day_of_month,
+          account_name: account?.name ?? null,
         },
       )
     }),
@@ -1002,7 +1331,8 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 
 المدخلات:
   - commitment (string): المعرّف أو الاسم — مطلوب
-  - name · amount · day_of_month · starts_on · ends_on · installments · total_amount · annual_interest_percent: كلها اختيارية
+  - name · amount · day_of_month · starts_on · ends_on · installments · total_amount · annual_interest_percent · account: كلها اختيارية
+  - account: حساب الدفع الافتراضي، أو null لفكّ الربط
 
 المخرجات: نفس مخرجات الإضافة بعد التعديل.`,
       inputSchema: {
@@ -1029,6 +1359,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         total_amount: z.number().min(0).nullable().optional(),
         annual_interest_percent: z.number().min(0).max(100).optional(),
         day_of_month: z.number().int().min(1).max(31).optional(),
+        account: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('حساب الدفع الافتراضي، أو null لفكّ الربط'),
       },
       outputSchema: {
         currency: z.string(),
@@ -1042,6 +1377,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         remaining_total: z.number().nullable(),
         total_amount: z.number().nullable(),
         day_of_month: z.number().nullable(),
+        account_name: z.string().nullable(),
       },
       annotations: WRITES,
     },
@@ -1067,6 +1403,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       }
       if (input.ends_on !== undefined) {
         patch.ends_on = input.ends_on === null ? null : requireDate(input.ends_on, 'ends_on')
+      }
+      // ‏`null` قيمةٌ مقصودة (فكّ الربط) لا غياب — نفس قاعدة التواريخ أدناه.
+      if (input.account !== undefined) {
+        patch.account_id =
+          input.account === null ? null : (await findAccount(connection, input.account)).id
       }
 
       /*
@@ -1118,6 +1459,14 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         today,
       )
 
+      // الاسم يُقرأ من الصفّ كما صار لا من المُدخَل: من لم يمرّر account يجب
+      // أن يرى حسابه القديم في الرد لا فراغاً يوحي بأنه فُكّ.
+      const linked = updated.account_id
+        ? ((await loadAccounts(connection, { includeArchived: true })).find(
+            (row) => row.id === updated.account_id,
+          ) ?? null)
+        : null
+
       return ok(
         `عُدِّل **${updated.name}**: ${money(Number(updated.amount), currency)} شهرياً` +
           (updated.day_of_month ? ` (يوم ${updated.day_of_month})` : '') +
@@ -1128,6 +1477,11 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           (view.hasStarted
             ? ''
             : `\nأول دفعة ${monthYear(updated.starts_on!)} — فلا يدخل حمل هذا الشهر.`) +
+          (input.account !== undefined
+            ? linked
+              ? `\nيُدفع من **${linked.name}**.`
+              : '\nفُكّ ربطه بالحساب.'
+            : '') +
           totalAmountWarning(
             Number(updated.amount),
             updated.ends_on ? totalPayments(updated.starts_on, updated.ends_on, today) : 0,
@@ -1146,6 +1500,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           remaining_total: view.remainingForMe,
           total_amount: updated.total_amount === null ? null : Number(updated.total_amount),
           day_of_month: updated.day_of_month,
+          account_name: linked?.name ?? null,
         },
       )
     }),
@@ -1324,14 +1679,20 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
 المدخلات:
   - amount (number): أكبر من 0
   - group (string): معرّف المجموعة أو اسمها، اختياري
+  - account (string): الحساب الذي خرج منه المصروف، اختياري
   - category (string): اختياري
   - date (string): YYYY-MM-DD، افتراضياً اليوم
   - note (string): اختياري
 
-المخرجات: id و amount و spent_at و group_id.`,
+**تسجيل المصروف لا يُنقص رصيد الحساب.** الرصيد يُدخَل يدوياً من كشف البنك
+(sanawi_save_account)، والربط هنا يقول «من أين خرج» لا «كم بقي». وخصمُه هنا
+مع إدخال الرصيد من الكشف كان سيخصم المصروف مرّتين.
+
+المخرجات: id و amount و spent_at و group_id و account_name.`,
       inputSchema: {
         amount: z.number().positive(),
         group: z.string().optional().describe('معرّف المجموعة أو اسمها'),
+        account: z.string().optional().describe('الحساب الذي خرج منه المصروف'),
         category: z.string().max(60).optional(),
         date: z.string().optional().describe('YYYY-MM-DD، افتراضياً اليوم'),
         note: z.string().max(200).optional(),
@@ -1343,12 +1704,14 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         spent_at: z.string(),
         group_id: z.string().nullable(),
         group_name: z.string().nullable(),
+        account_name: z.string().nullable(),
       },
       annotations: WRITES,
     },
     guard(async (input) => {
       const connection = await connect()
       const group = input.group ? await findGroup(connection, input.group) : null
+      const account = input.account ? await findAccount(connection, input.account) : null
       const spentAt = input.date ? requireDate(input.date, 'date') : isoDate()
 
       const { data, error } = await connection.db
@@ -1356,6 +1719,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
         .insert({
           user_id: connection.userId,
           group_id: group?.id ?? null,
+          account_id: account?.id ?? null,
           category: input.category ?? null,
           amount: input.amount,
           spent_at: spentAt,
@@ -1369,7 +1733,9 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       return ok(
         `سُجّل مصروف ${money(input.amount, currency)}` +
           (group ? ` على مجموعة **${group.name}**` : '') +
-          ` بتاريخ ${longDate(spentAt)}.`,
+          (account ? ` من **${account.name}**` : '') +
+          ` بتاريخ ${longDate(spentAt)}.` +
+          (account ? '\nالرصيد لم يُنقَص — حدّثه من كشف البنك بـ sanawi_save_account.' : ''),
         {
           currency,
           id: data.id,
@@ -1377,6 +1743,7 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
           spent_at: data.spent_at,
           group_id: data.group_id,
           group_name: group?.name ?? null,
+          account_name: account?.name ?? null,
         },
       )
     }),
@@ -1940,6 +2307,321 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
             annual_return_percent: Number(asset.annual_return_percent),
           },
         },
+      )
+    }),
+  )
+
+  /* ── الحسابات ───────────────────────────────────────────── */
+
+  server.registerTool(
+    'sanawi_save_account',
+    {
+      title: 'تسجيل حساب بنكي أو تحديث رصيده',
+      description: `يسجّل حساباً بنكياً جديداً، أو يحدّث رصيد حسابٍ موجود إن طابق الاسم.
+
+**الحساب هو المكان الذي يعيش فيه المال.** وصناديق الالتزامات مظاريف توضع فوقه
+لا بجانبه: صندوق التأمين بـ2,000 في حسابٍ رصيده 2,000 لا يعني أن معك 4,000 —
+يعني أن الألفين كلها مخصَّصة ولم يبقَ منها شيء غير مخصّص.
+
+الرصيد يُدخَل يدوياً: لا ربط مع البنك ولا استيراد حركات. فذكّر المستخدم بتحديثه
+حين يمضي عليه أسبوعان — sanawi_list_accounts تقول متى.
+
+التحديث بالاسم لا بمعرّف، والمطابقة تامّة لا جزئية: «بنك» لا تطابق «بنك الشغل»،
+فلا يُكتب رصيدٌ فوق حسابٍ لم يُقصد.
+
+المدخلات:
+  - name (string): اسم الحساب كما يسمّيه المستخدم («حساب الالتزامات»، «لئومي»)
+  - balance (number): الرصيد الفعلي كما في كشف البنك — قد يكون سالباً (مكشوف)
+  - kind ('checking' | 'savings'): افتراضياً checking للحساب الجديد
+
+المخرجات: الحساب بعد الحفظ ومعه reserved و available، وهل أُنشئ أم حُدِّث.`,
+      inputSchema: {
+        name: z.string().min(1).max(80).describe('اسم الحساب'),
+        balance: z.number().describe('الرصيد الفعلي — السالب مقبول لحسابٍ مكشوف'),
+        /*
+         * بلا `default()` عمداً — نفس سبب `sanawi_save_asset`: القيمة
+         * الافتراضية تصل المعالج كأنها مُرسَلة، فيصير كل تحديثِ رصيدٍ محواً
+         * صامتاً لنوع الحساب.
+         */
+        kind: z
+          .enum(['checking', 'savings'])
+          .optional()
+          .describe('نوع الحساب — افتراضياً checking للحساب الجديد'),
+      },
+      outputSchema: {
+        currency: z.string(),
+        created: z.boolean(),
+        account: z.object(accountOut),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const currency = connection.currency
+      const name = input.name.trim()
+
+      const accounts = await loadAccounts(connection)
+      const matches = accounts.filter((row) => row.name.trim() === name)
+
+      /*
+       * قيدٌ فريد في القاعدة يمنع التكرار، والحارس هنا لما قبله: قاعدةٌ أُنشئت
+       * من ملفٍ موحَّد قديم بلا الفهرس تُنتج حسابين بالاسم نفسه، ورسالة
+       * PostgREST الخام إنجليزيةٌ في واجهة عربية ولا تقول لصاحبها ما يفعل.
+       */
+      if (matches.length > 1) {
+        throw new Error(
+          `عندك ${matches.length} حسابات نشطة اسمها «${name}»، فلا أعرف أيّها تقصد. ` +
+            'ميّز أسماءها أو أرشف الزائد بـ sanawi_archive_account.',
+        )
+      }
+      const current = matches[0] ?? null
+
+      const saved = current
+        ? await connection.db
+            .from('accounts')
+            .update({
+              balance: input.balance,
+              ...(input.kind !== undefined ? { kind: input.kind } : {}),
+            })
+            .eq('id', current.id)
+            .select()
+            .single()
+        : await connection.db
+            .from('accounts')
+            .insert({
+              user_id: connection.userId,
+              name,
+              kind: input.kind ?? 'checking',
+              balance: input.balance,
+              archived_at: null,
+            })
+            .select()
+            .single()
+      if (saved.error) throw saved.error
+
+      const account = saved.data as Account
+      const obligations = await loadObligations(connection)
+      const reserved = reservedByAccount(obligations).get(account.id) ?? 0
+
+      const view = viewAccount({
+        id: account.id,
+        name: account.name,
+        kind: account.kind,
+        balance: Number(account.balance),
+        balanceUpdatedAt: account.balance_updated_at,
+        envelopes: obligations
+          .filter((o) => o.obligation.account_id === account.id)
+          .map((o) => ({
+            name: o.obligation.name,
+            balance: Number(o.balance?.my_fund_balance ?? 0),
+            obligationId: o.obligation.id,
+          }))
+          .filter((envelope) => envelope.balance !== 0),
+      })
+
+      return ok(
+        [
+          current
+            ? `**${account.name}** صار ${money(Number(account.balance), currency)}.`
+            : `سُجِّل حساب **${account.name}** بـ ${money(Number(account.balance), currency)}.`,
+          reserved > 0
+            ? `مخصَّص لصناديق: ${money(view.reserved, currency)} · **غير مخصّص: ${money(view.available, currency)}**`
+            : 'لا صناديق مربوطة به بعد — كلّه غير مخصّص.',
+          view.shortfall
+            ? `⚠️ صناديقك على هذا الحساب تعِد بـ ${money(-view.available, currency)} أكثر ممّا فيه.`
+            : null,
+        ]
+          .filter((line) => line !== null)
+          .join('\n'),
+        { currency, created: !current, account: toAccountOut(view) },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_transfer_between_accounts',
+    {
+      title: 'تحويل بين حسابين',
+      description: `ينقل مبلغاً من حسابٍ إلى حساب: ينقص رصيد الأول ويزيد رصيد الثاني.
+
+**التحويل ليس إيداعاً في صندوق.** الفرق جوهريّ:
+  - التحويل ينقل مالاً حقيقياً بين حسابين، ولا يغيّر أرصدة الصناديق.
+  - الإيداع (sanawi_add_deposit) يخصّص مالاً **موجوداً أصلاً**، ولا يغيّر أرصدة الحسابات.
+  - ولا واحد منهما يغيّر صافي الثروة — المال لم يزد، إنما تحرّك.
+
+ومن يقول «حوّلت 2,000 لصندوق التأمين» يقصد الاثنين معاً: مرِّر from_account لـ
+sanawi_add_deposit فتكتب التحويل والإيداع في نداءٍ واحد بدل ندائين.
+
+والتحويل يُغلق التسويات المعلّقة التي يسدّدها تلقائياً: من دفع التزاماً من حسابٍ
+غير حساب صندوقه بقيت عليه تسوية، وهذا التحويل هو ما يقفلها.
+
+المدخلات:
+  - from (string): معرّف الحساب المُرسِل أو اسمه
+  - to (string): معرّف الحساب المستقبِل أو اسمه
+  - amount (number): المبلغ، أكبر من 0
+  - date (string): YYYY-MM-DD، افتراضياً اليوم
+  - note (string): اختياري
+
+المخرجات: الرصيدان بعد التحويل، والتسويات التي أُغلقت.`,
+      inputSchema: {
+        from: z.string().min(1).describe('معرّف الحساب المُرسِل أو اسمه'),
+        to: z.string().min(1).describe('معرّف الحساب المستقبِل أو اسمه'),
+        amount: z.number().positive().describe('المبلغ المحوَّل'),
+        date: z.string().optional().describe('YYYY-MM-DD، افتراضياً اليوم'),
+        note: z.string().max(200).optional(),
+      },
+      outputSchema: {
+        currency: z.string(),
+        transfer_id: z.string(),
+        amount: z.number(),
+        transferred_at: z.string(),
+        from: z.object({ id: z.string(), name: z.string(), balance: z.number() }),
+        to: z.object({ id: z.string(), name: z.string(), balance: z.number() }),
+        settlements_closed: z.array(
+          z.object({ id: z.string(), amount: z.number(), note: z.string().nullable() }),
+        ),
+      },
+      annotations: WRITES,
+    },
+    guard(async (input) => {
+      const connection = await connect()
+      const currency = connection.currency
+      const [from, to] = await Promise.all([
+        findAccount(connection, input.from),
+        findAccount(connection, input.to),
+      ])
+
+      if (from.id === to.id) {
+        throw new Error(
+          `«${from.name}» هو نفسه في الطرفين — التحويل إلى الحساب نفسه لا ينقل شيئاً.`,
+        )
+      }
+
+      const transferredAt = input.date ? requireDate(input.date, 'date') : isoDate()
+
+      /*
+       * الصفّ يُكتب أولاً ثم يتحرّك الرصيدان.
+       *
+       * لا معاملة ذرّية عبر PostgREST، فالترتيب هو كل ما نملك: صفُّ التحويل
+       * موجودٌ سواء اكتمل ما بعده أو لا، فيبقى الأثر مقروءاً ويمكن تصحيح
+       * الرصيد يدوياً. والترتيب المعكوس يترك رصيدين متحرّكين بلا سببٍ مسجَّل.
+       */
+      const { data, error } = await connection.db
+        .from('account_transfers')
+        .insert({
+          user_id: connection.userId,
+          from_account_id: from.id,
+          to_account_id: to.id,
+          amount: input.amount,
+          transferred_at: transferredAt,
+          note: input.note ?? null,
+        })
+        .select()
+        .single()
+      if (error) throw error
+
+      const transfer = data as AccountTransfer
+      const fromBalance = await moveBalance(connection, from.id, -input.amount)
+      const toBalance = await moveBalance(connection, to.id, input.amount)
+
+      const closed = await closeSettlements(connection, {
+        fromAccountId: from.id,
+        toAccountId: to.id,
+        amount: input.amount,
+        transferId: transfer.id,
+      })
+
+      return ok(
+        [
+          `حُوّل ${money(input.amount, currency)} من **${from.name}** إلى **${to.name}**.`,
+          `- ${from.name}: ${money(fromBalance, currency)}`,
+          `- ${to.name}: ${money(toBalance, currency)}`,
+          'صافي الثروة لم يتغيّر — المال تحرّك ولم يزد.',
+          closed.length > 0
+            ? `✅ أُغلقت ${closed.length} تسوية معلّقة بـ ${money(
+                closed.reduce((sum, row) => sum + Number(row.amount), 0),
+                currency,
+              )}.`
+            : null,
+        ]
+          .filter((line) => line !== null)
+          .join('\n'),
+        {
+          currency,
+          transfer_id: transfer.id,
+          amount: Number(transfer.amount),
+          transferred_at: transfer.transferred_at,
+          from: { id: from.id, name: from.name, balance: fromBalance },
+          to: { id: to.id, name: to.name, balance: toBalance },
+          settlements_closed: closed.map((row) => ({
+            id: row.id,
+            amount: Number(row.amount),
+            note: row.note,
+          })),
+        },
+      )
+    }),
+  )
+
+  server.registerTool(
+    'sanawi_archive_account',
+    {
+      title: 'أرشفة حساب',
+      description: `يُخرج الحساب من القوائم النشطة دون حذف: التحويلات والدفعات التي تشير إليه تبقى.
+
+**يُرفض ما دام عليه صناديق مربوطة.** حسابٌ يحمل مظاريف لا يُؤرشف قبل نقلها،
+وإلا صارت صناديق بلا مكان: مالها يُحتسب ملكاً بلا أن يُعرف أين هو. اربط صناديقه
+بحسابٍ آخر أولاً (sanawi_update_obligation مع account) ثم أعد المحاولة.
+
+المدخلات:
+  - account (string): المعرّف أو الاسم
+
+المخرجات: id و name و archived.`,
+      inputSchema: { account: z.string().min(1).describe('معرّف الحساب أو اسمه') },
+      outputSchema: { id: z.string(), name: z.string(), archived: z.boolean() },
+      annotations: { ...WRITES, destructiveHint: true, idempotentHint: true },
+    },
+    guard(async ({ account }) => {
+      const connection = await connect()
+      // نبحث في المؤرشف أيضاً: الأداة معلَنة idempotent، ونداءٌ ثانٍ يجب ألّا
+      // يفشل بـ«لا حساب بهذا الاسم» فيبدو وكأن الحساب اختفى.
+      const target = await findAccount(connection, account, { includeArchived: true })
+
+      if (target.archived_at !== null) {
+        return ok(`**${target.name}** مؤرشف أصلاً — لم يتغيّر شيء.`, {
+          id: target.id,
+          name: target.name,
+          archived: true,
+        })
+      }
+
+      const obligations = await loadObligations(connection)
+      const linked = obligations.filter(
+        (o) =>
+          o.obligation.account_id === target.id &&
+          Number(o.balance?.my_fund_balance ?? 0) !== 0,
+      )
+      const reserved = reservedByAccount(obligations).get(target.id) ?? 0
+
+      if (reserved > 0) {
+        throw new Error(
+          `**${target.name}** عليه ${money(reserved, connection.currency)} مخصَّصة لصناديق: ` +
+            `${linked.map((o) => o.obligation.name).join('، ')}. ` +
+            'اربطها بحسابٍ آخر أولاً (sanawi_update_obligation مع account) ثم أرشفه — ' +
+            'صندوقٌ بلا حساب مالٌ لا يُعرف أين هو.',
+        )
+      }
+
+      const { error } = await connection.db
+        .from('accounts')
+        .update({ archived_at: new Date().toISOString() })
+        .eq('id', target.id)
+      if (error) throw error
+
+      return ok(
+        `أُرشف **${target.name}**. التحويلات والدفعات التي تشير إليه محفوظة، ` +
+          'ويمكن إرجاعه بمسح archived_at من التطبيق.',
+        { id: target.id, name: target.name, archived: true },
       )
     }),
   )

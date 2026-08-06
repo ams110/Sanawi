@@ -78,6 +78,7 @@ export function WealthScreen() {
     if (!sources) return null
     return computeNetWorth({
       assets: toAssetInputs(sources.assets),
+      accounts: sources.accounts,
       restrictedFunds: sources.restrictedFunds,
       debts: sources.debts,
       monthlyEssentials: sources.monthlyEssentials,
@@ -160,6 +161,10 @@ export function WealthScreen() {
 
         <dl className="space-y-1.5 border-t border-border pt-3 text-[13px]">
           <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-text-muted">{t('wealth.accountsTotal')}</dt>
+            <dd className="num font-bold text-text">{formatMoney(net.accountsTotal)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between gap-3">
             <dt className="text-text-muted">{t('wealth.assetsTotal')}</dt>
             <dd className="num font-bold text-text">{formatMoney(net.assetsTotal)}</dd>
           </div>
@@ -176,6 +181,75 @@ export function WealthScreen() {
         <p className="text-[12px] leading-relaxed text-text-muted">{t('wealth.restrictedNote')}</p>
         <p className="text-[12px] leading-relaxed text-text-muted">{t('wealth.debtsNote')}</p>
       </section>
+
+      {/*
+       * الحسابات ومظاريفها.
+       *
+       * أهمّ رقمٍ هنا «غير مخصّص»: موجباً فالوضع مضبوط، وسالباً فالتطبيق يَعِد
+       * بمالٍ ليس في البنك. ولا يمكن اكتشافه من صندوقٍ واحد — كلٌّ منها يبدو
+       * سليماً، والمجموع وحده يفضح النقص.
+       */}
+      {net.accounts.length > 0 && (
+        <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
+          <h2 className="text-sm font-bold text-text">{t('wealth.accountsTitle')}</h2>
+
+          <ul className="space-y-3">
+            {net.accounts.map((account) => (
+              <li key={account.name} className="space-y-1">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-sm font-semibold text-text">{account.name}</span>
+                  <span className="num text-sm font-bold text-text">
+                    {formatMoney(account.balance)}
+                  </span>
+                </div>
+                <div className="flex items-baseline justify-between gap-3 text-[13px]">
+                  <span className="text-text-muted">{t('wealth.reserved')}</span>
+                  <span className="num text-text-muted">{formatMoney(account.reserved)}</span>
+                </div>
+                <div className="flex items-baseline justify-between gap-3 text-[13px]">
+                  <span className={account.shortfall ? 'font-semibold text-danger' : 'text-text'}>
+                    {t('wealth.available')}
+                  </span>
+                  <span
+                    className={`num font-bold ${account.shortfall ? 'text-danger' : 'text-text'}`}
+                  >
+                    {formatMoney(account.available)}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {net.accounts.some((account) => account.shortfall) && (
+            <p className="rounded-2xl bg-danger-soft px-4 py-3 text-[13px] font-semibold text-danger">
+              {t('wealth.shortfallNote')}
+            </p>
+          )}
+
+          <p className="text-[12px] leading-relaxed text-text-muted">
+            {t('wealth.accountsNote')}
+          </p>
+        </section>
+      )}
+
+      {/*
+       * الصندوق غير المربوط يُحتسب ملكاً — وهو تخمينٌ يُقال لا يُخفى.
+       */}
+      {net.hasUnlinkedFunds && (
+        <section className="space-y-2 rounded-3xl border border-warning/30 bg-warning-soft p-5">
+          <h2 className="text-sm font-bold text-warning">{t('wealth.unlinkedTitle')}</h2>
+          <p className="text-[13px] leading-relaxed text-text">
+            {t('wealth.unlinkedNote', { amount: formatMoney(net.unlinkedRestrictedTotal) })}
+          </p>
+          <ul className="space-y-1">
+            {sources.unlinkedFunds.map((fund) => (
+              <li key={fund.name} className="text-xs text-text-muted">
+                {fund.name} — {formatMoney(fund.balance)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/*
        * القيم القديمة تُقال ولا تُبتلع: صافي ثروةٍ مبنيّ على رقمٍ عمره سنة

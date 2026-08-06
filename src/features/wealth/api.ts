@@ -1,13 +1,27 @@
 import { supabase } from '@/lib/supabase'
-import type { Asset, AssetKind, NetWorthSnapshot } from '@/lib/db/types'
+import type { Account, Asset, AssetKind, NetWorthSnapshot } from '@/lib/db/types'
 import { listObligations } from '@/features/obligations/api'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, shiftMonth, toCalcRows } from '@/features/expenses/api'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
 import { spendingBaseline } from '@/lib/wealth/baseline'
-import type { AssetInput, DebtInput } from '@/lib/wealth/networth'
+import type { CashAccountInput, DebtInput, RestrictedFundInput } from '@/lib/wealth/networth'
+import type { AssetInput } from '@/lib/wealth/networth'
 import { debtBalanceFrom, type PayoffDebt } from '@/lib/commitments/payoff'
+
+/* ── الحسابات ──────────────────────────────────────────────── */
+
+export async function listAccounts(): Promise<Account[]> {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('*')
+    // ‏`is` لا `eq`: `= NULL` لا يطابق شيئاً في Postgres، فيردّ قائمةً فارغة.
+    .is('archived_at', null)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Account[]
+}
 
 /* ── الأصول ────────────────────────────────────────────────── */
 
@@ -140,8 +154,15 @@ export async function saveSnapshot(
 
 export interface WealthSources {
   assets: Asset[]
-  /** أرصدة صناديق الالتزامات — ما أودعتُه أنا وحدي في كل صندوق. */
-  restrictedFunds: number[]
+  /** الحسابات البنكية ومعها ما خصّصته صناديقها — مصدر النقد الوحيد. */
+  accounts: CashAccountInput[]
+  /** صناديق غير مربوطة بحساب — تُحتسب ملكاً، ويُقال إنها طليقة. */
+  unlinkedFunds: { name: string; balance: number }[]
+  /**
+   * أرصدة صناديق الالتزامات — ما أودعتُه أنا وحدي في كل صندوق، ومعه هل هو
+   * مربوطٌ بحساب. المربوط مالُه معدودٌ في رصيد حسابه فلا يُجمع مرّتين.
+   */
+  restrictedFunds: RestrictedFundInput[]
   debts: DebtInput[]
   payoffDebts: PayoffDebt[]
   snapshots: NetWorthSnapshot[]
@@ -178,16 +199,47 @@ export async function loadWealthSources(): Promise<WealthSources> {
   // لم ينتهِ بعد.
   const completedKeys = [shiftMonth(month, -1), shiftMonth(month, -2), shiftMonth(month, -3)]
 
-  const [assets, obligations, details, expenses, snapshots, ...completed] = await Promise.all([
-    listAssets(),
-    listObligations(),
-    listCommitmentDetails(),
-    listExpenses(month),
-    listSnapshots(),
-    ...completedKeys.map((key) => listExpenses(key)),
-  ])
+  const [assets, accountRows, obligations, details, expenses, snapshots, ...completed] =
+    await Promise.all([
+      listAssets(),
+      listAccounts(),
+      listObligations(),
+      listCommitmentDetails(),
+      listExpenses(month),
+      listSnapshots(),
+      ...completedKeys.map((key) => listExpenses(key)),
+    ])
 
-  const restrictedFunds = obligations.map((o) => Number(o.balance?.my_fund_balance ?? 0))
+  /*
+   * الصندوق يُنسب إلى حسابه، والحساب يعرف كم خُصّص منه.
+   *
+   * وهذا هو مصدر اتفاق الشاشة مع خادم MCP: كلاهما يبني نفس المدخلات لنفس
+   * المحرّك (`computeNetWorth`)، فلا يقول كلود رقماً غير الذي في التلفون.
+   */
+  const reserved = new Map<string, number>()
+  const unlinkedFunds: { name: string; balance: number }[] = []
+
+  for (const item of obligations) {
+    const balance = Number(item.balance?.my_fund_balance ?? 0)
+    const accountId = item.obligation.account_id
+    if (!accountId) {
+      if (balance > 0) unlinkedFunds.push({ name: item.obligation.name, balance })
+      continue
+    }
+    // الصندوق السالب لا ينقص التخصيص — الشرح في src/lib/accounts/calc.ts.
+    reserved.set(accountId, (reserved.get(accountId) ?? 0) + Math.max(0, balance))
+  }
+
+  const accounts: CashAccountInput[] = accountRows.map((row) => ({
+    name: row.name,
+    balance: Number(row.balance),
+    reserved: reserved.get(row.id) ?? 0,
+  }))
+
+  const restrictedFunds: RestrictedFundInput[] = obligations.map((o) => ({
+    amount: Number(o.balance?.my_fund_balance ?? 0),
+    isLinked: o.obligation.account_id !== null,
+  }))
 
   const load = summarizeMonthlyLoad(
     details.map((d) => ({
@@ -263,6 +315,8 @@ export async function loadWealthSources(): Promise<WealthSources> {
 
   return {
     assets,
+    accounts,
+    unlinkedFunds,
     restrictedFunds,
     debts,
     payoffDebts,

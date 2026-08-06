@@ -410,3 +410,105 @@ describe('الحالات الحدّية', () => {
     expect(r.weightedReturnPercent).toBe(3)
   })
 })
+
+/*
+ * الحسابات: الشيكل يُعدّ مرّةً واحدة.
+ *
+ * هذه الحزمة تثبّت الإصلاح الذي وُلدت منه الحسابات: من سجّل رصيده البنكي
+ * وسجّل صناديقه كان صافي ثروته يخرج ضعفَ الحقيقة، لأن الألفين في البنك هي
+ * نفسها الألفان في صندوق التأمين.
+ */
+describe('الحسابات — المال يعيش في مكان', () => {
+  const twoAccounts = [
+    { name: 'بنك A', balance: 2000, reserved: 0 },
+    { name: 'بنك B', balance: 1500, reserved: 0 },
+  ]
+
+  it('حسابان بلا صناديق: مجموع الأرصدة لا ضعفه', () => {
+    const r = computeNetWorth(input({ accounts: twoAccounts }))
+    expect(r.accountsTotal).toBe(3500)
+    expect(r.netWorth).toBe(3500)
+  })
+
+  it('صندوقٌ مربوط تخصيصٌ لا ملكٌ ثانٍ', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [
+          { name: 'بنك A', balance: 2000, reserved: 2000 },
+          { name: 'بنك B', balance: 1500, reserved: 0 },
+        ],
+        restrictedFunds: [{ amount: 2000, isLinked: true }],
+      }),
+    )
+
+    // الرقم لم يتغيّر بربط الصندوق — وهذا هو المقصود كلّه.
+    expect(r.netWorth).toBe(3500)
+    expect(r.restrictedTotal).toBe(2000)
+    expect(r.accounts[0]).toMatchObject({ name: 'بنك A', available: 0, shortfall: false })
+  })
+
+  it('صناديق تفوق رصيد حسابها: نقصٌ يُعلَن', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [{ name: 'بنك B', balance: 1500, reserved: 2700 }],
+        restrictedFunds: [
+          { amount: 1500, isLinked: true },
+          { amount: 1200, isLinked: true },
+        ],
+      }),
+    )
+
+    expect(r.accounts[0]!.available).toBe(-1200)
+    expect(r.accounts[0]!.shortfall).toBe(true)
+    expect(r.netWorth).toBe(1500)
+  })
+
+  /*
+   * الحالة الانتقالية: صندوقٌ بلا حساب. التطبيق لا يعرف أين ماله، وإسقاطه
+   * يهبط بصافي الثروة كذباً — فيُحتسب ملكاً كما كان، ويُقال ذلك صراحةً.
+   */
+  it('الصندوق غير المربوط يبقى ملكاً، ويُعلَن أنه غير مربوط', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [{ name: 'بنك A', balance: 2000, reserved: 0 }],
+        restrictedFunds: [{ amount: 800, isLinked: false }],
+      }),
+    )
+
+    expect(r.unlinkedRestrictedTotal).toBe(800)
+    expect(r.hasUnlinkedFunds).toBe(true)
+    expect(r.netWorth).toBe(2800)
+  })
+
+  it('رقمٌ مجرّد في restrictedFunds = صندوقٌ غير مربوط', () => {
+    const r = computeNetWorth(input({ restrictedFunds: [800] }))
+    expect(r.hasUnlinkedFunds).toBe(true)
+    expect(r.ownedTotal).toBe(800)
+  })
+
+  it('نقد الحساب سائلٌ بحكم تعريفه', () => {
+    const r = computeNetWorth(
+      input({
+        assets: [asset({ name: 'الشقة', kind: 'property', amount: 60000, isLiquid: false })],
+        accounts: [{ name: 'بنك A', balance: 2000 }],
+      }),
+    )
+    expect(r.liquidTotal).toBe(2000)
+  })
+
+  it('حسابٌ مكشوف يبقى سالباً ولا يُقصّ عند الصفر', () => {
+    const r = computeNetWorth(input({ accounts: [{ name: 'مكشوف', balance: -400 }] }))
+    expect(r.accountsTotal).toBe(-400)
+    expect(r.netWorth).toBe(-400)
+    expect(r.isUnderwater).toBe(true)
+  })
+
+  it('بلا حسابات: كل الحقول أصفارٌ لا NaN', () => {
+    const r = computeNetWorth(input({}))
+    expect(r.accountsTotal).toBe(0)
+    expect(r.accountsReserved).toBe(0)
+    expect(r.accountsAvailable).toBe(0)
+    expect(r.accounts).toEqual([])
+    expect(r.hasUnlinkedFunds).toBe(false)
+  })
+})

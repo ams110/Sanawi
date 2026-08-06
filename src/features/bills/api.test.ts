@@ -14,6 +14,7 @@ const commitment = (id: string) => ({
   total_amount: null,
   annual_interest_percent: 0,
   my_share_percent: 100,
+  account_id: null,
   is_active: true,
   created_at: '',
 })

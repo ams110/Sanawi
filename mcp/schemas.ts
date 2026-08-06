@@ -16,6 +16,7 @@ import type {
   ObligationTemplate,
   PartnerSettlement,
 } from '../src/lib/db/types.js'
+import type { AccountView } from '../src/lib/accounts/calc.js'
 import type { CalendarMonth } from '../src/lib/obligations/calendar.js'
 import type { PayoffPlan } from '../src/lib/commitments/payoff.js'
 import { viewCommitment } from '../src/lib/commitments/calc.js'
@@ -55,12 +56,20 @@ export const obligationOut = {
   status_label: z.string(),
   /** اكتمال الصندوق 0..1. */
   progress: z.number(),
+  /** الحساب الذي يحتفظ بصندوق هذا الالتزام — فارغ = صندوق غير مربوط. */
+  account_id: z.string().nullable(),
+  account_name: z.string().nullable(),
   notes: z.string().nullable(),
 }
 
 export type ObligationOut = z.infer<z.ZodObject<typeof obligationOut>>
 
-export function toObligationOut({ obligation, balance, calc }: ObligationView): ObligationOut {
+export function toObligationOut({
+  obligation,
+  balance,
+  calc,
+  account,
+}: ObligationView): ObligationOut {
   return {
     id: obligation.id,
     name: obligation.name,
@@ -86,7 +95,57 @@ export function toObligationOut({ obligation, balance, calc }: ObligationView): 
     status: calc.status,
     status_label: STATUS_LABEL[calc.status] ?? calc.status,
     progress: calc.progress,
+    account_id: obligation.account_id,
+    account_name: account?.name ?? null,
     notes: obligation.notes,
+  }
+}
+
+/* ── الحساب ───────────────────────────────────────────────── */
+
+export const accountOut = {
+  id: z.string().nullable(),
+  name: z.string(),
+  kind: z.string(),
+  /** الرصيد الفعلي كما في البنك. */
+  balance: z.number(),
+  /** ما خصّصته صناديق الالتزامات المربوطة به. */
+  reserved: z.number(),
+  /** الرصيد ناقص المخصَّص — أهمّ رقم في اللوحة. سالب = وعدٌ بمالٍ غير موجود. */
+  available: z.number(),
+  shortfall: z.boolean(),
+  balance_updated_at: z.string().nullable(),
+  days_since_balance_update: z.number().nullable(),
+  /** مضى على الرصيد أكثر من أسبوعين — الرقم مبنيّ على مُدخَلٍ قديم. */
+  balance_is_stale: z.boolean(),
+  envelopes: z.array(
+    z.object({
+      name: z.string(),
+      balance: z.number(),
+      obligation_id: z.string().nullable(),
+      share: z.number(),
+    }),
+  ),
+}
+
+export function toAccountOut(view: AccountView): z.infer<z.ZodObject<typeof accountOut>> {
+  return {
+    id: view.id,
+    name: view.name,
+    kind: view.kind,
+    balance: view.balance,
+    reserved: view.reserved,
+    available: view.available,
+    shortfall: view.shortfall,
+    balance_updated_at: view.balanceUpdatedAt,
+    days_since_balance_update: view.daysSinceBalanceUpdate,
+    balance_is_stale: view.balanceIsStale,
+    envelopes: view.envelopes.map((envelope) => ({
+      name: envelope.name,
+      balance: envelope.balance,
+      obligation_id: envelope.obligationId,
+      share: envelope.share,
+    })),
   }
 }
 

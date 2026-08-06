@@ -83,6 +83,10 @@ const TABLES = [
   // 0014
   'assets',
   'net_worth_snapshots',
+  // 0016
+  'accounts',
+  'account_transfers',
+  'account_settlements',
 ]
 
 console.log(`الاتصال بـ ${env.VITE_SUPABASE_URL}\n`)
@@ -128,6 +132,14 @@ const COLUMNS = [
   ['income_sources', 'is_variable'],
   ['obligation_templates', 'hint'],
   ['commitment_templates', 'hint'],
+  // 0016 — الربط كلّه أعمدة على جداول قائمة، فغيابها لا يظهر في فحص الجداول.
+  ['accounts', 'balance_updated_at'],
+  ['accounts', 'archived_at'],
+  ['obligations', 'account_id'],
+  ['fund_deposits', 'account_id'],
+  ['obligation_payments', 'paid_from_account_id'],
+  ['fixed_commitments', 'account_id'],
+  ['expenses', 'account_id'],
 ]
 
 console.log('')

@@ -123,6 +123,7 @@ const obligation = {
   cycle_start_date: '2026-01-01',
   baseline_installment: 500,
   my_share_percent: 100,
+  account_id: null,
   is_active: true,
   notes: null,
   created_at: '2026-01-01T00:00:00Z',
@@ -131,6 +132,7 @@ const obligation = {
 const view = {
   obligation,
   balance: null,
+  account: null,
   calc: calculateObligation({
     totalAmount: 6000,
     mySharePercent: 100,
@@ -188,10 +190,16 @@ const app = await connect({
  */
 const called = new Set()
 
-/** ينادي أداة ويفشل الفحص إن ردّت خطأً. يعيد البيانات المنظّمة. */
-async function call(name, args = {}) {
+/**
+ * ينادي أداة ويفشل الفحص إن ردّت خطأً. يعيد البيانات المنظّمة.
+ *
+ * والعميل معامل: فحص الحسابات يحتاج قاعدةً نظيفة — أرقام «صافي الثروة = 3,500
+ * لا 7,000» لا تُقاس على قاعدةٍ فيها أصولٌ وديونٌ من فحوصٍ قبلها — فيرفع
+ * خادماً ثانياً ويبقى يعدّ في نفس مجموعة `called`.
+ */
+async function call(name, args = {}, client = app) {
   called.add(name)
-  const result = await app.callTool({ name, arguments: args })
+  const result = await client.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (result.isError) {
     fail(`${name}: ${text}`)
@@ -208,9 +216,9 @@ async function call(name, args = {}) {
  * تحذيرُ تناقض المبلغ الكلّي ليس حقلاً، هو جملةٌ يقرأها المستخدم. وفحصُ
  * الحقول وحدها كان سيمرّ على تحذيرٍ اختفى.
  */
-async function callRaw(name, args = {}) {
+async function callRaw(name, args = {}, client = app) {
   called.add(name)
-  const result = await app.callTool({ name, arguments: args })
+  const result = await client.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (result.isError) {
     fail(`${name}: ${text}`)
@@ -220,9 +228,9 @@ async function callRaw(name, args = {}) {
 }
 
 /** ينادي أداة ويتوقّع خطأً يذكر كذا — رسائل الأخطاء جزء من الواجهة. */
-async function expectError(name, args, needle) {
+async function expectError(name, args, needle, client = app) {
   called.add(name)
-  const result = await app.callTool({ name, arguments: args })
+  const result = await client.callTool({ name, arguments: args })
   const text = result.content?.[0]?.text ?? ''
   if (!result.isError) return fail(`${name}: كان يجب أن يفشل على ${JSON.stringify(args)}`)
   if (!text.includes(needle)) fail(`${name}: الرسالة لا تذكر «${needle}» — وصلت: ${text}`)
@@ -962,6 +970,206 @@ expect(
   Math.round((netBeforeDebts.net_worth - netAfterDebts.net_worth) * 100) / 100,
   400 * 24 + 300 * 12,
 )
+
+/* ─── الحسابات: المظاريف فوق المال لا بجانبه ─── */
+
+/*
+ * قاعدةٌ نظيفة وخادمٌ ثانٍ.
+ *
+ * السؤال الذي يجيب عنه هذا القسم رقميّ بحت: «حسابان بـ2,000 و1,500 يعطيان
+ * 3,500 لا 7,000». وقياسه على القاعدة أعلاه مستحيل — فيها أصولٌ بـ425 ألفاً
+ * وديونٌ وصناديق من فحوصٍ سابقة، فيصير كل رقمٍ متوقَّعٍ حسبةً هشّةً تنكسر
+ * كلما أُضيف فحصٌ قبلها. والخادم الثاني يعدّ في نفس `called`، فلا يهرب من
+ * حارس «كل أداة تُستدعى».
+ */
+{
+  const bankFake = await startFakeSupabase()
+  const bank = await connect({
+    SANAWI_SUPABASE_URL: bankFake.url,
+    SANAWI_SUPABASE_ANON_KEY: bankFake.anonKey,
+    SANAWI_EMAIL: bankFake.email,
+    SANAWI_PASSWORD: bankFake.password,
+    SANAWI_READ_ONLY: '0',
+  })
+
+  const on = (name, args = {}) => call(name, args, bank)
+  const netWorth = async () => (await on('sanawi_net_worth')).net_worth
+  const accountNamed = (list, name) => list.accounts.find((a) => a.name === name)
+
+  // بلا حسابات: الردّ يرشد ولا ينهار.
+  const before = await on('sanawi_list_accounts')
+  expect('بلا حسابات: القائمة فارغة', before?.accounts.length, 0)
+  expect('وبلا نقص', before?.has_shortfall, false)
+
+  // ١. حسابان: صافي الثروة مجموعُ الرصيدين لا ضعفُهما.
+  const a = await on('sanawi_save_account', { name: 'بنك A', balance: 2000 })
+  expect('الحساب أُنشئ', a?.created, true)
+  expect('ورصيده كما أُدخل', a?.account.balance, 2000)
+  await on('sanawi_save_account', { name: 'بنك B', balance: 1500 })
+
+  expect('حسابان: صافي الثروة', await netWorth(), 3500)
+
+  // الاسم نفسه يحدّث ولا يكرّر — نفس قاعدة sanawi_save_asset.
+  const again = await on('sanawi_save_account', { name: 'بنك A', balance: 2000 })
+  expect('الاسم نفسه يحدّث لا ينشئ', again?.created, false)
+  expect('ولم يتكرّر الصف', bankFake.db.accounts.length, 2)
+
+  // ٢. صندوقٌ مربوط: تخصيصٌ على المال لا ملكٌ ثانٍ.
+  await on('sanawi_create_obligation', {
+    name: 'تأمين السيارة',
+    total_amount: 2000,
+    next_due_date: inMonths(12),
+    account: 'بنك A',
+  })
+  // بلا from_account: المال في حساب الصندوق أصلاً، فلا شيء يتحرّك.
+  const funded = await on('sanawi_add_deposit', { obligation: 'تأمين السيارة', amount: 2000 })
+  expect('إيداعٌ بلا تحويل', funded?.transfer, null)
+  expect('والالتزام يعرف حسابه', funded?.obligation.account_name, 'بنك A')
+
+  const afterFunding = await on('sanawi_list_accounts')
+  expect('المخصَّص على A', accountNamed(afterFunding, 'بنك A')?.reserved, 2000)
+  expect('وغير المخصّص صفر', accountNamed(afterFunding, 'بنك A')?.available, 0)
+  expect('ولا نقص', accountNamed(afterFunding, 'بنك A')?.shortfall, false)
+  expect('والمظروف ظاهر باسمه', accountNamed(afterFunding, 'بنك A')?.envelopes[0]?.name, 'تأمين السيارة')
+  expect('صافي الثروة لم يتغيّر بالتخصيص', await netWorth(), 3500)
+
+  // ٣. إيداعٌ بتحويل: تحويل + إيداع في نداء واحد.
+  const moved = await on('sanawi_add_deposit', {
+    obligation: 'تأمين السيارة',
+    amount: 500,
+    from_account: 'بنك B',
+  })
+  expect('نقص رصيد المُرسِل', moved?.transfer?.from_balance, 1000)
+  expect('وزاد رصيد حساب الصندوق', moved?.transfer?.to_balance, 2500)
+  expect('وارتفع المظروف', moved?.obligation.my_fund_balance, 2500)
+  expect('وصافي الثروة كما هو', await netWorth(), 3500)
+
+  // ٤. صناديق تفوق رصيد حسابها: نقصٌ صريح لا رقمٌ يبدو سليماً.
+  await on('sanawi_save_account', { name: 'بنك B', balance: 1500 })
+  for (const [name, amount] of [
+    ['טיפול', 1500],
+    ['إطارات', 1200],
+  ]) {
+    await on('sanawi_create_obligation', {
+      name,
+      total_amount: amount,
+      next_due_date: inMonths(12),
+      account: 'بنك B',
+    })
+    await on('sanawi_add_deposit', { obligation: name, amount })
+  }
+
+  const strained = await on('sanawi_list_accounts')
+  expect('المخصَّص على B', accountNamed(strained, 'بنك B')?.reserved, 2700)
+  expect('وغير المخصّص سالب', accountNamed(strained, 'بنك B')?.available, -1200)
+  expect('والنقص معلَن', accountNamed(strained, 'بنك B')?.shortfall, true)
+  expect('والنقص يظهر في المجموع', strained?.has_shortfall, true)
+  expect('صافي الثروة = مجموع الأرصدة', await netWorth(), 4000)
+
+  // ٥. الدفع من حسابٍ غير حساب الصندوق: يُقبل، ويُعلَّم.
+  const paid = await on('sanawi_mark_paid', {
+    obligation: 'تأمين السيارة',
+    paid_from_account: 'بنك B',
+  })
+  expect('خرج من الصندوق ما يعادل الحصّة', paid?.amount_paid, 2000)
+  expect('والفائض رُحّل', paid?.carried_balance, 500)
+  expect('وخرج المال من الحساب الدافع', paid?.paid_from?.name, 'بنك B')
+  expect('ورصيده نقص بما خرج', paid?.paid_from?.balance, -500)
+  expect('ونشأت تسوية', paid?.settlement?.amount, 2000)
+  expect('المدين حساب الصندوق', paid?.settlement?.debtor, 'بنك A')
+  expect('والدائن الحساب الدافع', paid?.settlement?.creditor, 'بنك B')
+
+  const settled = await on('sanawi_list_accounts')
+  expect('رصيد حساب الصندوق لم يتغيّر', accountNamed(settled, 'بنك A')?.balance, 2500)
+  expect('لكن تخصيصه تحرّر', accountNamed(settled, 'بنك A')?.reserved, 500)
+  expect('فصار عنده غير مخصّص', accountNamed(settled, 'بنك A')?.available, 2000)
+  expect('والتسوية معلّقة', settled?.settlements.length, 1)
+
+  // ٦. التحويل المقابل يُغلق التسوية تلقائياً.
+  const netBeforeTransfer = await netWorth()
+  const transfer = await on('sanawi_transfer_between_accounts', {
+    from: 'بنك A',
+    to: 'بنك B',
+    amount: 2000,
+  })
+  expect('أُغلقت تسوية', transfer?.settlements_closed.length, 1)
+  expect('رصيد المُرسِل بعد التحويل', transfer?.from.balance, 500)
+  expect('ورصيد المستقبِل', transfer?.to.balance, 1500)
+  expect('والتحويل لا يغيّر صافي الثروة', await netWorth(), netBeforeTransfer)
+  expect(
+    'ولم تبقَ تسوية معلّقة',
+    (await on('sanawi_list_accounts'))?.settlements.length,
+    0,
+  )
+
+  // والتحويل إلى الحساب نفسه لا ينقل شيئاً.
+  await expectError(
+    'sanawi_transfer_between_accounts',
+    { from: 'بنك A', to: 'بنك A', amount: 10 },
+    'الحساب نفسه',
+    bank,
+  )
+
+  // ٧. الحالة الانتقالية: صندوقٌ بلا حساب يبقى ملكاً، ويُقال إنه غير مربوط.
+  const netBeforeUnlinked = await netWorth()
+  await on('sanawi_create_obligation', {
+    name: 'طبيب أسنان',
+    total_amount: 800,
+    next_due_date: inMonths(12),
+  })
+  await on('sanawi_add_deposit', { obligation: 'طبيب أسنان', amount: 800 })
+
+  const withUnlinked = await on('sanawi_net_worth')
+  expect('الصندوق غير المربوط يبقى ملكاً', withUnlinked?.net_worth, netBeforeUnlinked + 800)
+  expect('ويُعلَن أنه غير مربوط', withUnlinked?.has_unlinked_funds, true)
+  expect('بمقداره', withUnlinked?.unlinked_restricted_total, 800)
+  expect(
+    'ويظهر في قائمة الحسابات',
+    (await on('sanawi_list_accounts'))?.unlinked_total,
+    800,
+  )
+
+  // وربطه يصحّح الحساب: نفس المال، ولا يُعدّ مرّتين بعد الربط.
+  await on('sanawi_update_obligation', { obligation: 'طبيب أسنان', account: 'بنك A' })
+  const linked = await on('sanawi_net_worth')
+  expect('بعد الربط لا صناديق طليقة', linked?.has_unlinked_funds, false)
+  expect('وصافي الثروة نزل بمقدار ما كان يُعدّ مرّتين', linked?.net_worth, netBeforeUnlinked)
+
+  // ٨. الأرشفة تُرفض ما دام على الحساب صناديق.
+  await expectError(
+    'sanawi_archive_account',
+    { account: 'بنك B' },
+    'مخصَّصة لصناديق',
+    bank,
+  )
+
+  await on('sanawi_save_account', { name: 'بنك C', balance: 0, kind: 'savings' })
+  expect(
+    'وحسابٌ بلا صناديق يُؤرشف',
+    (await on('sanawi_archive_account', { account: 'بنك C' }))?.archived,
+    true,
+  )
+  expect(
+    'ونداءٌ ثانٍ لا يفشل',
+    (await on('sanawi_archive_account', { account: 'بنك C' }))?.archived,
+    true,
+  )
+  expect(
+    'والمؤرشف يخرج من القائمة',
+    (await on('sanawi_list_accounts'))?.accounts.length,
+    2,
+  )
+
+  await expectError(
+    'sanawi_transfer_between_accounts',
+    { from: 'حساب ما إله وجود', to: 'بنك A', amount: 10 },
+    'لا يوجد حساب',
+    bank,
+  )
+
+  await bank.close()
+  await bankFake.stop()
+}
 
 await app.close()
 await fake.stop()
