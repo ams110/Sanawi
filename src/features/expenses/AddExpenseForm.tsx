@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/Button'
 import type { ExpenseCategory } from '@/lib/db/types'
 import { addCategory, addExpense, monthKey } from './api'
 import { toDateKey } from '@/lib/date'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 
 const inputClass =
   'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand'
@@ -47,7 +49,7 @@ export function AddExpenseForm({
 }) {
   const { t } = useTranslation()
 
-  const [amount, setAmount] = useState(0)
+  const amount = useAmount()
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [isUnexpected, setIsUnexpected] = useState(false)
   const [note, setNote] = useState('')
@@ -59,12 +61,12 @@ export function AddExpenseForm({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (amount <= 0) return
+    if (!amount.isValid) return
     setBusy(true)
     setError(null)
     try {
       await addExpense(userId, {
-        amount,
+        amount: amount.value,
         categoryId,
         spentAt,
         isUnexpected,
@@ -72,12 +74,12 @@ export function AddExpenseForm({
       })
       // التصنيف يبقى مختاراً: من يشتري قهوة اليوم يشتريها غداً، وإعادة
       // اختياره في كل مرة ضريبةٌ على أكثر الحالات شيوعاً.
-      setAmount(0)
+      amount.reset()
       setNote('')
       setIsUnexpected(false)
       await onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('expenses.saveFailed'))
+      setError(failureText(err, t, t('expenses.saveFailed')))
     } finally {
       setBusy(false)
     }
@@ -146,11 +148,7 @@ export function AddExpenseForm({
       )}
 
       <input
-        type="number"
-        inputMode="decimal"
-        step="0.01"
-        value={amount || ''}
-        onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+        {...amount.props}
         placeholder={t('expenses.amountPlaceholder')}
         className={`num ${inputClass} text-center text-2xl font-black`}
       />
@@ -195,7 +193,7 @@ export function AddExpenseForm({
         </button>
       )}
 
-      <Button type="submit" loading={busy} disabled={amount <= 0} className="w-full">
+      <Button type="submit" loading={busy} disabled={!amount.isValid} className="w-full">
         {t('expenses.add')}
       </Button>
     </form>

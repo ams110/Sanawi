@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useRefresh } from '@/lib/refresh'
 import { formatMoney, formatMonthYear } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 import { Button } from '@/components/ui/Button'
 import { deleteBill, listBills, monthKey, saveBill, shiftMonth, summarizeBills, type BillRow } from './api'
 import { AddCommitmentForm } from './AddCommitmentForm'
@@ -64,7 +66,7 @@ export function BillsScreen() {
       setShares(s)
       setMethods(m)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('bills.loadFailed'))
+      setError(failureText(err, t, t('bills.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -290,7 +292,9 @@ function BillCard({
 
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState(row.commitment.name)
-  const [editAmount, setEditAmount] = useState(budgeted)
+  // الخطّاف هنا لا في حلقة القائمة: `BillCard` مكوّن سطرٍ لكل صفّ، فلكل سطرٍ
+  // حالته وحده وقواعد الخطّافات قائمة.
+  const editAmount = useAmount(0, String(budgeted))
   const [editDay, setEditDay] = useState<number | null>(row.commitment.day_of_month)
   const [editMethod, setEditMethod] = useState<string | null>(row.commitment.default_method_id)
   const [editStartsOn, setEditStartsOn] = useState(row.commitment.starts_on ?? '')
@@ -299,7 +303,7 @@ function BillCard({
 
   const cancelEdit = () => {
     setEditName(row.commitment.name)
-    setEditAmount(budgeted)
+    editAmount.reset(String(budgeted))
     setEditDay(row.commitment.day_of_month)
     setEditMethod(row.commitment.default_method_id)
     setEditStartsOn(row.commitment.starts_on ?? '')
@@ -309,9 +313,8 @@ function BillCard({
   }
 
   // المبلغ المقترح يتدرّج: الفاتورة المسجّلة، فمتوسّط السنة، فتقدير الميزانية.
-  const [amount, setAmount] = useState(
-    () => Number(row.payment?.amount ?? 0) || Math.round(average) || budgeted,
-  )
+  const suggested = Number(row.payment?.amount ?? 0) || Math.round(average) || budgeted
+  const amount = useAmount(0, suggested ? String(suggested) : '')
   const [busy, setBusy] = useState(false)
 
   const recorded = Boolean(row.payment)
@@ -361,7 +364,7 @@ function BillCard({
       <InlineEdit
         open={editing}
         onCancel={cancelEdit}
-        canSave={editName.trim().length > 0 && editAmount > 0}
+        canSave={editName.trim().length > 0 && editAmount.isValid}
         error={editError}
         title={t('bills.editTitle')}
         onSave={async () => {
@@ -374,7 +377,7 @@ function BillCard({
           try {
             await updateCommitment(row.commitment.id, {
               name: editName.trim(),
-              amount: editAmount,
+              amount: editAmount.value,
               dayOfMonth: editDay,
               defaultMethodId: editMethod,
               startsOn: editStartsOn || null,
@@ -383,7 +386,7 @@ function BillCard({
             setEditing(false)
             await onReload()
           } catch (err) {
-            setEditError(err instanceof Error ? err.message : t('bills.editFailed'))
+            setEditError(failureText(err, t, t('bills.editFailed')))
           }
         }}
         extraAction={
@@ -411,10 +414,7 @@ function BillCard({
         />
         <div className="flex gap-2">
           <input
-            type="number"
-            inputMode="decimal"
-            value={editAmount || ''}
-            onChange={(e) => setEditAmount(Math.max(0, Number(e.target.value) || 0))}
+            {...editAmount.props}
             placeholder={t('bills.monthlyAmount')}
             className={`num ${editInputClass}`}
           />
@@ -571,10 +571,7 @@ function BillCard({
       <label className="block space-y-1.5">
         <span className="text-sm font-semibold text-text">{t('bills.amountLabel')}</span>
         <input
-          type="number"
-          inputMode="numeric"
-          value={amount || ''}
-          onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+          {...amount.props}
           className="num w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand"
         />
       </label>
@@ -604,12 +601,12 @@ function BillCard({
           className="flex-1"
           loading={busy}
           variant={paid ? 'secondary' : 'primary'}
-          onClick={() => void run(() => onSave(amount, !paid, methodId))}
+          onClick={() => void run(() => onSave(amount.value, !paid, methodId))}
         >
           {paid ? t('bills.markUnpaid') : t('bills.markPaid')}
         </Button>
         {!paid && (
-          <Button variant="secondary" disabled={busy} onClick={() => void run(() => onSave(amount, false, methodId))}>
+          <Button variant="secondary" disabled={busy} onClick={() => void run(() => onSave(amount.value, false, methodId))}>
             {t('bills.save')}
           </Button>
         )}

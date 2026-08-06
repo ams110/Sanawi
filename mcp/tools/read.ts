@@ -14,6 +14,7 @@ import { freedomSensitivity } from '../../src/lib/wealth/freedom.js'
 import { buildPayoffPlan, comparePayoff } from '../../src/lib/commitments/payoff.js'
 import { heaviestMonth } from '../../src/lib/obligations/calendar.js'
 import { dailyAllowance } from '../../src/lib/budget/month.js'
+import type { PendingItem } from '../../src/lib/month/pending.js'
 import type {
   BillAverage,
   BillPayment,
@@ -161,13 +162,30 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         obligations_count: z.number(),
         overdue_count: z.number(),
         behind_count: z.number(),
+        /**
+         * ما زال عليه هذا الشهر — نفس القائمة وبنفس الترتيب الذي تعرضه
+         * الشاشة الأولى في التطبيق، لأنها من المحرّك نفسه.
+         */
+        pending: z.array(
+          z.object({
+            kind: z.enum(['deposit', 'income', 'bill']),
+            id: z.string(),
+            name: z.string(),
+            amount: z.number().nullable(),
+            /** الرقم يقينيّ (قسط، مصدر دخل) أو تخمين (متوسّط فاتورة). */
+            is_certain: z.boolean(),
+            note: z.string(),
+          }),
+        ),
+        pending_hidden: z.number(),
+        pending_is_clear: z.boolean(),
       },
       annotations: READ_ONLY,
     },
     guard(async () => {
       const connection = await connect()
       const picture = await loadMonth(connection)
-      const { summary, panel, obligations, expenses, load } = picture
+      const { summary, panel, obligations, expenses, load, pending } = picture
       const currency = connection.currency
 
       const overdue = obligations.filter((o) => o.calc.isOverdue)
@@ -208,6 +226,16 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         obligations_count: obligations.length,
         overdue_count: overdue.length,
         behind_count: behind.length,
+        pending: pending.items.map((item) => ({
+          kind: item.kind,
+          id: item.id,
+          name: item.name,
+          amount: item.amount,
+          is_certain: item.isCertain,
+          note: pendingNote(item.note),
+        })),
+        pending_hidden: pending.hiddenCount,
+        pending_is_clear: pending.isClear,
       }
 
       const text = [
@@ -252,9 +280,25 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         `- مصاريف يومية حتى الآن: ${money(expenses.total, currency)} (${expenses.daysElapsed} من ${expenses.daysInMonth} يوماً)`,
         `- هدف الادخار: ${money(picture.savingsTarget, currency)}`,
         `- **مجموع ما خرج ويخرج: ${money(panel.totalOut, currency)}**`,
-        overdue.length > 0
-          ? `\n⚠️ ${overdue.length} التزام فات موعده: ${overdue.map((o) => o.obligation.name).join('، ')}`
-          : '',
+        /*
+         * «ما زال عليك» تحلّ محلّ سطرَي التحذير المحسوبين هنا.
+         *
+         * كانا يقولان «3 التزامات فات موعدها» — عدداً بلا فعلٍ ولا رقم. وهذه
+         * القائمة هي نفسها التي يراها المستخدم على شاشته بالأسماء والأرقام
+         * والترتيب نفسه، فيكفّ عن تعلُّم أن التلفون وكلود مصدران مختلفان.
+         */
+        pending.isClear
+          ? '\n✅ كل ما عليك هذا الشهر مسجَّل.'
+          : `\n### ما زال عليك (${pending.items.length})\n` +
+            pending.items
+              .map(
+                (item) =>
+                  `- ${item.name}` +
+                  (item.amount === null ? '' : ` — ${money(item.amount, currency)}`) +
+                  ` · ${pendingNote(item.note)}`,
+              )
+              .join('\n') +
+            (pending.hiddenCount > 0 ? `\n- …و${pending.hiddenCount} غيرها` : ''),
         behind.length > 0
           ? `\n📉 ${behind.length} التزام متأخر عن الجدول: ${behind.map((o) => o.obligation.name).join('، ')}`
           : '',
@@ -1559,3 +1603,32 @@ async function loadProfileCountry({ db, userId }: Connection): Promise<string | 
 }
 
 const round2 = (v: number): number => Math.round(v * 100) / 100
+
+/**
+ * حالة السطر نصّاً عربياً.
+ *
+ * المحرّك يُخرج بنيةً لا نصّاً — لأن الواجهة تترجمها من ملف اللغة — وهذه
+ * نظيرتها عند كلود. ستّة أسطر ثابتة، أرخص من إخراج ملف اللغة إلى Node.
+ */
+function pendingNote(note: PendingItem['note']): string {
+  switch (note.type) {
+    case 'overdue':
+      return 'فات موعده'
+    case 'installment':
+      return 'قسطك الشهري'
+    case 'expected':
+      return 'متوقَّع من مصدر دخلك'
+    case 'variable':
+      return 'دخل متغيّر — يُسجَّل حين يصل'
+    case 'partial':
+      return `سُجّل ${note.done} من ${note.total}`
+    case 'average':
+      return `متوسّطها ${note.amount}`
+    default:
+      return note.days < 0
+        ? `فات موعدها بـ ${Math.abs(note.days)} يوماً`
+        : note.days === 0
+          ? 'موعدها اليوم'
+          : `بعد ${note.days} يوماً`
+  }
+}

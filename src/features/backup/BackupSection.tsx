@@ -2,8 +2,16 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { Button } from '@/components/ui/Button'
+import { failureText } from '@/lib/i18n/failure'
 import { useRefresh } from '@/lib/refresh'
-import { downloadBackup, exportBackup, importBackup, parseBackup } from './api'
+import {
+  BACKUP_VERSION,
+  BackupFileError,
+  downloadBackup,
+  exportBackup,
+  importBackup,
+  parseBackup,
+} from './api'
 
 /** تصدير واستيراد النسخة الاحتياطية — يظهر أسفل شاشة الدخل. */
 export function BackupSection() {
@@ -21,10 +29,24 @@ export function BackupSection() {
     try {
       downloadBackup(await exportBackup(user.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('backup.failed'))
+      setError(failureText(err, t, t('backup.failed')))
     } finally {
       setBusy(null)
     }
+  }
+
+  /*
+   * عطبُ الملف يُقال باسمه، لا يُصنَّف.
+   *
+   * `failureText` تصنّف ما لا تعرفه «خللاً ما بنعرفه، جرّب كمان مرة» — وهي
+   * نصيحةٌ خاطئة هنا: نفس الملف يفشل في كل مرة. والمستخدم يحتاج أن يعرف أن
+   * عليه اختيار ملفٍ آخر.
+   */
+  const fileProblem = (err: unknown): string | null => {
+    if (!(err instanceof BackupFileError)) return null
+    return err.reason === 'badFile'
+      ? t('backup.badFile')
+      : t('backup.versionMismatch', { found: err.found, supported: BACKUP_VERSION })
   }
 
   const doImport = async (file: File) => {
@@ -37,7 +59,7 @@ export function BackupSection() {
       const count = Object.values(summary.inserted).reduce((a, b) => a + b, 0)
       setNotice(t('backup.imported', { count }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('backup.failed'))
+      setError(fileProblem(err) ?? failureText(err, t, t('backup.failed')))
     } finally {
       setBusy(null)
       // تصفير القيمة يسمح باختيار نفس الملف مرة ثانية بعد التصحيح.

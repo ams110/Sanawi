@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import { formatMoney, formatMonthYear, formatMonthsRemaining } from '@/lib/format'
+import { DepositField, DepositResult, type DepositDone } from '@/features/record/DepositField'
 import type { ObligationWithCalc } from './api'
 
 const STATUS_PILL = {
@@ -12,14 +14,26 @@ const STATUS_PILL = {
 
 interface Props {
   item: ObligationWithCalc
-  onDeposit: (item: ObligationWithCalc) => void
-  depositing?: boolean
+  /** يُنادى بعد إيداعٍ ناجح ليعيد الشاشة جلب صفوفها. */
+  onDeposited: () => void | Promise<void>
 }
 
-export function ObligationCard({ item, onDeposit, depositing = false }: Props) {
+export function ObligationCard({ item, onDeposited }: Props) {
   const { t } = useTranslation()
   const { obligation, calc } = item
   const balance = Number(item.balance?.my_fund_balance ?? 0)
+
+  /*
+   * الحقل يُفتح داخل البطاقة ولا ينقل المستخدم.
+   *
+   * كان هنا زرٌّ يكتب القسط فوراً: نصّه «أودعت ✓» قبل الضغط وبعده، وأثناء
+   * الحفظ «...»، ولا سطر يقول «صار بالصندوق كذا». فمن ضغطه ظنّ أنه لم يُسجَّل
+   * وضغط ثانيةً — وهي شكوى صاحب التطبيق حرفياً. والفتح هنا يبقيه في مكانه
+   * (هذا أقصر طريقٍ للإيداع، ونقلُه إلى صفحةٍ أخرى يُبطل قصره) ويأتيه الحارس
+   * والرقم والردّ مع المكوّن.
+   */
+  const [open, setOpen] = useState(false)
+  const [done, setDone] = useState<DepositDone | null>(null)
 
   /*
    * الهدف التزامٌ لا يتجدّد: recurrence_months = 0. الحساب واحد لكن اللغة
@@ -77,17 +91,57 @@ export function ObligationCard({ item, onDeposit, depositing = false }: Props) {
           </span>
         </p>
 
-        {calc.monthlyInstallment > 0 && (
+        {calc.monthlyInstallment > 0 && !open && (
           <button
             type="button"
-            onClick={() => onDeposit(item)}
-            disabled={depositing}
-            className="shrink-0 rounded-xl bg-brand-soft px-3 py-2 text-xs font-bold text-brand transition disabled:opacity-50"
+            onClick={() => {
+              setOpen(true)
+              setDone(null)
+            }}
+            className="shrink-0 rounded-xl bg-brand-soft px-3 py-2 text-xs font-bold text-brand transition"
           >
-            {depositing ? t('common.loading') : t('obligations.deposited')}
+            {t('obligations.deposit')}
           </button>
         )}
       </div>
+
+      {open && (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
+          {done ? (
+            <>
+              <DepositResult done={done} />
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false)
+                  setDone(null)
+                }}
+                className="w-full rounded-xl px-3 py-2 text-xs font-bold text-text-muted"
+              >
+                {t('quickAdd.close')}
+              </button>
+            </>
+          ) : (
+            <>
+              <DepositField
+                item={item}
+                autoFocus
+                onDone={async (result) => {
+                  setDone(result)
+                  await onDeposited()
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="w-full rounded-xl px-3 py-2 text-xs font-bold text-text-muted"
+              >
+                {t('common.cancel')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </article>
   )
 }

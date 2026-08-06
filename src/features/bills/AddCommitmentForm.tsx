@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatMoney } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 import type { CommitmentTemplate, PaymentMethod } from '@/lib/db/types'
 import { addCommitment, listCommitmentTemplates, listPaymentMethods } from './commitments'
 
@@ -30,11 +32,11 @@ export function AddCommitmentForm({
   const [methodId, setMethodId] = useState<string | null>(null)
   const [picked, setPicked] = useState<CommitmentTemplate | null>(null)
   const [name, setName] = useState('')
-  const [amount, setAmount] = useState(0)
+  const amount = useAmount()
   const [isInstallment, setIsInstallment] = useState(false)
   const [startsOn, setStartsOn] = useState('')
   const [endsOn, setEndsOn] = useState('')
-  const [totalAmount, setTotalAmount] = useState(0)
+  const totalAmount = useAmount()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,8 +48,8 @@ export function AddCommitmentForm({
         setTemplates(t)
         setMethods(m)
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [open, templates.length])
+      .catch((e: unknown) => setError(failureText(e, t, t('bills.templatesFailed'))))
+  }, [open, templates.length, t])
 
   const choose = (tpl: CommitmentTemplate) => {
     const same = picked?.id === tpl.id
@@ -60,7 +62,7 @@ export function AddCommitmentForm({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!name.trim() || amount <= 0) return
+    if (!name.trim() || !amount.isValid) return
     if (isInstallment && !endsOn) return
     // أول دفعة بعد آخرها ليست خطأ إدخالٍ يُصحَّح بصمت — نمنع الحفظ ونقولها.
     if (startsOn && endsOn && startsOn > endsOn) {
@@ -72,28 +74,28 @@ export function AddCommitmentForm({
     try {
       await addCommitment(userId, {
         name: name.trim(),
-        amount,
+        amount: amount.value,
         icon: picked?.icon ?? null,
         startsOn: startsOn || null,
         endsOn: isInstallment ? endsOn : null,
-        totalAmount: isInstallment && totalAmount > 0 ? totalAmount : null,
+        totalAmount: isInstallment && totalAmount.isValid ? totalAmount.value : null,
         mySharePercent: 100,
         dayOfMonth,
         defaultMethodId: methodId,
       })
       setPicked(null)
       setName('')
-      setAmount(0)
+      amount.reset()
       setIsInstallment(false)
       setStartsOn('')
       setEndsOn('')
-      setTotalAmount(0)
+      totalAmount.reset()
       setDayOfMonth(null)
       setMethodId(null)
       setOpen(false)
       await onAdded()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('bills.addFailed'))
+      setError(failureText(err, t, t('bills.addFailed')))
     } finally {
       setBusy(false)
     }
@@ -160,10 +162,7 @@ export function AddCommitmentForm({
 
       <div className="space-y-1">
         <input
-          type="number"
-          inputMode="decimal"
-          value={amount || ''}
-          onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+          {...amount.props}
           placeholder={t('bills.monthlyAmount')}
           className={`num ${inputClass} text-center text-2xl font-black`}
         />
@@ -265,10 +264,7 @@ export function AddCommitmentForm({
             />
           </label>
           <input
-            type="number"
-            inputMode="decimal"
-            value={totalAmount || ''}
-            onChange={(e) => setTotalAmount(Math.max(0, Number(e.target.value) || 0))}
+            {...totalAmount.props}
             placeholder={t('bills.totalAmount')}
             className={`num ${inputClass}`}
           />
@@ -287,7 +283,7 @@ export function AddCommitmentForm({
         <Button
           type="submit"
           loading={busy}
-          disabled={!name.trim() || amount <= 0 || (isInstallment && !endsOn)}
+          disabled={!name.trim() || !amount.isValid || (isInstallment && !endsOn)}
           className="flex-[3]"
         >
           {t('bills.add')}

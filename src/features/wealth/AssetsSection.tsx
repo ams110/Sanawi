@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import { formatMoney, formatDate } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
+import { useAmount } from '@/features/record/amount'
 import type { Asset, AssetKind } from '@/lib/db/types'
 import { addAsset, archiveAsset, updateAsset } from './api'
 
@@ -179,10 +181,11 @@ function AssetFields({
 }) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState<Draft>(initial ?? EMPTY)
+  // القيمة خارج المسودّة: حقلٌ نصّيّ لا يُمسح عند النقطة العشرية.
+  const amount = useAmount(0, initial?.amount ?? '')
   const [error, setError] = useState<string | null>(null)
 
-  const amount = Number(draft.amount)
-  const canSave = draft.name.trim().length > 0 && Number.isFinite(amount) && amount > 0
+  const canSave = draft.name.trim().length > 0 && amount.isValid
 
   return (
     <InlineEdit
@@ -193,20 +196,20 @@ function AssetFields({
       onCancel={onCancel}
       onSave={async () => {
         if (!draft.name.trim()) return setError(t('wealth.needName'))
-        if (!Number.isFinite(amount) || amount <= 0) return setError(t('wealth.needAmount'))
+        if (!amount.isValid) return setError(t('wealth.needAmount'))
         try {
           setError(null)
           await onSubmit({
             name: draft.name.trim(),
             kind: draft.kind,
-            amount,
+            amount: amount.value,
             annualReturnPercent: Number(draft.annualReturnPercent) || 0,
             isLiquid: draft.isLiquid,
             // صندوق طوارئ غير سائل تناقض، فلا نحفظ العلامة إلا مع السيولة.
             isEmergencyFund: draft.isEmergencyFund && draft.isLiquid,
           })
         } catch (err) {
-          setError(err instanceof Error ? err.message : t('wealth.saveFailed'))
+          setError(failureText(err, t, t('wealth.saveFailed')))
         }
       }}
       extraAction={
@@ -253,14 +256,7 @@ function AssetFields({
       </div>
 
       <div className="flex gap-2">
-        <input
-          className={editInputClass}
-          type="number"
-          inputMode="decimal"
-          placeholder={t('wealth.assetAmount')}
-          value={draft.amount}
-          onChange={(e) => setDraft((d) => ({ ...d, amount: e.target.value }))}
-        />
+        <input {...amount.props} className={editInputClass} placeholder={t('wealth.assetAmount')} />
         <input
           className={editInputClass}
           type="number"

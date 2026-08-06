@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatDate, formatMoney } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { useRefresh } from '@/lib/refresh'
 import type { IncomeEntry, IncomeSource } from '@/lib/db/types'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
+import { useAmount } from '@/features/record/amount'
 import { toDateKey } from '@/lib/date'
 import {
   addIncomeEntry,
@@ -44,7 +46,7 @@ function EntryRow({
 }) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
-  const [amount, setAmount] = useState(Number(entry.amount))
+  const amount = useAmount(0, String(Number(entry.amount)))
   const [sourceId, setSourceId] = useState(entry.source_id)
   const [receivedAt, setReceivedAt] = useState(entry.received_at)
   const [error, setError] = useState<string | null>(null)
@@ -52,7 +54,7 @@ function EntryRow({
   const source = sources.find((s) => s.id === entry.source_id)
 
   const cancel = () => {
-    setAmount(Number(entry.amount))
+    amount.reset(String(Number(entry.amount)))
     setSourceId(entry.source_id)
     setReceivedAt(entry.received_at)
     setError(null)
@@ -90,26 +92,23 @@ function EntryRow({
       <InlineEdit
         open={editing}
         onCancel={cancel}
-        canSave={amount > 0}
+        canSave={amount.isValid}
         error={error}
         title={t('panel.editIncome')}
         onSave={async () => {
           setError(null)
           try {
-            await updateIncomeEntry(entry.id, { amount, sourceId, receivedAt })
+            await updateIncomeEntry(entry.id, { amount: amount.value, sourceId, receivedAt })
             setEditing(false)
             await onChanged()
           } catch (err) {
-            setError(err instanceof Error ? err.message : t('panel.editFailed'))
+            setError(failureText(err, t, t('panel.editFailed')))
           }
         }}
       >
         <div className="flex gap-2">
           <input
-            type="number"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            {...amount.props}
             className={`num ${editInputClass}`}
           />
           <input
@@ -162,7 +161,7 @@ export function IncomeEntries({
   const { token: refreshToken } = useRefresh()
 
   const [rows, setRows] = useState<IncomeEntry[]>([])
-  const [amount, setAmount] = useState(0)
+  const amount = useAmount()
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [receivedAt, setReceivedAt] = useState(() => toDateKey())
@@ -173,7 +172,7 @@ export function IncomeEntries({
     try {
       setRows(await listIncomeEntries(monthKey()))
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('panel.incomeFailed'))
+      setError(failureText(err, t, t('panel.incomeFailed')))
     }
   }, [t, refreshToken])
 
@@ -183,21 +182,21 @@ export function IncomeEntries({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (amount <= 0) return
+    if (!amount.isValid) return
     setBusy(true)
     setError(null)
     try {
       await addIncomeEntry(userId, {
-        amount,
+        amount: amount.value,
         sourceId,
         name: name.trim() || null,
         receivedAt,
       })
-      setAmount(0)
+      amount.reset()
       setName('')
       await load()
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('panel.incomeFailed'))
+      setError(failureText(err, t, t('panel.incomeFailed')))
     } finally {
       setBusy(false)
     }
@@ -259,10 +258,7 @@ export function IncomeEntries({
 
         <div className="flex gap-2">
           <input
-            type="number"
-            inputMode="decimal"
-            value={amount || ''}
-            onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+            {...amount.props}
             placeholder={t('panel.incomeAmount')}
             className={`num ${inputClass}`}
           />
@@ -284,7 +280,7 @@ export function IncomeEntries({
           />
         )}
 
-        <Button type="submit" variant="secondary" loading={busy} disabled={amount <= 0} className="w-full">
+        <Button type="submit" variant="secondary" loading={busy} disabled={!amount.isValid} className="w-full">
           {t('panel.addIncome')}
         </Button>
       </form>

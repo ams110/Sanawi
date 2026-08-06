@@ -9,6 +9,7 @@ import { createObligation, listTemplates, track } from '@/features/obligations/a
 import { Button } from '@/components/ui/Button'
 import type { ObligationTemplate } from '@/lib/db/types'
 import { toDateKey } from '@/lib/date'
+import { failureText } from '@/lib/i18n/failure'
 
 /**
  * أول تشغيل: شاشتا شرح ثم إضافة أول التزام من القوالب.
@@ -84,7 +85,7 @@ export function OnboardingScreen() {
       // يهبط مباشرةً على التفاصيل: هناك الرقم الذي جاء من أجله.
       await finish(`/obligations/${created.id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('onboarding.createFailed'))
+      setError(failureText(err, t, t('onboarding.createFailed')))
       setBusy(false)
     }
   }

@@ -13,6 +13,7 @@
     "mcp": "node mcp/dist/mcp/index.js",
     "check:db": "node scripts/check-db.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
+    "check:screens": "node scripts/check-screens.mjs",
     "check:flow": "node scripts/check-flow.mjs",
     "check:ui": "node scripts/screenshot.mjs",
     "check:uiflow": "node scripts/check-ui-flow.mjs",

@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '@/features/auth/AuthProvider'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { ObligationCard } from './ObligationCard'
 import { scheduleObligationReminders } from '@/features/reminders/schedule'
-import { addDeposit, listObligations, track, type ObligationWithCalc } from './api'
+import { listObligations, type ObligationWithCalc } from './api'
 import { useTranslation } from 'react-i18next'
 import { useRefresh } from '@/lib/refresh'
+import { failureText } from '@/lib/i18n/failure'
 
 export function ObligationsScreen() {
   const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
-  const { user } = useAuth()
   const [items, setItems] = useState<ObligationWithCalc[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [depositingId, setDepositingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -26,7 +24,7 @@ export function ObligationsScreen() {
       // فشل الجدولة لا يُفشل عرض الالتزامات: التنبيه مساعِد لا شرط.
       void scheduleObligationReminders(loaded).catch(() => {})
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
+      setError(failureText(err, t, t('obligations.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)
@@ -36,20 +34,6 @@ export function ObligationsScreen() {
   useEffect(() => {
     void load()
   }, [load])
-
-  const handleDeposit = async (item: ObligationWithCalc) => {
-    if (!user) return
-    setDepositingId(item.obligation.id)
-    try {
-      await addDeposit(item.obligation.id, user.id, item.calc.monthlyInstallment)
-      void track(user.id, 'deposit_added', { obligation_id: item.obligation.id })
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('obligations.depositFailed'))
-    } finally {
-      setDepositingId(null)
-    }
-  }
 
   const totalMonthly = items.reduce((sum, i) => sum + i.calc.monthlyInstallment, 0)
 
@@ -87,12 +71,7 @@ export function ObligationsScreen() {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <ObligationCard
-              key={item.obligation.id}
-              item={item}
-              onDeposit={handleDeposit}
-              depositing={depositingId === item.obligation.id}
-            />
+            <ObligationCard key={item.obligation.id} item={item} onDeposited={load} />
           ))}
         </div>
       )}

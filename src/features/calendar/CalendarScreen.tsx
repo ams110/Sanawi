@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatMoney, formatMonthYear } from '@/lib/format'
+import { failureText } from '@/lib/i18n/failure'
 import { buildCalendar, calendarTotal, heaviestMonth } from '@/lib/obligations/calendar'
 import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
 import { useRefresh } from '@/lib/refresh'
@@ -23,7 +24,7 @@ export function CalendarScreen() {
       setError(null)
       setItems(await listObligations())
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('obligations.loadFailed'))
+      setError(failureText(err, t, t('obligations.loadFailed')))
     } finally {
       setLoading(false)
       setBusy(false)

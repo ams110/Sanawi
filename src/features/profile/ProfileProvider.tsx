@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { Profile } from '@/lib/db/types'
 import { useAuth } from '@/features/auth/AuthProvider'
+import { failureText } from '@/lib/i18n/failure'
 import { ensureProfile } from './api'
 
 interface ProfileContextValue {
@@ -16,6 +18,7 @@ interface ProfileContextValue {
 const ProfileContext = createContext<ProfileContextValue | null>(null)
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation()
   const { user } = useAuth()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -31,11 +34,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       setError(null)
       setProfile(await ensureProfile(user.id))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(failureText(err, t, t('profile.loadFailed')))
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [t, user])
 
   useEffect(() => {
     void refresh()

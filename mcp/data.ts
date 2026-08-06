@@ -18,6 +18,7 @@ import {
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
+import { pendingThisMonth, type PendingResult } from '../src/lib/month/pending.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
 import {
   summarizeAccounts,
@@ -298,6 +299,13 @@ export interface MonthPicture {
   incomeBySource: { name: string; amount: number; expected: number | null }[]
   /** الحمل الشهري مفصولاً: متكرّر بلا نهاية، وأقساط تنتهي. */
   load: MonthlyLoad
+  /**
+   * ما زال عليه هذا الشهر — نفس المحرّك الذي تعرضه الشاشة الأولى.
+   *
+   * مستورَدٌ لا منسوخ: قاعدة «الرقم الذي يقوله كلود = الرقم على الشاشة»
+   * ممدودةٌ هنا من الأرقام إلى **قائمة ما يستحقّ الانتباه وترتيبها**.
+   */
+  pending: PendingResult
 }
 
 /**
@@ -319,14 +327,17 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   // آخر الشهر يقعان في شهرين مختلفين، فتختلف أرقام اللوحة عن بعضها.
   const today = new Date()
 
-  const [obligations, money, profile, details, expenseRows, entries] = await Promise.all([
-    loadObligations(connection),
-    loadMoneyItems(connection),
-    loadProfile(connection),
-    loadCommitmentDetails(connection),
-    loadMonthExpenses(connection, month),
-    loadIncomeEntries(connection, month),
-  ])
+  const [obligations, money, profile, details, expenseRows, entries, deposits, bills] =
+    await Promise.all([
+      loadObligations(connection),
+      loadMoneyItems(connection),
+      loadProfile(connection),
+      loadCommitmentDetails(connection),
+      loadMonthExpenses(connection, month),
+      loadIncomeEntries(connection, month),
+      loadMonthDeposits(connection, month),
+      loadBillPayments(connection, month),
+    ])
 
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
   const incomes = money.incomes.map((i) => ({
@@ -407,7 +418,68 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     return view.hasStarted && !view.isFinished
   })
 
+  const depositsByObligation = new Map<string, FundDeposit[]>()
+  for (const d of deposits) {
+    const list = depositsByObligation.get(d.obligation_id) ?? []
+    list.push(d)
+    depositsByObligation.set(d.obligation_id, list)
+  }
+
+  const receivedBySource = new Map<string, number>()
+  for (const entry of entries) {
+    if (!entry.source_id) continue
+    receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
+  }
+  const recordedBills = new Set(bills.map((b) => b.commitment_id))
+
+  const pending = pendingThisMonth({
+    today,
+    obligations: obligations.map((o) => ({
+      id: o.obligation.id,
+      name: o.obligation.name,
+      monthlyInstallment: o.calc.monthlyInstallment,
+      isOverdue: o.calc.isOverdue,
+      deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
+        id: d.id,
+        amount: Number(d.amount),
+        depositDate: d.deposit_date,
+        createdAt: d.created_at,
+        partnerId: d.partner_id,
+        note: d.note,
+      })),
+    })),
+    incomes: money.incomes.map((i) => ({
+      id: i.id,
+      name: i.name,
+      amount: Number(i.amount),
+      frequency: i.frequency as IncomeFrequency,
+      isVariable: Boolean(i.is_variable),
+      receivedCount: receivedBySource.get(i.id) ?? 0,
+    })),
+    bills: details.map((d) => {
+      const view = viewCommitment(
+        {
+          amount: Number(d.amount),
+          startsOn: d.starts_on,
+          endsOn: d.ends_on,
+          mySharePercent: Number(d.my_share_percent),
+        },
+        today,
+      )
+      return {
+        id: d.commitment_id,
+        name: d.name,
+        amount: view.myAmount,
+        average: 0,
+        isDueThisMonth: view.hasStarted && !view.isFinished,
+        isRecorded: recordedBills.has(d.commitment_id),
+        dayOfMonth: null,
+      }
+    }),
+  })
+
   return {
+    pending,
     summary: summarizeMonth({
       incomes,
       fixedCommitments: activeThisMonth.map((c) => Number(c.amount)),
@@ -436,6 +508,29 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   }
 }
 
+/**
+ * إيداعات شهرٍ كلها بنداءٍ واحد — لبناء «ما زال عليك».
+ *
+ * شهرٌ واحدٌ يكفي: `summarizeDeposits` تقيس منذ آخر تفريغٍ للصندوق، وأيُّ
+ * تفريغٍ وقع قبل هذا الشهر يقع قبل كل ما حُمّل، فالنتيجة واحدة.
+ */
+export async function loadMonthDeposits(
+  { db }: Connection,
+  month: string,
+): Promise<FundDeposit[]> {
+  const start = new Date(`${month}T00:00:00`)
+  const end = isoDate(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+
+  const { data, error } = await db
+    .from('fund_deposits')
+    .select('*')
+    .gte('deposit_date', month)
+    .lte('deposit_date', end)
+    .order('deposit_date', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as FundDeposit[]
+}
+
 /** حركات صندوق التزام — يقرأها الإيداع ليعرف ما سبقه هذا الشهر. */
 export async function loadDeposits(
   { db }: Connection,
@@ -450,6 +545,13 @@ export async function loadDeposits(
     .limit(limit)
   if (error) throw error
   return (data ?? []) as FundDeposit[]
+}
+
+/** فواتير شهرٍ مسجَّلة — لمعرفة ما بقي بلا تسجيل. */
+export async function loadBillPayments({ db }: Connection, month: string) {
+  const { data, error } = await db.from('bill_payments').select('*').eq('billing_month', month)
+  if (error) throw error
+  return (data ?? []) as { commitment_id: string }[]
 }
 
 export async function loadCommitmentDetails({ db }: Connection): Promise<CommitmentDetail[]> {
