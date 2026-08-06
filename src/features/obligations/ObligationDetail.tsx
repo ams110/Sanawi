@@ -10,10 +10,14 @@ import { listSettlements } from '@/features/partners/api'
 import type { PartnerSettlement } from '@/lib/db/types'
 import { PaymentDialog } from './PaymentDialog'
 import type { RenewalResult } from '@/lib/obligations/renewal'
+import { summarizeDeposits, type DepositView } from '@/lib/obligations/deposits'
+import type { FundDeposit } from '@/lib/db/types'
 import {
   addDeposit,
   archiveObligation,
+  deleteDeposit,
   getObligation,
+  listDeposits,
   markPaid,
   track,
   type ObligationWithCalc,
@@ -27,7 +31,17 @@ export function ObligationDetail() {
   const { t } = useTranslation()
   const [item, setItem] = useState<ObligationWithCalc | null>(null)
   const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
+  const [deposits, setDeposits] = useState<FundDeposit[]>([])
   const [payerId, setPayerId] = useState<string | null>(null)
+  /*
+   * المبلغ نصٌّ لا رقم.
+   *
+   * الحقل الرقمي يفرغ إلى `NaN` وسط الكتابة (يمسح المستخدم ليعيد)، ورقمٌ في
+   * الحالة يجعل الحقل يقفز إلى صفرٍ تحت إصبعه. النصّ يُقرأ رقماً عند الإرسال.
+   */
+  const [amount, setAmount] = useState('')
+  /** الإيداع الثاني في الشهر نفسه يُسأل عنه قبل أن يقع، لا بعده. */
+  const [confirmSecond, setConfirmSecond] = useState(false)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,13 +52,15 @@ export function ObligationDetail() {
   const load = useCallback(async () => {
     if (!id) return
     try {
-      const [found, shares] = await Promise.all([
+      const [found, shares, movements] = await Promise.all([
         getObligation(id),
         // فشل التسوية لا يمنع عرض الالتزام نفسه.
         listSettlements(id).catch(() => [] as PartnerSettlement[]),
+        listDeposits(id).catch(() => [] as FundDeposit[]),
       ])
       setItem(found)
       setSettlements(shares)
+      setDeposits(movements)
     } catch (err) {
       setError(err instanceof Error ? err.message : t('form.loadFailed'))
     } finally {
@@ -56,18 +72,41 @@ export function ObligationDetail() {
     void load()
   }, [load])
 
-  const deposit = async () => {
+  const deposit = async (value: number) => {
     if (!user || !item) return
     setBusy(true)
+    setError(null)
     try {
-      await addDeposit(item.obligation.id, user.id, item.calc.monthlyInstallment, payerId)
+      await addDeposit(item.obligation.id, user.id, value, payerId)
       void track(user.id, 'deposit_added', {
         obligation_id: item.obligation.id,
         by_partner: payerId !== null,
       })
+      setConfirmSecond(false)
+      setAmount('')
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('obligations.depositFailed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * تراجُعٌ عن إيداع.
+   *
+   * كان الإيداع الفعلَ الوحيد في التطبيق بلا رجعة — والأكثرَ وقوعاً. وضغطةٌ
+   * بالغلط تبقى في الصندوق إلى الأبد فترفع رصيده وتخفض قسطه، ويقول التطبيق
+   * «ملحّق ✅» لمن ليس كذلك.
+   */
+  const undoDeposit = async (depositId: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await deleteDeposit(depositId)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('detail.undoFailed'))
     } finally {
       setBusy(false)
     }
@@ -130,6 +169,26 @@ export function ObligationDetail() {
   const { obligation, calc } = item
   const myBalance = Number(item.balance?.my_fund_balance ?? 0)
   const fundBalance = Number(item.balance?.fund_balance ?? 0)
+
+  // الحساب من المحرّك النقي لا من الشاشة: نفس الأرقام التي يقولها خادم MCP.
+  const movements = summarizeDeposits(
+    deposits.map((d) => ({
+      id: d.id,
+      amount: Number(d.amount),
+      depositDate: d.deposit_date,
+      createdAt: d.created_at,
+      partnerId: d.partner_id,
+      note: d.note,
+    })),
+  )
+
+  const partnerName = (partnerId: string | null): string | null =>
+    partnerId === null ? null : (settlements.find((s) => s.partner_id === partnerId)?.partner_name ?? null)
+
+  // الحقل الفارغ يعني «القسط» — وهو ما يريده الغالب، ويبقى قابلاً للتغيير.
+  const typed = Number(amount.replace(',', '.'))
+  const draft = amount.trim() === '' ? calc.monthlyInstallment : Number.isFinite(typed) ? typed : 0
+  const canDeposit = draft > 0 && !busy
 
   return (
     <div className="space-y-5 px-5 py-6">
@@ -203,11 +262,69 @@ export function ObligationDetail() {
           </div>
         )}
 
-        {calc.monthlyInstallment > 0 && (
-          <Button onClick={deposit} loading={busy} className="w-full">
-            {t('detail.depositAmount', { amount: formatMoney(calc.monthlyInstallment) })}
-          </Button>
-        )}
+        {/*
+          * مبلغٌ يُكتب لا زرٌّ بمبلغٍ واحد.
+          *
+          * كان الزرّ يودع القسط بالضبط ولا شيء غيره، فمن أودع 300 بدل 500 لم
+          * يكن له مكانٌ في التطبيق كلّه يكتب فيه رقمه — يفتح كلود أو لا يسجّل.
+          * والحقل يبدأ فارغاً بمعنى «القسط» فيبقى الطريق السريع ضغطةً واحدة.
+          */}
+        <div className="space-y-2 rounded-2xl border border-border bg-surface p-4">
+          <label className="block space-y-1.5">
+            <span className="text-sm font-semibold text-text">{t('detail.depositTitle')}</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="any"
+              value={amount}
+              onChange={(ev) => {
+                setAmount(ev.target.value)
+                setConfirmSecond(false)
+              }}
+              placeholder={String(calc.monthlyInstallment)}
+              className="num w-full rounded-xl border border-border bg-surface-muted px-3 py-2.5 text-lg font-bold text-text"
+            />
+          </label>
+
+          {/*
+            * الإيداع الثاني في الشهر نفسه يُسأل عنه ولا يُمنع.
+            *
+            * من يدفع قسطه على دفعتين له حقٌّ في ذلك، ومن ضغط مرّتين لا يقصد —
+            * والفرق بينهما سؤالٌ واحد. وكان يقع صامتاً: صندوقٌ أكبر من الحقيقة
+            * وقسطٌ أصغر منها.
+            */}
+          {movements.alreadyDepositedThisMonth && (
+            <p className="rounded-xl bg-accent-soft px-3 py-2 text-[13px] font-semibold text-text">
+              {t('detail.depositedThisMonth', {
+                amount: formatMoney(movements.thisMonthTotal),
+                count: movements.thisMonthCount,
+              })}
+            </p>
+          )}
+
+          {movements.alreadyDepositedThisMonth && confirmSecond ? (
+            <div className="flex gap-2">
+              <Button onClick={() => void deposit(draft)} loading={busy} className="flex-1">
+                {t('detail.confirmSecond')}
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmSecond(false)} disabled={busy}>
+                {t('common.cancel')}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              onClick={() =>
+                movements.alreadyDepositedThisMonth ? setConfirmSecond(true) : void deposit(draft)
+              }
+              disabled={!canDeposit}
+              loading={busy}
+              className="w-full"
+            >
+              {t('detail.depositAmount', { amount: formatMoney(draft) })}
+            </Button>
+          )}
+        </div>
 
         <Button variant="secondary" onClick={() => setPayOpen(true)} className="w-full">
           {t('payment.markPaid')}
@@ -224,6 +341,33 @@ export function ObligationDetail() {
         </div>
       </div>
 
+      {/*
+        * الحركات تُرى.
+        *
+        * كانت الشاشة تعرض رصيداً بلا ما بناه: يودع المستخدم فلا يرى إيداعه،
+        * ولا يعرف أنه أودع هذا الشهر، ولا يستطيع أن يتراجع. والخادم يعرضها
+        * منذ البداية — فالنقص كان في الواجهة وحدها.
+        */}
+      <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
+        <h2 className="text-sm font-bold text-text">{t('detail.historyTitle')}</h2>
+
+        {movements.entries.length === 0 ? (
+          <p className="text-[13px] text-text-muted">{t('detail.historyEmpty')}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {movements.entries.map((entry) => (
+              <MovementRow
+                key={entry.id}
+                entry={entry}
+                partner={partnerName(entry.partnerId)}
+                busy={busy}
+                onUndo={() => undoDeposit(entry.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
       {payOpen && (
         <PaymentDialog
           item={item}
@@ -235,6 +379,54 @@ export function ObligationDetail() {
         />
       )}
     </div>
+  )
+}
+
+/**
+ * سطر حركة: إيداعٌ أو سحب.
+ *
+ * والسحب بلا زرّ تراجُع: حذفه يعيد إلى الصندوق مالاً خرج فعلاً عند الدفع —
+ * وهو ليس غلطةَ إدخال بل واقعة. تصحيحُه بإيداعٍ مضاد لا بمحو أثره.
+ */
+function MovementRow({
+  entry,
+  partner,
+  busy,
+  onUndo,
+}: {
+  entry: DepositView
+  partner: string | null
+  busy: boolean
+  onUndo: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const withdrawal = entry.kind === 'withdrawal'
+
+  return (
+    <li className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-text">
+          {withdrawal ? t('detail.withdrawal') : t('detail.deposit')}
+          {partner ? ` · ${partner}` : ''}
+        </p>
+        <p className="num text-xs text-text-muted">{formatDate(entry.depositDate)}</p>
+      </div>
+      <span className={`num text-sm font-bold ${withdrawal ? 'text-text-muted' : 'text-brand'}`}>
+        {withdrawal ? '−' : '+'}
+        {formatMoney(entry.amount)}
+      </span>
+      {!withdrawal && (
+        <button
+          type="button"
+          aria-label={t('detail.undo')}
+          disabled={busy}
+          onClick={() => void onUndo()}
+          className="shrink-0 rounded-lg px-1.5 text-sm text-danger disabled:opacity-40"
+        >
+          ✕
+        </button>
+      )}
+    </li>
   )
 }
 

@@ -34,6 +34,7 @@ import type {
   CommitmentDetail,
   Expense,
   FixedCommitment,
+  FundDeposit,
   IncomeEntry,
   IncomeFrequency,
   IncomeSource,
@@ -433,6 +434,22 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     incomeBySource,
     load,
   }
+}
+
+/** حركات صندوق التزام — يقرأها الإيداع ليعرف ما سبقه هذا الشهر. */
+export async function loadDeposits(
+  { db }: Connection,
+  obligationId: string,
+  limit = 50,
+): Promise<FundDeposit[]> {
+  const { data, error } = await db
+    .from('fund_deposits')
+    .select('*')
+    .eq('obligation_id', obligationId)
+    .order('deposit_date', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as FundDeposit[]
 }
 
 export async function loadCommitmentDetails({ db }: Connection): Promise<CommitmentDetail[]> {
