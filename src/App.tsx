@@ -16,6 +16,7 @@ import { BillsScreen } from '@/features/bills/BillsScreen'
 import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
 import { WealthScreen } from '@/features/wealth/WealthScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
+import { UpdateBanner } from '@/features/update/UpdateBanner'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
@@ -86,6 +87,7 @@ function Shell() {
    */
   return (
     <div className="min-h-dvh bg-bg pb-36">
+      <UpdateBanner />
       <Header />
       <main className="mx-auto max-w-lg">
         <Routes>
