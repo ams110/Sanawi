@@ -1,11 +1,31 @@
 name: بناء APK
 
 # التشغيل اليدوي هو الافتراض: البناء يستغرق دقائق ويستهلك حصة الإجراءات،
-# ولا معنى لتشغيله على كل دفعة بينما التطبيق يُختبر على الويب أصلاً.
+# ولا معنى لتشغيله على كل دفعة بينما التطبيق يحمّل واجهته من الموقع.
+#
+# لكنّ «لا معنى» هذا صار خطأً مرّة، وبثمنٍ باهظ: بُني APK واحد يوم ٣ آب
+# الساعة ٣:٣١، وأُضيف `server.url` — الذي يجعل التطبيق يحمّل من الموقع —
+# الساعة ٤:٢٩ من اليوم نفسه. فبقي على الهاتف تطبيقٌ يحمل نسخةً محزومة من
+# تلك الساعة، لا يقرأ الموقع أصلاً، ولا يصله شيءٌ ممّا نُشر بعده. ثلاثة أيام
+# من الميزات وصلت الموقع ولم تصل صاحبه، وكل دمجٍ كان يبدو بلا أثر.
+#
+# فما يمسّ القشرة — إعداد Capacitor، أو مشروع أندرويد، أو هذا الملف — يبني
+# APK جديداً من تلقائه. وما يمسّ الواجهة وحدها يبقى بلا بناء: هذا هو الغرض
+# من `server.url` أصلاً.
 on:
   workflow_dispatch:
   push:
     tags: ['v*']
+    branches: [main]
+    paths:
+      - 'capacitor.config.ts'
+      - 'android/**'
+      - '.github/workflows/android.yml'
+
+# الإصدار يحتاج كتابةً على المستودع؛ وبدونه لا يبقى للـ APK إلا أرشيفُ
+# تشغيلٍ لا يُنزَّل من الهاتف بلا تسجيل دخول وفكِّ ضغط.
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -45,8 +65,31 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
         working-directory: android
 
+      - name: تسمية باسمٍ يقول نسخته
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk "out/sanawi-${GITHUB_SHA::7}.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: sanawi-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: out/*.apk
           retention-days: 30
+
+      # ‏رابطٌ مباشر يُفتح من الهاتف: أرشيف التشغيل يحتاج حساباً وفكَّ ضغط،
+      # وهذا ما يجعل «نزّل التطبيق» مهمّةً تُؤجَّل.
+      - name: إصدارٌ يُنزَّل من الهاتف
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short="${GITHUB_SHA::7}"
+          notes=$(cat <<'EOF'
+          قشرةٌ تفتح sanawi.kabblan.com، فكل ما بعدها من الواجهة يصل بإعادة تحميل بلا تنصيب.
+
+          التنصيب فوق نسخةٍ قديمة قد يرفضه أندرويد لاختلاف التوقيع — أزِل القديم أولاً.
+          ولا شيء يضيع بذلك: بياناتك كلها في الخادم لا في الجهاز.
+          EOF
+          )
+          gh release create "apk-$short" "out/sanawi-$short.apk" \
+            --title "سنوي — APK $short" --notes "$notes" \
+            || echo "إصدارٌ بهذه البصمة موجود — لا شيء يُفعل"
