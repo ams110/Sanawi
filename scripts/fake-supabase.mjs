@@ -404,10 +404,21 @@ export async function startFakeSupabase() {
       return res.end()
     }
 
+    /*
+     * الحقنة تُصيب جدولها لا أوّلَ الواصلين.
+     *
+     * الأدوات تستعلم بـPromise.all، وهو يرفض عند أول فشلٍ تاركاً أشقّاءه
+     * سائرين في الشبكة. فحقنةٌ بلا جدول كان يلتهمها طلبٌ شاردٌ من الأداة
+     * السابقة على آلةٍ بطيئة، وتمرّ الأداة المقصودة نظيفةً — فحصٌ يفشل في
+     * CI وينجح محلياً.
+     */
     if (nextFailure && url.pathname.startsWith('/rest/v1/')) {
-      const { status, ...payload } = nextFailure
-      nextFailure = null
-      return send(status ?? 400, payload)
+      const { table, ...rest } = nextFailure
+      if (!table || url.pathname.startsWith(`/rest/v1/${table}`)) {
+        const { status, ...payload } = rest
+        nextFailure = null
+        return send(status ?? 400, payload)
+      }
     }
 
     try {
@@ -593,7 +604,11 @@ export async function startFakeSupabase() {
     other: { email: OTHER_EMAIL, password: OTHER_PASSWORD, userId: OTHER_USER_ID },
     db,
     calls,
-    /** يجعل نداء REST القادم يفشل بخطأ على شكل PostgREST تماماً. */
+    /**
+     * يجعل نداء REST القادم يفشل بخطأ على شكل PostgREST تماماً.
+     * مرّر `table` لحصر الحقنة بطلبات ذلك الجدول وحده — بلا حصرٍ قد
+     * يلتهمها طلبٌ شاردٌ من نداءٍ سابق لم تهدأ استعلاماته المتوازية بعد.
+     */
     failNext: (failure) => {
       nextFailure = failure
     },
