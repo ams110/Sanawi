@@ -130,6 +130,16 @@ export function UpdateSection() {
       <div>
         <h2 className="text-sm font-bold text-text">{t('update.title')}</h2>
         <p className="text-xs text-text-muted">{t('update.subtitle')}</p>
+        {/*
+         * رقم النسخة مكتوبٌ لا مخفيّ.
+         *
+         * «مش ظاهر ولا إشي ممّا عملناه» سؤالٌ لا جواب له ما دام لا أحد — لا
+         * صاحب التطبيق ولا من يساعده — يستطيع أن يقول أيّ نسخةٍ يفتحها. سطرٌ
+         * واحد يحوّل السؤال إلى مقارنة رقمين.
+         */}
+        <p className="num mt-1 text-[11px] text-text-muted">
+          {t('update.build', { id: __BUILD_ID__ })}
+        </p>
       </div>
       <Button type="button" variant="secondary" className="w-full" onClick={reloadApp}>
         {t('update.button')}
