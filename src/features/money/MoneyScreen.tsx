@@ -9,7 +9,6 @@ import { useAmount } from '@/features/record/amount'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { hasStarted } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
-import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
 import { IncomeEntries } from './IncomeEntries'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
@@ -152,9 +151,6 @@ export function MoneyScreen() {
           await updateProfile(user.id, { monthly_savings_target: value })
         }}
       />
-
-      <BackupSection />
-      <UpdateSection />
     </div>
   )
 }

@@ -13,7 +13,7 @@ import {
   parseBackup,
 } from './api'
 
-/** تصدير واستيراد النسخة الاحتياطية — يظهر أسفل شاشة الدخل. */
+/** تصدير واستيراد النسخة الاحتياطية — يظهر في شاشة الإعدادات. */
 export function BackupSection() {
   const { t } = useTranslation()
   const { user } = useAuth()
