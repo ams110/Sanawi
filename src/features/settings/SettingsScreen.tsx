@@ -29,7 +29,10 @@ export function SettingsScreen() {
 
   return (
     <div className="space-y-5 px-5 py-6">
-      <h1 className="text-xl font-bold text-text">{t('settings.title')}</h1>
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('settings.title')}</h1>
+        <p className="text-sm text-text-muted">{t('settings.subtitle')}</p>
+      </div>
 
       <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
         <h2 className="text-sm font-bold text-text">{t('settings.accountSection')}</h2>

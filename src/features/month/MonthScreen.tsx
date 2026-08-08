@@ -214,6 +214,12 @@ export function MonthScreen() {
 
   return (
     <div className="space-y-5 px-5 py-6">
+      {/* الترويسة الموحّدة: عنوانٌ وسطرُ شرح، كما في كل تبويب. */}
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('month.screenTitle')}</h1>
+        <p className="text-sm text-text-muted">{t('month.screenSubtitle')}</p>
+      </div>
+
       {/* الرقم الذي يُقرأ في نصف ثانية */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
         <p className="text-sm text-text-muted">{t('month.title')}</p>

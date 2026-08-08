@@ -71,6 +71,11 @@ export function InsightsScreen() {
 
   return (
     <div className="space-y-6 px-5 py-6">
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('insights.title')}</h1>
+        <p className="text-sm text-text-muted">{t('insights.subtitle')}</p>
+      </div>
+
       {/* شاشة التحليل تقيس ما يخرج؛ ومدخلٌ واحد يصلها بما يتراكم. */}
       <Link
         to="/wealth"
@@ -90,7 +95,7 @@ export function InsightsScreen() {
 
       <section className="space-y-4">
         <div>
-          <h1 className="text-xl font-bold text-text">{t('insights.groupTitle')}</h1>
+          <h2 className="text-lg font-bold text-text">{t('insights.groupTitle')}</h2>
           <p className="text-sm text-text-muted">{t('insights.groupSubtitle')}</p>
         </div>
 

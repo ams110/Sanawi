@@ -116,6 +116,11 @@ export function WealthScreen() {
 
   return (
     <div className="space-y-5 px-5 py-6">
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('wealth.title')}</h1>
+        <p className="text-sm text-text-muted">{t('wealth.screenSubtitle')}</p>
+      </div>
+
       {/* الرقم الواحد: يُقرأ في نصف ثانية بلا قراءة ما حوله. */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
         <p className="text-sm text-text-muted">{t('wealth.net')}</p>

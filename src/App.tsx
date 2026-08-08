@@ -213,16 +213,17 @@ function Header() {
   const { t } = useTranslation()
   const { pathname } = useLocation()
   const isTab = TABS.some((tab) => tab.to === pathname)
-  // الإعدادات تُفتح من كل الشاشات، فالرجوع منها إلى لوحة الشهر لا إلى
-  // قائمة الالتزامات التي لم يمرّ بها.
+  // الإعدادات والثروة تُفتحان من لوحة الشهر لا من قائمة الالتزامات —
+  // فالرجوع يعيد إلى حيث كان المستخدم فعلاً، لا إلى قائمةٍ لم يمرّ بها.
   const inSettings = pathname === '/settings'
+  const backToMonth = inSettings || pathname === '/wealth'
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
         {isTab ? (
           <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
-        ) : inSettings ? (
+        ) : backToMonth ? (
           <Link to="/month" className="text-sm font-bold text-brand">
             ← {t('common.back')}
           </Link>
