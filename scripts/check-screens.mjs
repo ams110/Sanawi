@@ -133,6 +133,19 @@ function seed(db, userId) {
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
   })
 
+  // قبضة الشهر الماضي: كانت تسقط من كل شاشةٍ واقفة على الحاضر، وبها
+  // يُفحص سجلّ «قبضاتك حسب المصدر» — المال المسجَّل بأثرٍ رجعي لا يضيع.
+  db.income_entries.push({
+    id: 'in-past',
+    user_id: userId,
+    source_id: 'i1',
+    name: null,
+    amount: 11000,
+    received_at: iso(new Date(today.getFullYear(), today.getMonth() - 1, 20)),
+    note: null,
+    created_at: new Date().toISOString(),
+  })
+
   db.expenses.push({
     id: 'e1',
     user_id: userId,
@@ -239,6 +252,17 @@ try {
     step(`${tab.name}: تُرسم بلا مفتاح ترجمة خام`, !RAW_KEY.test(body), (body.match(RAW_KEY) ?? [])[0] ?? '')
     step(`${tab.name}: ليست فارغة`, body.trim().length > 80)
   }
+
+  /*
+   * سجلّ «قبضاتك حسب المصدر»: القبضة المسجَّلة بأثرٍ رجعي في شهرٍ مضى
+   * كانت غير مرئية من أي شاشة — موجودةً في القاعدة وضائعةً من العين.
+   */
+  await page.goto(`${BASE}/flow/income`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const historyCard = page.locator('section').filter({ hasText: 'قبضاتك حسب المصدر' }).first()
+  step('سجلّ القبضات حسب المصدر ظاهر', await historyCard.isVisible())
+  const historyText = (await historyCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('وقبضة الشهر الماضي فيه لا ضائعة', /11,000/.test(historyText), historyText.slice(0, 140))
 
   /*
    * قائمة الفواتير الموحّدة: دفعة الالتزام التي حلّ موعدها تظهر مع فواتير

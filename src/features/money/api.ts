@@ -11,6 +11,19 @@ export async function listIncomes(): Promise<IncomeSource[]> {
   return (data ?? []) as IncomeSource[]
 }
 
+/**
+ * كل المصادر بما فيها المؤرشفة — لتسمية قبضاتٍ وقعت على مصدرٍ أُرشف بعدها.
+ * الأرشفة تُخفي المصدر من النماذج، ولا تُنكر مالاً وصل عليه.
+ */
+export async function listAllIncomeSources(): Promise<IncomeSource[]> {
+  const { data, error } = await supabase
+    .from('income_sources')
+    .select('*')
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as IncomeSource[]
+}
+
 export async function listFixedCommitments(): Promise<FixedCommitment[]> {
   const { data, error } = await supabase
     .from('fixed_commitments')

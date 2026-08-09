@@ -420,6 +420,47 @@ expect('الدخل الواصل', actual?.income, 9000)
 expect('الفجوة عن المعتاد', actual?.income_gap, -4300)
 expect('الباقي بعد الواقع', actual?.remaining, 7225)
 
+/*
+ * القبضة على مصدرٍ مؤرشف تبقى مسمّاةً في التفصيل.
+ *
+ * كانت تدخل المجموع وتغيب عن كل سطر، فيقرأ صاحبها «المجموع 700 وكل
+ * المصادر صفر». الصفّان يُدسّان مباشرةً ثم يُرفعان كي لا يزحزحا أرقام
+ * ما بعدهما.
+ */
+fake.db.income_sources.push({
+  id: 'src-archived',
+  user_id: fake.userId,
+  name: 'شغل قديم',
+  amount: 0,
+  frequency: 'monthly',
+  is_variable: true,
+  is_active: false,
+  created_at: new Date().toISOString(),
+})
+fake.db.income_entries.push({
+  id: 'ent-archived',
+  user_id: fake.userId,
+  source_id: 'src-archived',
+  name: null,
+  amount: 700,
+  received_at: monthDay(4),
+  note: null,
+  created_at: new Date().toISOString(),
+})
+const withArchived = await call('sanawi_month_overview')
+const archivedRow = withArchived?.income_by_source?.find((r) => r.name === 'شغل قديم')
+expect('قبضة المصدر المؤرشف تبقى مسمّاةً في التفصيل', archivedRow?.amount, 700)
+expect('بلا توقُّعٍ مخترَع لها', archivedRow?.expected ?? null, null)
+expect('والمجموع الواصل يشملها', withArchived?.received_income, 9700)
+fake.db.income_entries.splice(
+  fake.db.income_entries.findIndex((e) => e.id === 'ent-archived'),
+  1,
+)
+fake.db.income_sources.splice(
+  fake.db.income_sources.findIndex((s) => s.id === 'src-archived'),
+  1,
+)
+
 // ٦. التقويم
 const calendar = await call('sanawi_calendar', { months: 12 })
 expect('طول النافذة', calendar?.months.length, 12)

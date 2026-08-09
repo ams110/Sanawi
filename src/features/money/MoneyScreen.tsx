@@ -10,6 +10,7 @@ import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { hasStarted } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
 import { IncomeEntries } from './IncomeEntries'
+import { IncomeHistory } from './IncomeHistory'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
@@ -118,6 +119,8 @@ export function MoneyScreen() {
       </section>
 
       {user && <IncomeEntries userId={user.id} sources={incomes} />}
+
+      <IncomeHistory />
 
       <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
         <div className="flex items-baseline justify-between">

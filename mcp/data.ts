@@ -384,6 +384,23 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     }
   }
 
+  /*
+   * القبضة على مصدرٍ مؤرشف كانت تدخل المجموع وتغيب عن كل تفصيل، فيقرأ
+   * صاحبها «المجموع 700 وكل المصادر صفر». الأرشفة تخفي المصدر من النماذج
+   * ولا تُنكر مالاً وصل عليه — فيُجلب اسمه ويُعرض سطره كأي مصدر.
+   */
+  const activeIds = new Set(money.incomes.map((s) => s.id))
+  const archivedReceivedIds = [...receivedBySourceId.keys()].filter((id) => !activeIds.has(id))
+  const archivedNames = new Map<string, string>()
+  if (archivedReceivedIds.length > 0) {
+    const { data: archivedRows, error: archivedError } = await connection.db
+      .from('income_sources')
+      .select('id,name')
+      .in('id', archivedReceivedIds)
+    if (archivedError) throw archivedError
+    for (const row of archivedRows ?? []) archivedNames.set(row.id as string, row.name as string)
+  }
+
   const incomeBySource = [
     ...money.incomes.map((source) => ({
       name: source.name,
@@ -392,6 +409,11 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
       expected: source.is_variable
         ? null
         : monthlyEquivalent(Number(source.amount), source.frequency as IncomeFrequency),
+    })),
+    ...archivedReceivedIds.map((id) => ({
+      name: archivedNames.get(id) ?? 'مصدر مؤرشف',
+      amount: Math.round(receivedBySourceId.get(id)! * 100) / 100,
+      expected: null,
     })),
     ...[...receivedLoose].map(([name, amount]) => ({
       name,
