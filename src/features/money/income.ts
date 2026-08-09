@@ -11,6 +11,24 @@ export function monthBounds(key: string): { start: string; end: string } {
   }
 }
 
+/**
+ * قبضات آخر اثني عشر شهراً — لسجلّ «من وين إجا مصريّك».
+ *
+ * القبضة المسجَّلة بتاريخٍ رجعي في شهرٍ مضى كانت تسقط من كل عرض: الشاشات
+ * واقفة على الشهر الحالي، ولا شيء يدلّ على أن في الشهور الماضية مالاً.
+ */
+export async function listRecentIncomeEntries(monthsBack = 12): Promise<IncomeEntry[]> {
+  const now = new Date()
+  const start = toDateKey(new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1))
+  const { data, error } = await supabase
+    .from('income_entries')
+    .select('*')
+    .gte('received_at', start)
+    .order('received_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as IncomeEntry[]
+}
+
 export async function listIncomeEntries(month: string): Promise<IncomeEntry[]> {
   const { start, end } = monthBounds(month)
   const { data, error } = await supabase

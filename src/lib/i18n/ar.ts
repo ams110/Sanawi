@@ -602,6 +602,19 @@ export const ar = {
     incomeDate: 'تاريخ الاستلام',
     addIncome: 'سجّل',
     incomeList: 'سجل دخلك',
+
+    /*
+     * سجلّ القبضات حسب المصدر.
+     *
+     * قبضةٌ بتاريخٍ في شهرٍ مضى كانت تختفي من كل الشاشات الواقفة على
+     * الحاضر، وصاحبُ ثلاثة أعمال لا يعرف كم جاء من كلٍّ منها.
+     */
+    historyTitle: 'قبضاتك حسب المصدر',
+    historySubtitle: 'آخر 12 شهر — من وين إجا مصريّك',
+    historyCount: '{{count}} قبضة',
+    historyArchived: 'مصدر مؤرشف',
+    historyUnsourced: 'بلا مصدر',
+
     thisMonth: 'هذا الشهر',
     noIncomeYet: 'ما سجّلت ولا دفعة دخل هالشهر',
     noIncomeThatMonth: 'ما في دخل مسجّل بهالشهر',
