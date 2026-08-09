@@ -1,110 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/features/auth/AuthProvider'
-import { useProfile } from '@/features/profile/ProfileProvider'
-import { useRefresh } from '@/lib/refresh'
 import { formatMoney } from '@/lib/format'
-import { failureText } from '@/lib/i18n/failure'
-import { computeNetWorth } from '@/lib/wealth/networth'
-import { updateProfile } from '@/features/profile/api'
-import type { Profile } from '@/lib/db/types'
-import { AssetsSection } from './AssetsSection'
-import { FreedomPanel } from './FreedomPanel'
-import { PayoffPanel } from './PayoffPanel'
 import { NetWorthTrend } from './NetWorthTrend'
-import { loadWealthSources, saveSnapshot, toAssetInputs, type WealthSources } from './api'
-import { AccountsSection } from '@/features/accounts/AccountsSection'
-import { loadAccountsPicture, type AccountsPicture } from '@/features/accounts/api'
+import { saveSnapshot } from './api'
+import { useWealth, WealthLoading } from './useWealth'
 
 /**
- * شاشة الثروة — النصف الغائب من التطبيق.
+ * نظرة الثروة — الرقم الواحد وتفصيله وصندوق الطوارئ والمسار.
  *
- * كل شاشةٍ قبلها تجيب على «كم يخرج»، وهذه وحدها تجيب على «كم تراكم».
- * ولذلك ترتيبها من الأعلى إلى الأسفل ليس عشوائياً: الرقم الواحد أولاً،
- * ثم من أين جاء، ثم إلى أين يمضي — لأن من يفتحها يسأل الأول، ومن يبقى
- * فيها يسأل الثاني والثالث.
+ * أول صفحات المحور: من يفتح «الثروة» يسأل «كم صار معي؟» قبل أي شيء.
+ * الحسابات والأصول والخطط صفحاتٌ جاراتٌ في الشريط أعلاه.
  */
-export function WealthScreen() {
+export function WealthOverview() {
   const { t } = useTranslation()
-  const { user } = useAuth()
-  const { profile, patchLocal } = useProfile()
-  const { token: refreshToken, setBusy } = useRefresh()
-
-  const [sources, setSources] = useState<WealthSources | null>(null)
-  const [accounts, setAccounts] = useState<AccountsPicture | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { user, sources, net, loading, error, emergencyMonths, load, saveProfilePatch } =
+    useWealth()
   const [snapshotSaved, setSnapshotSaved] = useState(false)
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      const [wealth, accountsPicture] = await Promise.all([
-        loadWealthSources(),
-        // فشل قراءة الحسابات لا يمنع صافي الثروة — القسم وحده يسقط.
-        loadAccountsPicture().catch(() => null),
-      ])
-      setSources(wealth)
-      setAccounts(accountsPicture)
-    } catch (err) {
-      setError(failureText(err, t, t('wealth.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const emergencyMonths = Number(profile?.emergency_months ?? 3)
-
-  /*
-   * كتابةٌ واحدة تُمسك خطأها.
-   *
-   * `patchLocal` يجعل الشاشة تعرض القيمة الجديدة فوراً؛ فإن فشلت الكتابة
-   * صارت الشاشة تكذب بصمت. نعيد المحلّي إلى ما كان ونقول ما جرى.
-   */
-  const saveProfilePatch = useCallback(
-    async (patch: Partial<Profile>) => {
-      if (!user || !profile) return
-      const before = Object.fromEntries(
-        Object.keys(patch).map((key) => [key, profile[key as keyof Profile]]),
-      ) as Partial<Profile>
-
-      patchLocal(patch)
-      try {
-        await updateProfile(user.id, patch)
-      } catch (err) {
-        patchLocal(before)
-        setError(failureText(err, t, t('wealth.saveFailed')))
-      }
-    },
-    [user, profile, patchLocal, t],
-  )
-
-  const net = useMemo(() => {
-    if (!sources) return null
-    return computeNetWorth({
-      assets: toAssetInputs(sources.assets),
-      accounts: sources.accounts,
-      restrictedFunds: sources.restrictedFunds,
-      debts: sources.debts,
-      monthlyEssentials: sources.monthlyEssentials,
-      emergencyMonths,
-    })
-  }, [sources, emergencyMonths])
-
-  if (loading) {
-    return (
-      <div className="space-y-4 px-5 py-6">
-        <div className="h-44 animate-pulse rounded-3xl bg-surface-muted" />
-        <div className="h-32 animate-pulse rounded-3xl bg-surface-muted" />
-        <div className="h-52 animate-pulse rounded-3xl bg-surface-muted" />
-      </div>
-    )
-  }
+  if (loading) return <WealthLoading />
 
   if (error || !sources || !net) {
     return (
@@ -197,25 +110,6 @@ export function WealthScreen() {
         <p className="text-[12px] leading-relaxed text-text-muted">{t('wealth.debtsNote')}</p>
       </section>
 
-      {/*
-       * الحسابات: عرضٌ **ومعه فعل**.
-       *
-       * كان هذا القسم يعرض «غير مخصّص» ويختفي كلّه لمن لا حساب له — ولا سبيل
-       * في التطبيق إلى إنشاء حساب أصلاً. صار يُدخِل الرصيد ويربط الصندوق
-       * ويغلق التسوية، فلا يبقى في الشاشة رقمٌ لا يُنفَّذ عليه شيء.
-       */}
-      {user && accounts && (
-        <AccountsSection picture={accounts} userId={user.id} onChanged={load} />
-      )}
-
-      {/*
-       * تحذير «صناديق بلا حساب» انتقل إلى `AccountsSection` ومعه زرُّ الربط.
-       *
-       * كان هنا بلا زرّ — ولا سبيل في التطبيق كلّه إلى ربط صندوقٍ بحساب —
-       * فيظهر كل يوم ولا يُطفأ. وتحذيرٌ لا يُطفأ يدرّب صاحبه على تجاهل
-       * التحذيرات كلها، بما فيها ما سيهمّه يوماً.
-       */}
-
       <EmergencyFundCard
         current={net.emergencyFund.current}
         target={net.emergencyFund.target}
@@ -244,21 +138,6 @@ export function WealthScreen() {
             : null
         }
       />
-
-      {user && <AssetsSection userId={user.id} assets={sources.assets} onChanged={load} />}
-
-      <FreedomPanel
-        netWorth={net.netWorth}
-        annualSpending={sources.annualSpending}
-        spendingIsProvisional={sources.spendingIsProvisional}
-        defaultContribution={Number(profile?.monthly_savings_target ?? 0)}
-        defaultReturnPercent={net.assetsTotal > 0 ? net.weightedReturnPercent : 0}
-        inflationPercent={Number(profile?.inflation_percent ?? 3)}
-        withdrawalRatePercent={Number(profile?.withdrawal_rate_percent ?? 4)}
-        onSettingsChange={saveProfilePatch}
-      />
-
-      <PayoffPanel debts={sources.payoffDebts} />
     </div>
   )
 }

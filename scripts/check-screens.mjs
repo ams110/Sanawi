@@ -201,17 +201,21 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners)\.[a-zA-Z]/
 
+  // كل مقاطع المحاور الجديدة، لا الأبواب الخمسة وحدها.
   const TABS = [
     { path: '/month', name: 'month' },
-    { path: '/bills', name: 'bills' },
-    { path: '/expenses', name: 'expenses' },
-    { path: '/money', name: 'money' },
+    { path: '/flow/expenses', name: 'expenses' },
+    { path: '/flow/income', name: 'money' },
+    { path: '/flow/bills', name: 'bills' },
     { path: '/obligations', name: 'obligations' },
-    { path: '/calendar', name: 'calendar' },
-    { path: '/insights', name: 'insights' },
+    { path: '/obligations/calendar', name: 'calendar' },
     { path: '/wealth', name: 'wealth' },
+    { path: '/wealth/accounts', name: 'wealth-accounts' },
+    { path: '/wealth/assets', name: 'wealth-assets' },
+    { path: '/wealth/plans', name: 'wealth-plans' },
+    { path: '/reports', name: 'insights' },
     { path: '/settings', name: 'settings' },
   ]
 
@@ -223,6 +227,23 @@ try {
     const body = await page.locator('body').innerText()
     step(`${tab.name}: تُرسم بلا مفتاح ترجمة خام`, !RAW_KEY.test(body), (body.match(RAW_KEY) ?? [])[0] ?? '')
     step(`${tab.name}: ليست فارغة`, body.trim().length > 80)
+  }
+
+  /*
+   * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ
+   * يُفحص لا تعليقٌ يُصدَّق.
+   */
+  const REDIRECTS = [
+    ['/bills', '/flow/bills'],
+    ['/expenses', '/flow/expenses'],
+    ['/money', '/flow/income'],
+    ['/calendar', '/obligations/calendar'],
+    ['/insights', '/reports'],
+  ]
+  for (const [from, to] of REDIRECTS) {
+    await page.goto(`${BASE}${from}`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(400)
+    step(`الرابط القديم ${from} يوصل إلى ${to}`, page.url().includes(to), page.url())
   }
 
   /*
@@ -294,7 +315,7 @@ try {
    * الفحص يمرّ على المسار كاملاً: أنشئ حساباً، اربط به صندوقاً، وتأكّد أن
    * «المحجوز» صار رصيد الصندوق فعلاً.
    */
-  await page.goto(`${BASE}/wealth`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/wealth/accounts`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
 
   /*
