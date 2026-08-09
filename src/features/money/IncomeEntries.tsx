@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
-import { formatDate, formatMoney } from '@/lib/format'
+import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { useRefresh } from '@/lib/refresh'
 import type { IncomeEntry, IncomeSource } from '@/lib/db/types'
@@ -182,13 +182,27 @@ export function IncomeEntries({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /*
+   * السجل يمشي مع الأشهر — لا الشهر الحالي وحده.
+   *
+   * دخل كانون سؤالٌ مشروع في شباط: من يفاوض على عقدٍ أو يقارن مواسم شغله
+   * الحرّ يحتاج تاريخه لا لقطته. المصاريف تتنقّل بين الأشهر منذ البداية،
+   * والدخل كان محبوساً في «الآن».
+   */
+  const [shift, setShift] = useState(0)
+  const viewMonth = (() => {
+    const now = new Date()
+    return monthKey(new Date(now.getFullYear(), now.getMonth() + shift, 1))
+  })()
+  const isCurrent = shift === 0
+
   const load = useCallback(async () => {
     try {
-      setRows(await listIncomeEntries(monthKey()))
+      setRows(await listIncomeEntries(viewMonth))
     } catch (err) {
       setError(failureText(err, t, t('panel.incomeLoadFailed')))
     }
-  }, [t, refreshToken])
+  }, [t, refreshToken, viewMonth])
 
   useEffect(() => {
     void load()
@@ -225,6 +239,32 @@ export function IncomeEntries({
         <span className="num text-lg font-bold text-brand">{formatMoney(total)}</span>
       </div>
 
+      {/* التنقّل بنمط شاشة المصاريف نفسه: في RTL السهم الأيمن يرجع للأقدم. */}
+      <div className="flex items-center justify-between rounded-xl bg-surface-muted px-3 py-2">
+        <span className="num text-[13px] font-semibold text-text">
+          {isCurrent ? t('panel.thisMonth') : formatMonthYear(viewMonth)}
+        </span>
+        <div className="flex shrink-0 gap-1">
+          <button
+            type="button"
+            onClick={() => setShift((s) => s - 1)}
+            aria-label="◀"
+            className="rounded-lg bg-bg px-2.5 py-1 text-xs text-text-muted"
+          >
+            ◀
+          </button>
+          <button
+            type="button"
+            onClick={() => setShift((s) => s + 1)}
+            disabled={isCurrent}
+            aria-label="▶"
+            className="rounded-lg bg-bg px-2.5 py-1 text-xs text-text-muted disabled:opacity-40"
+          >
+            ▶
+          </button>
+        </div>
+      </div>
+
       {error && (
         <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
           {error}
@@ -232,7 +272,9 @@ export function IncomeEntries({
       )}
 
       {rows.length === 0 ? (
-        <p className="text-sm text-text-muted">{t('panel.noIncomeYet')}</p>
+        <p className="text-sm text-text-muted">
+          {isCurrent ? t('panel.noIncomeYet') : t('panel.noIncomeThatMonth')}
+        </p>
       ) : (
         <ul className="space-y-2">
           {rows.map((row) => (
@@ -246,6 +288,12 @@ export function IncomeEntries({
         </ul>
       )}
 
+      {/*
+       * النموذج في الشهر الحالي وحده: تاريخه افتراضياً اليوم، فإضافةٌ أثناء
+       * تصفّح شباط كانت ستُحفظ في الحاضر وتختفي من المعروض — حفظٌ يبدو فشلاً.
+       * ومن يريد التسجيل بأثرٍ رجعي يغيّر حقل التاريخ من الشهر الحالي.
+       */}
+      {isCurrent && (
       <form onSubmit={submit} className="space-y-2 border-t border-border pt-3">
         <p className="text-xs font-semibold text-text-muted">{t('panel.logIncome')}</p>
 
@@ -298,6 +346,7 @@ export function IncomeEntries({
           {t('panel.addIncome')}
         </Button>
       </form>
+      )}
     </section>
   )
 }
