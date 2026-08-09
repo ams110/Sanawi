@@ -88,6 +88,17 @@ function seed(db, userId) {
   const obligations = [
     { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500 },
     { id: 'o2', name: 'טסט (فحص سنوي)', total: 1200, due: `${year + 1}-03-01`, baseline: 100 },
+    /*
+     * التزامٌ فات موعده بيومين — به تُفحص قائمة الفواتير الموحّدة: دفعته
+     * تظهر مع فواتير الشهر وفوقها، في أي يومٍ من السنة جرى الفحص.
+     */
+    {
+      id: 'o3',
+      name: 'اشتراك الصالة',
+      total: 1800,
+      due: iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2)),
+      baseline: 150,
+    },
   ]
   for (const o of obligations) {
     db.obligations.push({
@@ -230,6 +241,35 @@ try {
   }
 
   /*
+   * قائمة الفواتير الموحّدة: دفعة الالتزام التي حلّ موعدها تظهر مع فواتير
+   * الشهر، مرتّبةً بالاستعجال نفسه، ومعها جاهزية صندوقها وزرُّ دفعها.
+   */
+  await page.goto(`${BASE}/flow/bills`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+
+  const annualCard = page.locator('li').filter({ hasText: 'دفعة التزام' }).first()
+  step('دفعة الالتزام المستحقّة تظهر في قائمة الفواتير', await annualCard.isVisible())
+
+  const annualText = (await annualCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('وفيها اسم الالتزام وجاهزية صندوقه', /اشتراك الصالة/.test(annualText) && /صندوق/.test(annualText), annualText.slice(0, 120))
+  step('والمتأخّرة تقول إنها متأخّرة', /متأخرة/.test(annualText), annualText.slice(0, 120))
+
+  // المتأخّر فوق فاتورة الشهر التي لم يحن يومها — الترتيب استعجالٌ واحد للقائمتين.
+  const billCard = page.locator('li').filter({ hasText: 'بالميزانية' }).first()
+  const annualBox = await annualCard.boundingBox()
+  const billBox = await billCard.boundingBox()
+  step('وتسبق فاتورة الشهر في الترتيب', Boolean(annualBox && billBox && annualBox.y < billBox.y))
+
+  /* زرّ الدفع يفتح نفس حوار صفحة التفاصيل — تأكيدٌ قبل أي أثر. */
+  await annualCard.getByRole('button', { name: 'اندفع ✓' }).click()
+  await page.waitForTimeout(600)
+  const payDialog = page.getByRole('dialog')
+  step('وزرّ الدفع يفتح حوار التأكيد', (await payDialog.innerText().catch(() => '')).includes('أكّد الدفع'))
+  await page.screenshot({ path: `${OUT}/bills-pay.png` })
+  await payDialog.getByRole('button', { name: 'إلغاء' }).click()
+  await page.waitForTimeout(400)
+
+  /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ
    * يُفحص لا تعليقٌ يُصدَّق.
    */
@@ -300,6 +340,10 @@ try {
   // المحدِّد محصورٌ في الورقة: نفس النصّ موجودٌ خلفها في شاشة الالتزام،
   // و`.first()` كان يمسك المحجوب فيفشل النقر لسببٍ لا علاقة له بالمفحوص.
   const sheet = page.getByRole('dialog')
+  // الصندوق يُختار بالاسم لا بالافتراضي: الافتراضي أقربُ موعدٍ، وأيُّ بذرةٍ
+  // جديدة تزحزحه — والحارس المفحوص يخصّ الصندوق الذي أُودع فيه هذا الشهر.
+  await sheet.locator('select').selectOption({ label: 'تأمين السيارة' })
+  await page.waitForTimeout(300)
   await sheet.getByRole('button', { name: /^حطّ ₪/ }).click()
   await page.waitForTimeout(600)
   step(

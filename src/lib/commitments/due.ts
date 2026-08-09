@@ -35,18 +35,27 @@ export function dueDateInMonth(dayOfMonth: number, monthStart: Date): Date {
   return new Date(year, month, day)
 }
 
-export function dueInfo(
-  dayOfMonth: number,
-  monthStart: Date,
-  today: Date = new Date(),
-): DueInfo {
-  const date = dueDateInMonth(dayOfMonth, monthStart)
+/**
+ * الاستحقاق من تاريخٍ كامل — لدفعات الالتزامات السنوية.
+ *
+ * الفاتورة الشهرية موعدُها يومٌ في الشهر، ودفعة الالتزام موعدُها تاريخٌ
+ * بعينه. والإلحاح واحدٌ للاثنين، فيُحسب هنا مرةً وتبني عليه الصيغتان.
+ */
+export function dueInfoForDate(date: Date, today: Date = new Date()): DueInfo {
   const daysAway = differenceInCalendarDays(date, today)
 
   const urgency: DueUrgency =
     daysAway < 0 ? 'overdue' : daysAway === 0 ? 'today' : daysAway <= SOON_DAYS ? 'soon' : 'later'
 
   return { date, daysAway, urgency }
+}
+
+export function dueInfo(
+  dayOfMonth: number,
+  monthStart: Date,
+  today: Date = new Date(),
+): DueInfo {
+  return dueInfoForDate(dueDateInMonth(dayOfMonth, monthStart), today)
 }
 
 export interface SortableBill {
@@ -64,14 +73,22 @@ export interface SortableBill {
  * وما بقي يُرتَّب بالموعد: الأقرب أولاً، والمتأخّر قبل الجميع.
  * وبلا موعدٍ في الذيل لأنه لا يزاحم على الاستعجال.
  */
+/**
+ * مفتاح ترتيبٍ من فرق الأيام وحده — تشترك فيه الفاتورة ودفعة الالتزام.
+ *
+ * المتأخّر أشدّ استعجالاً كلّما زاد تأخّره، فيأخذ مفتاحاً أصغر كلّما بعُد.
+ */
+export function sortKeyFromDaysAway(daysAway: number): number {
+  return daysAway < 0 ? daysAway : daysAway + 1_000
+}
+
 export function billSortKey(bill: SortableBill, monthStart: Date, today: Date = new Date()): number {
   if (bill.isPaid) return 40_000
   if (bill.dayOfMonth == null) return 30_000
   if (bill.isAutomatic) return 20_000 + bill.dayOfMonth
 
   const { daysAway } = dueInfo(bill.dayOfMonth, monthStart, today)
-  // المتأخّر أشدّ استعجالاً كلّما زاد تأخّره، فيأخذ مفتاحاً أصغر كلّما بعُد.
-  return daysAway < 0 ? daysAway : daysAway + 1_000
+  return sortKeyFromDaysAway(daysAway)
 }
 
 export function sortBills<T>(

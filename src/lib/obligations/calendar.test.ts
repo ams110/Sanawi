@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCalendar, calendarTotal, heaviestMonth } from './calendar'
+import { buildCalendar, calendarTotal, duesInMonth, heaviestMonth } from './calendar'
 
 const TODAY = new Date('2026-08-02T00:00:00')
 const opts = { today: TODAY }
@@ -143,5 +143,76 @@ describe('الموعد المبدئي في المقدمة', () => {
       opts,
     )
     expect(calendarTotal(cal)).toBe(0)
+  })
+})
+
+describe('استحقاقات شهرٍ بعينه — duesInMonth', () => {
+  const AUG = new Date('2026-08-01T00:00:00')
+  const SEP = new Date('2026-09-01T00:00:00')
+  const JUL = new Date('2026-07-01T00:00:00')
+
+  const insurance = {
+    id: 'a',
+    name: 'تأمين',
+    totalAmount: 6000,
+    mySharePercent: 50,
+    nextDueDate: '2026-08-15',
+    recurrenceMonths: 12,
+  }
+
+  it('يعيد المستحقّ في الشهر المعروض بحصّتي محسوبة', () => {
+    const dues = duesInMonth([insurance], AUG, TODAY)
+    expect(dues).toHaveLength(1)
+    expect(dues[0]!.myAmount).toBe(3000)
+    expect(dues[0]!.amount).toBe(6000)
+    expect(dues[0]!.dueDate.getDate()).toBe(15)
+    expect(dues[0]!.isOverdue).toBe(false)
+  })
+
+  it('لا يعيد ما موعده في شهرٍ آخر', () => {
+    expect(duesInMonth([insurance], SEP, TODAY)).toHaveLength(0)
+  })
+
+  it('المتأخّر يُسحب إلى شهر اليوم بتاريخه الأصلي', () => {
+    const overdue = { ...insurance, nextDueDate: '2026-06-20' }
+    const dues = duesInMonth([overdue], AUG, TODAY)
+    expect(dues).toHaveLength(1)
+    expect(dues[0]!.isOverdue).toBe(true)
+    // التاريخ الأصلي محفوظ — منه يُقاس التأخّر.
+    expect(dues[0]!.dueDate.getMonth()).toBe(5)
+  })
+
+  it('مستحقُّ اليوم ليس متأخّراً', () => {
+    const today = { ...insurance, nextDueDate: '2026-08-02' }
+    expect(duesInMonth([today], AUG, TODAY)[0]!.isOverdue).toBe(false)
+  })
+
+  it('الشهر الماضي فراغٌ — سجلٌّ لا قائمة عمل', () => {
+    const overdue = { ...insurance, nextDueDate: '2026-06-20' }
+    expect(duesInMonth([overdue], JUL, TODAY)).toHaveLength(0)
+  })
+
+  it('الدورية القصيرة تصل إلى الشهر المعروض القادم', () => {
+    const quarterly = { ...insurance, nextDueDate: '2026-06-10', recurrenceMonths: 3 }
+    // حزيران فات فسُحب إلى آب، والدورة التالية أيلول 10.
+    const aug = duesInMonth([quarterly], AUG, TODAY)
+    expect(aug).toHaveLength(1)
+    expect(aug[0]!.isOverdue).toBe(true)
+    const sep = duesInMonth([quarterly], SEP, TODAY)
+    expect(sep).toHaveLength(1)
+    expect(sep[0]!.dueDate.getMonth()).toBe(8)
+    expect(sep[0]!.isOverdue).toBe(false)
+  })
+
+  it('لمرة واحدة لا يتكرّر بعد شهره', () => {
+    const once = { ...insurance, nextDueDate: '2026-08-20', recurrenceMonths: 0 }
+    expect(duesInMonth([once], AUG, TODAY)).toHaveLength(1)
+    expect(duesInMonth([once], SEP, TODAY)).toHaveLength(0)
+  })
+
+  it('يرتّب بالموعد الأقرب أولاً', () => {
+    const late = { ...insurance, id: 'b', name: 'ترخيص', nextDueDate: '2026-08-25' }
+    const dues = duesInMonth([late, insurance], AUG, TODAY)
+    expect(dues.map((d) => d.name)).toEqual(['تأمين', 'ترخيص'])
   })
 })

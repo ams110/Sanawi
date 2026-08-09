@@ -21,8 +21,20 @@ import {
   listPaymentMethods,
   updateCommitment,
 } from './commitments'
-import { dueInfo, sortBills } from '@/lib/commitments/due'
+import { billSortKey, dueInfo, dueInfoForDate, sortKeyFromDaysAway } from '@/lib/commitments/due'
+import { duesInMonth } from '@/lib/obligations/calendar'
+import {
+  listObligations,
+  markPaid,
+  track,
+  type ObligationWithCalc,
+  type PaymentResult,
+} from '@/features/obligations/api'
+import { listAccounts } from '@/features/accounts/api'
+import { PaymentDialog } from '@/features/obligations/PaymentDialog'
+import { AnnualDueCard } from './AnnualDueCard'
 import type {
+  Account,
   CommitmentDetail,
   CommitmentPartnerShare,
   ObligationPartner,
@@ -30,11 +42,16 @@ import type {
 } from '@/lib/db/types'
 
 /**
- * فواتير الشهر.
+ * فواتير الشهر — قائمة الدفع الموحّدة.
  *
  * الالتزام الثابت رقمٌ في الميزانية، والفاتورة واقعٌ يتغيّر. هذه الشاشة تسجّل
  * الواقع بجانب التوقّع، فيرى المستخدم أين تجاوزت فاتورته ما قدّره — وهي
  * الفجوة التي تجعله يظن نفسه مرتاحاً وهو ليس كذلك.
+ *
+ * ومعها دفعات الالتزامات التي حلّ موعدها هذا الشهر: «شو لازم أدفع؟» سؤالٌ
+ * واحد، وكان جوابه مقسوماً على بابين — الفواتير الصغيرة هنا مرتّبةً بالموعد،
+ * وأكبر دفعةٍ في السنة غائبةً في باب الالتزامات. القائمتان صارتا قائمةً
+ * واحدة يرتّبها الاستعجال نفسه.
  */
 export function BillsScreen() {
   const { t } = useTranslation()
@@ -47,24 +64,31 @@ export function BillsScreen() {
   const [partners, setPartners] = useState<ObligationPartner[]>([])
   const [shares, setShares] = useState<CommitmentPartnerShare[]>([])
   const [methods, setMethods] = useState<PaymentMethod[]>([])
+  const [obligations, setObligations] = useState<ObligationWithCalc[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       setError(null)
-      const [b, d, p, s, m] = await Promise.all([
+      const [b, d, p, s, m, o, a] = await Promise.all([
         listBills(month),
         listCommitmentDetails(),
         listPartners(),
         listCommitmentShares(),
         listPaymentMethods(),
+        // فشل جلب الالتزامات لا يُسقط الفواتير الشهرية معه — القائمتان جارتان لا توأمان.
+        listObligations().catch(() => [] as ObligationWithCalc[]),
+        listAccounts().catch(() => [] as Account[]),
       ])
       setRows(b)
       setDetails(d)
       setPartners(p)
       setShares(s)
       setMethods(m)
+      setObligations(o)
+      setAccounts(a)
     } catch (err) {
       setError(failureText(err, t, t('bills.loadFailed')))
     } finally {
@@ -90,26 +114,99 @@ export function BillsScreen() {
   )
   const methodById = useMemo(() => new Map(methods.map((m) => [m.id, m])), [methods])
 
+  const obligationById = useMemo(
+    () => new Map(obligations.map((i) => [i.obligation.id, i])),
+    [obligations],
+  )
+
+  /** دفعات الالتزامات المستحقّة في الشهر المعروض — الماضي يُرجع فراغاً من المحرّك. */
+  const dues = useMemo(
+    () =>
+      duesInMonth(
+        obligations.map((i) => ({
+          id: i.obligation.id,
+          name: i.obligation.name,
+          totalAmount: Number(i.obligation.total_amount),
+          mySharePercent: Number(i.obligation.my_share_percent),
+          nextDueDate: i.obligation.next_due_date,
+          recurrenceMonths: i.obligation.recurrence_months,
+        })),
+        new Date(`${month}T00:00:00`),
+      ).filter((d) => obligationById.has(d.obligationId)),
+    [obligations, month, obligationById],
+  )
+
+  const annualTotal = useMemo(() => dues.reduce((sum, d) => sum + d.myAmount, 0), [dues])
+
   /*
    * الترتيب بالموعد لا بالإضافة: قائمةٌ بترتيب الإضافة ترتيبٌ لا يعني شيئاً،
    * وترتيبها بالاستحقاق يحوّل الشاشة من سجلٍّ إلى قائمة عملٍ لهذا الأسبوع.
+   * ودفعة الالتزام تدخل الترتيب نفسه بمفتاح استعجالها — لا فوق القائمة تشريفاً
+   * ولا تحتها نسياناً.
    */
-  const ordered = useMemo(
-    () =>
-      sortBills(
-        rows,
-        (r) => ({
-          dayOfMonth: r.commitment.day_of_month,
-          isPaid: Boolean(r.payment?.paid_at),
-          isAutomatic: Boolean(
-            r.commitment.default_method_id &&
-              methodById.get(r.commitment.default_method_id)?.is_automatic,
-          ),
-        }),
-        new Date(`${month}T00:00:00`),
-      ),
-    [rows, month, methodById],
-  )
+  type WorkRow =
+    | { kind: 'bill'; row: BillRow; key: number }
+    | { kind: 'due'; due: (typeof dues)[number]; key: number }
+
+  const ordered = useMemo(() => {
+    const monthStart = new Date(`${month}T00:00:00`)
+    const workRows: WorkRow[] = [
+      ...rows.map((r) => ({
+        kind: 'bill' as const,
+        row: r,
+        key: billSortKey(
+          {
+            dayOfMonth: r.commitment.day_of_month,
+            isPaid: Boolean(r.payment?.paid_at),
+            isAutomatic: Boolean(
+              r.commitment.default_method_id &&
+                methodById.get(r.commitment.default_method_id)?.is_automatic,
+            ),
+          },
+          monthStart,
+        ),
+      })),
+      ...dues.map((d) => ({
+        kind: 'due' as const,
+        due: d,
+        key: sortKeyFromDaysAway(dueInfoForDate(d.dueDate).daysAway),
+      })),
+    ]
+    return workRows.sort((a, b) => a.key - b.key)
+  }, [rows, dues, month, methodById])
+
+  /* دفع التزامٍ من هنا — نفس مسار صفحة التفاصيل، بنفس المحرّك والحوار. */
+  const [payTarget, setPayTarget] = useState<ObligationWithCalc | null>(null)
+  const [paidFrom, setPaidFrom] = useState<string | null>(null)
+  const [payResult, setPayResult] = useState<PaymentResult | null>(null)
+  const [payBusy, setPayBusy] = useState(false)
+  const [payError, setPayError] = useState<string | null>(null)
+
+  const confirmPayment = async () => {
+    if (!user || !payTarget) return
+    setPayBusy(true)
+    setPayError(null)
+    try {
+      const result = await markPaid(payTarget, user.id, paidFrom)
+      void track(user.id, 'obligation_paid', {
+        obligation_id: payTarget.obligation.id,
+        had_shortfall: result.shortfall > 0,
+      })
+      setPayResult(result)
+      await load()
+    } catch (err) {
+      setPayError(failureText(err, t, t('payment.failed')))
+    } finally {
+      setPayBusy(false)
+    }
+  }
+
+  const closePayment = () => {
+    setPayTarget(null)
+    setPayResult(null)
+    setPayError(null)
+    setPaidFrom(null)
+  }
 
   const sharesByCommitment = useMemo(() => {
     const map = new Map<string, CommitmentPartnerShare[]>()
@@ -173,7 +270,7 @@ export function BillsScreen() {
 
       {user && <AddCommitmentForm userId={user.id} onAdded={load} />}
 
-      {rows.length === 0 ? (
+      {rows.length === 0 && dues.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
           <p className="text-[15px] leading-relaxed text-text-muted">{t('bills.empty')}</p>
           <Link to="/money" className="mt-4 block">
@@ -182,60 +279,91 @@ export function BillsScreen() {
         </div>
       ) : (
         <>
-          <section className="rounded-3xl border border-border bg-surface p-5">
-            <dl className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <dt className="text-xs text-text-muted">{t('bills.recorded')}</dt>
-                <dd className="num text-lg font-bold text-text">{formatMoney(summary.recorded)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">{t('bills.paid')}</dt>
-                <dd className="num text-lg font-bold text-brand">{formatMoney(summary.paid)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-text-muted">{t('bills.outstanding')}</dt>
-                <dd
-                  className={`num text-lg font-bold ${
-                    summary.outstanding > 0 ? 'text-accent' : 'text-text-muted'
-                  }`}
-                >
-                  {formatMoney(summary.outstanding)}
-                </dd>
-              </div>
-            </dl>
-            <p className="mt-3 text-center text-[13px] text-text-muted">
-              {summary.payable > 0
-                ? t('bills.payableCount', { count: summary.payable })
-                : t('bills.payableNone')}
-            </p>
-          </section>
+          {rows.length > 0 && (
+            <section className="rounded-3xl border border-border bg-surface p-5">
+              <dl className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <dt className="text-xs text-text-muted">{t('bills.recorded')}</dt>
+                  <dd className="num text-lg font-bold text-text">{formatMoney(summary.recorded)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">{t('bills.paid')}</dt>
+                  <dd className="num text-lg font-bold text-brand">{formatMoney(summary.paid)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-text-muted">{t('bills.outstanding')}</dt>
+                  <dd
+                    className={`num text-lg font-bold ${
+                      summary.outstanding > 0 ? 'text-accent' : 'text-text-muted'
+                    }`}
+                  >
+                    {formatMoney(summary.outstanding)}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-center text-[13px] text-text-muted">
+                {summary.payable > 0
+                  ? t('bills.payableCount', { count: summary.payable })
+                  : t('bills.payableNone')}
+              </p>
+              {/* الدفعة الكبيرة لا تُخفى في مجموع الفواتير الصغيرة — سطرها لها. */}
+              {annualTotal > 0 && (
+                <p className="mt-1 text-center text-[13px] font-semibold text-brand">
+                  📅 {t('bills.annualDueTotal', { amount: formatMoney(annualTotal) })}
+                </p>
+              )}
+            </section>
+          )}
 
           <ul className="space-y-3">
-            {ordered.map((row) => (
-              <BillCard
-                key={row.commitment.id}
-                row={row}
-                detail={detailById.get(row.commitment.id) ?? null}
-                month={month}
-                methods={methods}
-                methodById={methodById}
-                partners={partners}
-                shares={sharesByCommitment.get(row.commitment.id) ?? []}
-                userId={user?.id ?? null}
-                onReload={load}
-                onSave={async (amount, paid, methodId) => {
-                  if (!user) return
-                  await saveBill(user.id, row.commitment.id, month, amount, paid, methodId)
-                  await load()
-                }}
-                onClear={async () => {
-                  await deleteBill(row.commitment.id, month)
-                  await load()
-                }}
-              />
-            ))}
+            {ordered.map((entry) =>
+              entry.kind === 'bill' ? (
+                <BillCard
+                  key={entry.row.commitment.id}
+                  row={entry.row}
+                  detail={detailById.get(entry.row.commitment.id) ?? null}
+                  month={month}
+                  methods={methods}
+                  methodById={methodById}
+                  partners={partners}
+                  shares={sharesByCommitment.get(entry.row.commitment.id) ?? []}
+                  userId={user?.id ?? null}
+                  onReload={load}
+                  onSave={async (amount, paid, methodId) => {
+                    if (!user) return
+                    await saveBill(user.id, entry.row.commitment.id, month, amount, paid, methodId)
+                    await load()
+                  }}
+                  onClear={async () => {
+                    await deleteBill(entry.row.commitment.id, month)
+                    await load()
+                  }}
+                />
+              ) : (
+                <AnnualDueCard
+                  key={`due-${entry.due.obligationId}-${entry.due.dueDate.getTime()}`}
+                  due={entry.due}
+                  item={obligationById.get(entry.due.obligationId)!}
+                  onPay={() => setPayTarget(obligationById.get(entry.due.obligationId) ?? null)}
+                />
+              ),
+            )}
           </ul>
         </>
+      )}
+
+      {payTarget && (
+        <PaymentDialog
+          item={payTarget}
+          accounts={accounts}
+          paidFromAccountId={paidFrom}
+          onPaidFromChange={setPaidFrom}
+          onConfirm={confirmPayment}
+          onClose={closePayment}
+          result={payResult}
+          busy={payBusy}
+          error={payError}
+        />
       )}
     </div>
   )
