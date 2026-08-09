@@ -15,9 +15,9 @@ import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { BillsScreen } from '@/features/bills/BillsScreen'
 import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
 import { WealthScreen } from '@/features/wealth/WealthScreen'
+import { SettingsScreen } from '@/features/settings/SettingsScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { UpdateBanner } from '@/features/update/UpdateBanner'
-import { useTheme, type ThemePreference } from '@/lib/theme'
 import { RefreshProvider, useRefresh } from '@/lib/refresh'
 import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -63,6 +63,7 @@ export default function App() {
 function Shell() {
   const { session, loading } = useAuth()
   const { profile, loading: profileLoading } = useProfile()
+  const { pathname } = useLocation()
 
   if (loading || (session && profileLoading)) {
     return (
@@ -107,6 +108,7 @@ function Shell() {
            * بالسياق الذي يجعل الرقم مفهوماً.
            */}
           <Route path="/wealth" element={<WealthScreen />} />
+          <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/obligations" element={<ObligationsScreen />} />
           <Route path="/obligations/new" element={<ObligationForm />} />
           <Route path="/obligations/:id" element={<ObligationDetail />} />
@@ -114,7 +116,8 @@ function Shell() {
           <Route path="*" element={<Navigate to="/month" replace />} />
         </Routes>
       </main>
-      <QuickAdd />
+      {/* الزرّ العائم يضيف مالاً — وفي الإعدادات لا مال يُضاف، فيغيب عنها. */}
+      {pathname !== '/settings' && <QuickAdd />}
       <BottomNav />
     </div>
   )
@@ -199,24 +202,31 @@ function RefreshButton() {
   )
 }
 
-const THEME_OPTIONS = [
-  { value: 'system', key: 'theme.system' },
-  { value: 'light', key: 'theme.light' },
-  { value: 'dark', key: 'theme.dark' },
-] as const satisfies readonly { value: ThemePreference; key: string }[]
-
+/*
+ * الهيدر زرّان لا سبعة.
+ *
+ * كانت أزرار الثيم الثلاثة و«خروج» محشورةً فيه بخطّ 12px — أهدافُ لمسٍ
+ * صغيرة تُضغط مرةً في الشهر وتزاحم اسم التطبيق كلَّ يوم. صارت كلها في
+ * شاشة الإعدادات، وبقي هنا ما يُستعمل فعلاً: التحديث وبوابة الإعدادات.
+ */
 function Header() {
   const { t } = useTranslation()
-  const { signOut } = useAuth()
-  const { preference, setPreference } = useTheme()
   const { pathname } = useLocation()
   const isTab = TABS.some((tab) => tab.to === pathname)
+  // الإعدادات والثروة تُفتحان من لوحة الشهر لا من قائمة الالتزامات —
+  // فالرجوع يعيد إلى حيث كان المستخدم فعلاً، لا إلى قائمةٍ لم يمرّ بها.
+  const inSettings = pathname === '/settings'
+  const backToMonth = inSettings || pathname === '/wealth'
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
         {isTab ? (
           <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
+        ) : backToMonth ? (
+          <Link to="/month" className="text-sm font-bold text-brand">
+            ← {t('common.back')}
+          </Link>
         ) : (
           <Link to="/obligations" className="text-sm font-bold text-brand">
             ← {t('obligations.backToList')}
@@ -225,27 +235,20 @@ function Header() {
 
         <div className="flex items-center gap-2">
           <RefreshButton />
-          <div className="flex rounded-xl border border-border bg-surface p-0.5">
-            {THEME_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setPreference(opt.value)}
-                className={`rounded-lg px-2 py-1 text-xs font-semibold transition ${
-                  preference === opt.value ? 'bg-brand-soft text-brand' : 'text-text-muted'
-                }`}
-              >
-                {t(opt.key)}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="text-xs font-semibold text-text-muted"
+          <Link
+            to="/settings"
+            aria-label={t('settings.open')}
+            aria-current={inSettings ? 'page' : undefined}
+            className={`flex size-9 items-center justify-center rounded-xl border transition ${
+              inSettings
+                ? 'border-brand bg-brand-soft text-brand'
+                : 'border-border bg-surface text-text-muted'
+            }`}
           >
-            {t('theme.signOut')}
-          </button>
+            <span className="text-base leading-none" aria-hidden="true">
+              ⚙
+            </span>
+          </Link>
         </div>
       </div>
     </header>

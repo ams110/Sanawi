@@ -9,7 +9,6 @@ import { useAmount } from '@/features/record/amount'
 import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { hasStarted } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
-import { BackupSection, UpdateSection } from '@/features/backup/BackupSection'
 import { IncomeEntries } from './IncomeEntries'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
 import { useRefresh } from '@/lib/refresh'
@@ -82,7 +81,10 @@ export function MoneyScreen() {
 
   return (
     <div className="space-y-5 px-5 py-6">
-      <h1 className="text-xl font-bold text-text">{t('money.title')}</h1>
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('money.title')}</h1>
+        <p className="text-sm text-text-muted">{t('money.subtitle')}</p>
+      </div>
 
       {error && (
         <p role="alert" className="rounded-2xl bg-danger-soft px-4 py-3 text-sm text-danger">
@@ -152,9 +154,6 @@ export function MoneyScreen() {
           await updateProfile(user.id, { monthly_savings_target: value })
         }}
       />
-
-      <BackupSection />
-      <UpdateSection />
     </div>
   )
 }

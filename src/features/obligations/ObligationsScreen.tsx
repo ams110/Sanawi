@@ -49,6 +49,11 @@ export function ObligationsScreen() {
 
   return (
     <div className="space-y-5 px-5 py-6">
+      <div>
+        <h1 className="text-xl font-bold text-text">{t('obligations.screenTitle')}</h1>
+        <p className="text-sm text-text-muted">{t('obligations.screenSubtitle')}</p>
+      </div>
+
       {/* الرقم الرئيسي: مجموع ما يجب أن يخرج من الحساب هذا الشهر */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
         <p className="text-sm text-text-muted">{t('obligations.monthlyTotalLabel')}</p>

@@ -602,17 +602,25 @@ await expectError('sanawi_update_obligation', { obligation: 'طبيب أسنان
 
 // أخطاء القاعدة نفسها: يجب أن تصل مترجَمةً لا «[object Object]».
 // supabase-js يعيد كائناً عادياً لا صنف Error، فاشتراط instanceof كان يبتلعها.
-fake.failNext({ status: 403, code: '42501', message: 'new row violates row-level security policy' })
+// كل حقنةٍ باسم جدولها: الأدوات تستعلم بالتوازي، وحقنةٌ بلا جدولٍ يلتهمها
+// طلبٌ شاردٌ من النداء السابق فيمرّ المقصودُ نظيفاً — فشلٌ في CI لا يُستنسخ.
+fake.failNext({
+  status: 403,
+  code: '42501',
+  message: 'new row violates row-level security policy',
+  table: 'obligations',
+})
 await expectError('sanawi_list_obligations', {}, 'RLS')
 
 fake.failNext({
   status: 400,
   code: '23514',
   message: 'new row for relation "fund_deposits" violates check constraint',
+  table: 'fund_deposits',
 })
 await expectError('sanawi_add_deposit', { obligation: 'طبيب أسنان', amount: 5 }, 'مرفوضة من قاعدة البيانات')
 
-fake.failNext({ status: 401, code: 'PGRST301', message: 'JWT expired' })
+fake.failNext({ status: 401, code: 'PGRST301', message: 'JWT expired', table: 'profiles' })
 await expectError('sanawi_month_overview', {}, 'انتهت صلاحية الجلسة')
 
 // مصدرٌ غير معرَّف يبقى تسميةً حرّة: دخلٌ عابر لا يستحقّ مصدراً دائماً.

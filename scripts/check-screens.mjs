@@ -201,7 +201,7 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update)\.[a-zA-Z]/
 
   const TABS = [
     { path: '/month', name: 'month' },
@@ -212,6 +212,7 @@ try {
     { path: '/calendar', name: 'calendar' },
     { path: '/insights', name: 'insights' },
     { path: '/wealth', name: 'wealth' },
+    { path: '/settings', name: 'settings' },
   ]
 
   for (const tab of TABS) {
