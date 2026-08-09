@@ -14,7 +14,13 @@ import { MoneyScreen } from '@/features/money/MoneyScreen'
 import { InsightsScreen } from '@/features/insights/InsightsScreen'
 import { BillsScreen } from '@/features/bills/BillsScreen'
 import { ExpensesScreen } from '@/features/expenses/ExpensesScreen'
-import { WealthScreen } from '@/features/wealth/WealthScreen'
+import { WealthHub } from '@/features/wealth/WealthHub'
+import { WealthOverview } from '@/features/wealth/WealthOverview'
+import { AssetsScreen } from '@/features/wealth/AssetsScreen'
+import { PlansScreen } from '@/features/wealth/PlansScreen'
+import { AccountsScreen } from '@/features/accounts/AccountsScreen'
+import { FlowHub } from '@/features/flow/FlowHub'
+import { ObligationsHub } from '@/features/obligations/ObligationsHub'
 import { SettingsScreen } from '@/features/settings/SettingsScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { UpdateBanner } from '@/features/update/UpdateBanner'
@@ -94,25 +100,52 @@ function Shell() {
         <Routes>
           <Route path="/" element={<Navigate to="/month" replace />} />
           <Route path="/month" element={<MonthScreen />} />
-          <Route path="/calendar" element={<CalendarScreen />} />
-          <Route path="/money" element={<MoneyScreen />} />
-          <Route path="/bills" element={<BillsScreen />} />
-          <Route path="/expenses" element={<ExpensesScreen />} />
-          <Route path="/insights" element={<InsightsScreen />} />
+
           {/*
-           * الثروة مسارٌ لا تبويب.
+           * المحاور: التبويب السفلي بابٌ، والمقاطع تحته غرف.
            *
-           * التنقّل السفلي محسوبٌ على سبعة: ثامنٌ يترك 48px لكل تبويب فتُقصّ
-           * «الفواتير». والشاشة لا تُفتح كل يوم كما تُفتح المصاريف — تُفتح
-           * حين يسأل صاحبها عن مساره، فبطاقةٌ في لوحة الشهر تكفي وتصله
-           * بالسياق الذي يجعل الرقم مفهوماً.
+           * سبعة تبويباتٍ صارت خمسة، ولا شاشة حُذفت — انتظمت الشاشات في
+           * محاور بشريط مقاطع (HubTabs). كلُّ مقطعٍ مسارٌ فرعي حقيقي،
+           * فالرابط العميق يعمل والذاكرة العضلية تُهاجَر بإعادة توجيه.
            */}
-          <Route path="/wealth" element={<WealthScreen />} />
-          <Route path="/settings" element={<SettingsScreen />} />
-          <Route path="/obligations" element={<ObligationsScreen />} />
+          <Route path="/flow" element={<FlowHub />}>
+            <Route index element={<Navigate to="/flow/expenses" replace />} />
+            <Route path="expenses" element={<ExpensesScreen />} />
+            <Route path="income" element={<MoneyScreen />} />
+            <Route path="bills" element={<BillsScreen />} />
+          </Route>
+
+          <Route path="/obligations" element={<ObligationsHub />}>
+            <Route index element={<ObligationsScreen />} />
+            <Route path="calendar" element={<CalendarScreen />} />
+          </Route>
+          {/* صفحات التفاصيل خارج المحور: ملء شاشةٍ بزرّ رجوع، لا شريط مقاطع فوقها. */}
           <Route path="/obligations/new" element={<ObligationForm />} />
           <Route path="/obligations/:id" element={<ObligationDetail />} />
           <Route path="/obligations/:id/edit" element={<ObligationForm />} />
+
+          <Route path="/wealth" element={<WealthHub />}>
+            <Route index element={<WealthOverview />} />
+            <Route path="accounts" element={<AccountsScreen />} />
+            <Route path="assets" element={<AssetsScreen />} />
+            <Route path="plans" element={<PlansScreen />} />
+          </Route>
+
+          <Route path="/reports" element={<InsightsScreen />} />
+          <Route path="/settings" element={<SettingsScreen />} />
+
+          {/*
+           * إعادات توجيهٍ دائمة لا مؤقتة.
+           *
+           * المسارات القديمة محفوظةٌ في متصفحات 14 مستخدماً حقيقياً وفي
+           * عضلات أصابعهم — والأسطر رخيصة. لا تُحذف.
+           */}
+          <Route path="/expenses" element={<Navigate to="/flow/expenses" replace />} />
+          <Route path="/money" element={<Navigate to="/flow/income" replace />} />
+          <Route path="/bills" element={<Navigate to="/flow/bills" replace />} />
+          <Route path="/calendar" element={<Navigate to="/obligations/calendar" replace />} />
+          <Route path="/insights" element={<Navigate to="/reports" replace />} />
+
           <Route path="*" element={<Navigate to="/month" replace />} />
         </Routes>
       </main>
@@ -124,25 +157,22 @@ function Shell() {
 }
 
 /*
- * ترتيب التبويبات: الأقرب إلى اليوم أقربُ إلى الإبهام.
+ * خمسة أبوابٍ لا سبع شاشات.
  *
- * الترتيب السابق كان بترتيب بناء الميزات لا بترتيب استعمالها، فوقعت
- * «الفواتير» و«مصاريف» — وهما ما يُفتح كل يوم — في الوسط، وجاء «التقويم»
- * وهو شاشةُ نظرةٍ شهرية في المرتبة الثالثة.
+ * السبعة كانت حدّاً فيزيائياً (55px للتبويب) لا سقفاً للميزات — فكلّ
+ * ميزةٍ جديدة كانت تُدفن في شاشةٍ قائمة. الخمسة أبوابُ محاور: «الحركة»
+ * تضمّ ما يدخل ويخرج يومياً، و«الالتزامات» قائمتَها وتقويمَها، و«الثروة»
+ * نالت أخيراً تبويبها بأربع صفحات، و«تقارير» بابُ التحليل وما سيُبنى فوقه.
  *
- * والترتيب الآن رحلةُ الشهر نفسها: الشهر ثم ما يخرج (فواتير، مصاريف) ثم ما
- * يدخل، ثم ما هو أبعد من الشهر (التزامات، تقويم، تحليل).
- *
- * وأسماؤها كلها في `nav.*` — مفتاحٌ واحد لكل تبويب، لا ثلاثة فضاءات.
+ * «الشهر» و«التزامات» في موقعيهما القديمين عمداً: ذاكرة 14 مستخدماً
+ * العضلية أثمن من ترتيبٍ أنظف نظرياً.
  */
 const TABS = [
   { to: '/month', key: 'nav.month', icon: '📊' },
-  { to: '/bills', key: 'nav.bills', icon: '🧾' },
-  { to: '/expenses', key: 'nav.expenses', icon: '🛒' },
-  { to: '/money', key: 'nav.money', icon: '💰' },
+  { to: '/flow', key: 'nav.flow', icon: '🛒' },
   { to: '/obligations', key: 'nav.obligations', icon: '🎯' },
-  { to: '/calendar', key: 'nav.calendar', icon: '📅' },
-  { to: '/insights', key: 'nav.insights', icon: '🔍' },
+  { to: '/wealth', key: 'nav.wealth', icon: '💼' },
+  { to: '/reports', key: 'nav.reports', icon: '🔍' },
 ] as const
 
 /**
@@ -163,9 +193,8 @@ function BottomNav() {
               <Link
                 to={tab.to}
                 aria-current={active ? 'page' : undefined}
-                // 10px لا 11px: سبعة تبويبات تترك 55px لكل واحد على شاشة
-                // 390px، والاسم يُقصّ عند 11px.
-                className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition ${
+                // خمسة تبويبات = 78px لكل واحد على شاشة 390px — يتّسع 11px.
+                className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold transition ${
                   active ? 'text-brand' : 'text-text-muted'
                 }`}
               >
@@ -212,25 +241,30 @@ function RefreshButton() {
 function Header() {
   const { t } = useTranslation()
   const { pathname } = useLocation()
-  const isTab = TABS.some((tab) => tab.to === pathname)
-  // الإعدادات والثروة تُفتحان من لوحة الشهر لا من قائمة الالتزامات —
-  // فالرجوع يعيد إلى حيث كان المستخدم فعلاً، لا إلى قائمةٍ لم يمرّ بها.
   const inSettings = pathname === '/settings'
-  const backToMonth = inSettings || pathname === '/wealth'
+  /*
+   * الرجوع لصفحات التفاصيل وحدها.
+   *
+   * المحاور ومقاطعها كلها «أعلى التطبيق» فتحمل اسمه؛ ما يحتاج رجوعاً
+   * هو صفحات ملء الشاشة: تفاصيل الالتزام إلى قائمته، والإعدادات إلى
+   * لوحة الشهر. والتقويم غرفةٌ في محور الالتزامات لا صفحة تفاصيل.
+   */
+  const obligationDeep =
+    pathname.startsWith('/obligations/') && pathname !== '/obligations/calendar'
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
       <div className="mx-auto flex max-w-lg items-center justify-between gap-3 px-5 py-3">
-        {isTab ? (
-          <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
-        ) : backToMonth ? (
+        {inSettings ? (
           <Link to="/month" className="text-sm font-bold text-brand">
             ← {t('common.back')}
           </Link>
-        ) : (
+        ) : obligationDeep ? (
           <Link to="/obligations" className="text-sm font-bold text-brand">
             ← {t('obligations.backToList')}
           </Link>
+        ) : (
+          <h1 className="text-lg font-bold text-brand">{t('app.name')}</h1>
         )}
 
         <div className="flex items-center gap-2">

@@ -50,11 +50,12 @@ export function QuickAdd() {
 }
 
 const DESTINATIONS = [
-  { to: '/expenses', key: 'quickAdd.expense', icon: '🛒' },
-  { to: '/bills', key: 'quickAdd.bill', icon: '🧾' },
-  { to: '/money', key: 'quickAdd.income', icon: '💰' },
+  { to: '/flow/expenses', key: 'quickAdd.expense', icon: '🛒' },
+  { to: '/flow/bills', key: 'quickAdd.bill', icon: '🧾' },
+  { to: '/flow/income', key: 'quickAdd.income', icon: '💰' },
   { to: '/obligations/new', key: 'quickAdd.obligation', icon: '🎯' },
-  { to: '/wealth', key: 'quickAdd.balance', icon: '🏦' },
+  // «رصيد» يقصد الحسابات تحديداً — صفحتها صارت لها بابها في محور الثروة.
+  { to: '/wealth/accounts', key: 'quickAdd.balance', icon: '🏦' },
 ] as const
 
 function QuickAddSheet({ onClose }: { onClose: () => void }) {

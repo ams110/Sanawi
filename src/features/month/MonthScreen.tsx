@@ -300,6 +300,23 @@ export function MonthScreen() {
        * الشاشة يكون قد فرغ من السؤال القريب — وعندها وحدها يعني السؤالُ
        * البعيد شيئاً.
        */}
+      {/* بطاقة السيولة قبل بطاقة الثروة: «كم معي الآن؟» أقرب من «كم تراكم؟». */}
+      <Link
+        to="/wealth/accounts"
+        className="flex items-center gap-3 rounded-3xl border border-border bg-surface p-5"
+      >
+        <span className="text-2xl" aria-hidden="true">
+          🏦
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-bold text-text">{t('accounts.entryTitle')}</span>
+          <span className="block text-[12px] text-text-muted">{t('accounts.entryHint')}</span>
+        </span>
+        <span className="text-text-muted" aria-hidden="true">
+          ←
+        </span>
+      </Link>
+
       <Link
         to="/wealth"
         className="flex items-center gap-3 rounded-3xl border border-brand/30 bg-brand-soft p-5"
