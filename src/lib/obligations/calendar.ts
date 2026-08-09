@@ -5,7 +5,7 @@
  * لا بعد أن توقعه. ملف نقي — لا React ولا Supabase.
  */
 
-import { addMonths, differenceInCalendarMonths, startOfMonth } from 'date-fns'
+import { addMonths, differenceInCalendarDays, differenceInCalendarMonths, startOfMonth } from 'date-fns'
 
 export interface CalendarObligationInput {
   id: string
@@ -100,6 +100,67 @@ export function buildCalendar(
   }
 
   return months
+}
+
+/**
+ * دفعات الالتزامات المستحقّة في شهرٍ بعينه — لقائمة الفواتير الموحّدة.
+ *
+ * شاشة الفواتير كانت تجيب عن «شو لازم أدفع هالشهر؟» بنصف جواب: الفواتير
+ * الشهرية وحدها، بينما أكبر دفعةٍ في السنة — التأمين حين يحلّ موعده — لا
+ * تظهر فيها أصلاً. هذه الدالة هي النصف الآخر.
+ *
+ * قاعدتان من التقويم نفسه: المتأخّرُ يُسحب إلى شهر اليوم **بتاريخه الأصلي**
+ * (فيُقرأ متأخّراً لا قادماً)، والشهور الماضية تُرجع فراغاً — الماضي سجلُّ
+ * دفعاتٍ لا قائمةُ عمل، وإسقاطُ الاستحقاق عليه يخترع ديوناً دُفعت.
+ */
+export interface MonthDue {
+  obligationId: string
+  name: string
+  amount: number
+  myAmount: number
+  /** التاريخ الفعلي — المتأخّر يبقى بتاريخه الأصلي ليُقاس تأخّره. */
+  dueDate: Date
+  isOverdue: boolean
+}
+
+export function duesInMonth(
+  obligations: CalendarObligationInput[],
+  monthStart: Date,
+  today: Date = new Date(),
+): MonthDue[] {
+  const viewMonth = startOfMonth(monthStart)
+  const currentMonth = startOfMonth(today)
+  if (viewMonth < currentMonth) return []
+
+  const dues: MonthDue[] = []
+
+  for (const obligation of obligations) {
+    const share = obligation.mySharePercent ?? 100
+    const myAmount = round2((obligation.totalAmount * share) / 100)
+    let due = toDate(obligation.nextDueDate)
+
+    while (true) {
+      // الموعد الفائت ينتمي إلى شهر اليوم مهما قدُم — لم يُدفع فهو ما زال عملاً.
+      const slotMonth = due < currentMonth ? currentMonth : startOfMonth(due)
+      const offset = differenceInCalendarMonths(slotMonth, viewMonth)
+      if (offset > 0) break
+      if (offset === 0) {
+        dues.push({
+          obligationId: obligation.id,
+          name: obligation.name,
+          amount: obligation.totalAmount,
+          myAmount,
+          dueDate: due,
+          // بفرق الأيام التقويمية لا بالساعة: مستحقُّ اليوم ليس متأخّراً.
+          isOverdue: differenceInCalendarDays(due, today) < 0,
+        })
+      }
+      if (obligation.recurrenceMonths <= 0) break
+      due = addMonths(due, obligation.recurrenceMonths)
+    }
+  }
+
+  return dues.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
 }
 
 /** أثقل شهر في النافذة — للتحذير المبكر. */
