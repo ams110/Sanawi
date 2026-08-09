@@ -165,6 +165,7 @@ export const ar = {
     bills: 'فواتير',
     obligations: 'القائمة',
     calendar: 'التقويم',
+    partners: 'الشركاء',
     overview: 'نظرة',
     accounts: 'حسابات',
     assets: 'أصول',
@@ -704,6 +705,24 @@ export const ar = {
   },
 
   partners: {
+    /*
+     * مركز الشركاء.
+     *
+     * الجواب كان مبعثراً: تسوية الالتزام في صفحته، وحصّة الفاتورة خلف زرّ
+     * مطويّ. من له شريكٌ في ثلاثة أشياء كان يجمع بالآلة الحاسبة.
+     */
+    screenTitle: 'الشركاء',
+    screenSubtitle: 'مين شريكك بشو، وقديش باقي عنده',
+    totalOutstanding: 'باقي إلك عند شركائك',
+    allSettled: 'كل شركائك مخلّصين 👌',
+    monthlyCarry: 'بيحمل {{amount}} بالشهر',
+    inObligations: 'بالالتزامات',
+    inBills: 'بالفواتير الشهرية',
+    noShares: 'ما إله حصص بعد',
+    unknownObligation: 'التزام محذوف',
+    empty: 'ما في شركاء بعد. بتضيفهم من قسمة أي التزام أو فاتورة — من شاشتها.',
+    loadFailed: 'ما قدرنا نجيب الشركاء',
+
     enable: '+ هاد الالتزام مشترك مع حدا',
     sharedLabel: 'مشترك',
     allMine: 'كله عليّ',

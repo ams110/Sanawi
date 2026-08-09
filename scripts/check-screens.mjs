@@ -86,7 +86,8 @@ function seed(db, userId) {
   })
 
   const obligations = [
-    { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500 },
+    // حصّتي 50٪ — النصف الآخر على الشريك المزروع تحت، وبه يُفحص مركز الشركاء.
+    { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500, share: 50 },
     { id: 'o2', name: 'טסט (فحص سنوي)', total: 1200, due: `${year + 1}-03-01`, baseline: 100 },
     /*
      * التزامٌ فات موعده بيومين — به تُفحص قائمة الفواتير الموحّدة: دفعته
@@ -113,12 +114,49 @@ function seed(db, userId) {
       recurrence_months: 12,
       cycle_start_date: iso(today),
       baseline_installment: o.baseline,
-      my_share_percent: 100,
+      my_share_percent: o.share ?? 100,
       is_active: true,
       notes: null,
       created_at: new Date().toISOString(),
     })
   }
+
+  /*
+   * شريكٌ بحصّةٍ في التزامٍ وفاتورة، وإيداعٍ جزئي — به يُفحص مركز الشركاء:
+   * الباقي عليه من التأمين، وما يحمله من الكهرباء شهرياً، في بطاقةٍ واحدة.
+   */
+  db.obligation_partners.push({
+    id: 'p1',
+    user_id: userId,
+    name: 'سامر',
+    created_at: new Date().toISOString(),
+  })
+  db.obligation_partner_shares.push({
+    id: 'ps1',
+    user_id: userId,
+    obligation_id: 'o1',
+    partner_id: 'p1',
+    share_percent: 50,
+    created_at: new Date().toISOString(),
+  })
+  db.commitment_partner_shares.push({
+    id: 'cs1',
+    user_id: userId,
+    commitment_id: 'f1',
+    partner_id: 'p1',
+    share_percent: 50,
+  })
+  db.fund_deposits.push({
+    id: 'pd1',
+    user_id: userId,
+    obligation_id: 'o1',
+    partner_id: 'p1',
+    account_id: null,
+    amount: 1000,
+    deposit_date: iso(new Date(today.getFullYear(), today.getMonth(), 1)),
+    note: null,
+    created_at: new Date().toISOString(),
+  })
 
   // إيداعٌ سابق هذا الشهر: به وحده يظهر حارس «حطّيت هالشهر».
   db.fund_deposits.push({
@@ -235,6 +273,7 @@ try {
     { path: '/flow/bills', name: 'bills' },
     { path: '/obligations', name: 'obligations' },
     { path: '/obligations/calendar', name: 'calendar' },
+    { path: '/obligations/partners', name: 'partners' },
     { path: '/wealth', name: 'wealth' },
     { path: '/wealth/accounts', name: 'wealth-accounts' },
     { path: '/wealth/assets', name: 'wealth-assets' },
@@ -292,6 +331,21 @@ try {
   await page.screenshot({ path: `${OUT}/bills-pay.png` })
   await payDialog.getByRole('button', { name: 'إلغاء' }).click()
   await page.waitForTimeout(400)
+
+  /*
+   * مركز الشركاء: الباقي من التزام الشريك وحمله الشهري من الفاتورة —
+   * في بطاقةٍ واحدة بدل صفحةٍ لكل شيء وآلةٍ حاسبة.
+   */
+  await page.goto(`${BASE}/obligations/partners`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const partnerCard = page.locator('li').filter({ hasText: 'سامر' }).first()
+  step('بطاقة الشريك ظاهرة في المركز', await partnerCard.isVisible())
+  // مقطعٌ في المحور لا صفحة تفاصيل: الهيدر يحمل اسم التطبيق لا «ارجع».
+  const headerText = await page.locator('header').innerText()
+  step('وبلا زرّ رجوعٍ في الهيدر — هو مقطعُ محورٍ لا تفاصيل', !headerText.includes('ارجع'), headerText.replace(/\n/g, ' · '))
+  const partnerText = (await partnerCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('وفيها الباقي من التزامه', /2,000/.test(partnerText), partnerText.slice(0, 140))
+  step('وحمله الشهري من الفاتورة', /بيحمل.*200/.test(partnerText), partnerText.slice(0, 140))
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ
