@@ -144,6 +144,26 @@ export function AccountsSection({ picture, userId, onChanged }: Props) {
       )}
 
       {/*
+       * التحويل الحرّ بين حسابين — لا عبر التسويات وحدها.
+       *
+       * كان التحويل محبوساً خلف تسويةٍ معلّقة: من أراد تمويل حساب التزاماته
+       * أول الشهر لم يجد زرّاً له في التطبيق كلّه، والعملية موجودة في الطبقة
+       * تحته منذ البداية.
+       */}
+      {accounts.length >= 2 && (
+        <TransferForm
+          accounts={accounts.map((a) => ({ id: a.id, name: a.name }))}
+          busy={busy}
+          onTransfer={(fromAccountId, toAccountId, amount) =>
+            run(
+              () => transferBetweenAccounts(userId, { fromAccountId, toAccountId, amount }),
+              t('accounts.transferFailed'),
+            )
+          }
+        />
+      )}
+
+      {/*
        * الصندوق غير المربوط: تحذيرٌ ومعه زرُّه.
        *
        * القاعدة التي وُلدت من هذا: لا تحذير بلا فعلٍ يُطفئه. وكان هذا التحذير
@@ -296,6 +316,97 @@ function AccountRow({
       >
         {t('common.cancel')}
       </button>
+    </div>
+  )
+}
+
+/** تحويل حرّ بين حسابين — المبلغ ينقص من الأول ويزيد على الثاني. */
+function TransferForm({
+  accounts,
+  busy,
+  onTransfer,
+}: {
+  accounts: { id: string; name: string }[]
+  busy: boolean
+  onTransfer: (fromId: string, toId: string, amount: number) => Promise<void> | void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [fromId, setFromId] = useState('')
+  const [toId, setToId] = useState('')
+  const amount = useAmount()
+
+  if (!open) {
+    return (
+      <Button variant="secondary" onClick={() => setOpen(true)} className="w-full">
+        {t('accounts.transferButton')}
+      </Button>
+    )
+  }
+
+  const sameAccount = Boolean(fromId) && fromId === toId
+  const canSave = Boolean(fromId) && Boolean(toId) && !sameAccount && amount.isValid
+
+  const selectClass =
+    'w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold text-text'
+
+  return (
+    <div className="space-y-2 rounded-2xl border border-border bg-surface-muted p-4">
+      <label className="block space-y-1">
+        <span className="text-[11px] font-semibold text-text-muted">
+          {t('accounts.transferFrom')}
+        </span>
+        <select value={fromId} onChange={(ev) => setFromId(ev.target.value)} className={selectClass}>
+          <option value="">{t('accounts.pick')}</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block space-y-1">
+        <span className="text-[11px] font-semibold text-text-muted">
+          {t('accounts.transferTo')}
+        </span>
+        <select value={toId} onChange={(ev) => setToId(ev.target.value)} className={selectClass}>
+          <option value="">{t('accounts.pick')}</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <input
+        {...amount.props}
+        placeholder={t('accounts.transferAmount')}
+        aria-label={t('accounts.transferAmount')}
+        className="num w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-bold text-text"
+      />
+
+      {sameAccount && (
+        <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
+          {t('accounts.transferSame')}
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          disabled={busy || !canSave}
+          onClick={async () => {
+            await onTransfer(fromId, toId, amount.value)
+            amount.reset()
+            setOpen(false)
+          }}
+          className="flex-1"
+        >
+          {t('accounts.settle')}
+        </Button>
+        <Button variant="secondary" onClick={() => setOpen(false)} disabled={busy}>
+          {t('common.cancel')}
+        </Button>
+      </div>
     </div>
   )
 }
