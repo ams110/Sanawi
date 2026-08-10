@@ -405,7 +405,18 @@ export const ar = {
     duplicate: 'موجودة',
     commit: 'سجّل {{count}} حركة',
     done: 'انسجّلت {{expenses}} مصاريف و{{incomes}} قبضات 👌',
+    doneDeposits: 'و{{count}} إيداع راح لصندوقه 🎯',
     saveFailed: 'ما قدرنا نسجّل الحركات — جرّب كمان مرة',
+
+    /*
+     * وجهة القبضة الداخلة: دخل أم قسط صندوق.
+     *
+     * تحويلة التوفير تظهر في كشف حسابها قبضةً وهي ليست دخلاً — عدُّها دخلاً
+     * ينفخ الشهر بمالٍ لم يصل. ومع كل صندوقٍ رصيدُه ليتذكّر صاحبه أيّها أيّ.
+     */
+    fundFor: 'وين بتنحسب «{{name}}»؟',
+    asIncome: 'دخل وصلني',
+    asFund: 'قسط بصندوق {{name}} — فيه {{balance}}',
   },
 
   report: {
@@ -619,6 +630,23 @@ export const ar = {
     annualFundReady: 'صندوقك جاهز — جمعت {{amount}} 👌',
     annualFundShort: 'بصندوقك {{balance}} — ناقصك {{shortfall}} من جيبك',
     annualDetails: 'صفحة الالتزام',
+
+    /*
+     * قسط الصندوق داخل قائمة الفواتير.
+     *
+     * «كل التزاماتي الشهرية بمحل واحد» — القسط اللي بتدفعه لنفسك صار سطراً
+     * بجانب فاتورة التلفون: بحاله، وتاريخ آخر إيداع، وإيداعٍ من مكانه.
+     */
+    fundChip: 'قسط صندوق',
+    fundInstallments: 'أقساط صناديقك',
+    fundNone: 'بعدك ما حطّيته هالشهر',
+    fundPartial: 'حطّيت {{done}} من {{total}}',
+    fundDone: 'حطّيت {{amount}} 👌',
+    fundLastDeposit: 'آخر إيداع {{date}}',
+    fundDepositCount: 'على {{count}} دفعات',
+    fundBalance: 'مجموع بصندوقك: {{amount}}',
+    fundDeposit: 'حطّ القسط',
+    paidOn: 'دفعتها {{date}}',
     editTitle: 'عدّل البند',
     editName: 'الاسم',
     archive: 'شيل البند',
