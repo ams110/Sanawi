@@ -24,6 +24,7 @@ import { ObligationsHub } from '@/features/obligations/ObligationsHub'
 import { PartnersScreen } from '@/features/partners/PartnersScreen'
 import { ReportsHub } from '@/features/reports/ReportsHub'
 import { ForecastScreen } from '@/features/reports/ForecastScreen'
+import { SubscriptionsScreen } from '@/features/reports/SubscriptionsScreen'
 import { SettingsScreen } from '@/features/settings/SettingsScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { UpdateBanner } from '@/features/update/UpdateBanner'
@@ -138,6 +139,7 @@ function Shell() {
           <Route path="/reports" element={<ReportsHub />}>
             <Route index element={<InsightsScreen />} />
             <Route path="forecast" element={<ForecastScreen />} />
+            <Route path="subscriptions" element={<SubscriptionsScreen />} />
           </Route>
           <Route path="/settings" element={<SettingsScreen />} />
 

@@ -168,6 +168,7 @@ export const ar = {
     partners: 'الشركاء',
     insights: 'التحليل',
     forecast: 'التوقّع',
+    subscriptions: 'اشتراكات',
     overview: 'نظرة',
     accounts: 'حسابات',
     assets: 'أصول',
@@ -382,6 +383,19 @@ export const ar = {
     finishedTitle: 'خلّصت هالالتزام 🎉',
     close: 'تمام',
     failed: 'ما قدرنا نسجّل الدفعة',
+  },
+
+  subs: {
+    title: 'اشتراكاتك',
+    subtitle: 'كل متكرّر دائم — بكلفته السنوية الصادقة',
+    yearlyLabel: '{{count}} اشتراك بيكلفوك بالسنة',
+    monthlyLine: 'يعني {{amount}} كل شهر',
+    perYear: 'بالسنة',
+    monthlyOf: '{{amount}} بالشهر',
+    cancelHint: 'شفت واحد ما بتستعمله؟ بتشيله من شاشة الفواتير —',
+    goToBills: 'روح للفواتير',
+    empty: 'ما في بنود متكرّرة دائمة بعد. البنود اللي بتضيفها بلا تاريخ نهاية بتظهر هون بكلفتها السنوية.',
+    loadFailed: 'ما قدرنا نجيب الاشتراكات',
   },
 
   forecast: {
