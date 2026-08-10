@@ -276,7 +276,7 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast)\.[a-zA-Z]/
 
   // كل مقاطع المحاور الجديدة، لا الأبواب الخمسة وحدها.
   const TABS = [
@@ -292,6 +292,7 @@ try {
     { path: '/wealth/assets', name: 'wealth-assets' },
     { path: '/wealth/plans', name: 'wealth-plans' },
     { path: '/reports', name: 'insights' },
+    { path: '/reports/forecast', name: 'forecast' },
     { path: '/settings', name: 'settings' },
   ]
 
@@ -365,6 +366,20 @@ try {
   const partnerText = (await partnerCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
   step('وفيها الباقي من التزامه', /2,000/.test(partnerText), partnerText.slice(0, 140))
   step('وحمله الشهري من الفاتورة', /بيحمل.*200/.test(partnerText), partnerText.slice(0, 140))
+
+  /*
+   * التوقّع النقدي: بلا حساباتٍ في البذرة غيرُ المخصَّص صفر، والفواتير
+   * والأقساط تنزل به تحت الصفر فوراً — فالتحذير يجب أن يظهر بتاريخٍ ورقم.
+   */
+  await page.goto(`${BASE}/reports/forecast`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const forecastBody = await page.locator('body').innerText()
+  step('التوقّع يحذّر من النزول تحت الصفر', forecastBody.includes('تحت الصفر'))
+  step('وقائمة «شو طالع» فيها فاتورة الشهر', /شو طالع[\s\S]*كهرباء/.test(forecastBody))
+  step('وصراحة «بلا الدخل» معروضة لا مخفيّة', forecastBody.includes('بلا الدخل'))
+  // التزامٌ موعدُه هذا الشهر: دفعتُه لا تُعدّ دفعةً وقسطاً معاً — نفس المال مرتين.
+  const gymCount = (forecastBody.match(/اشتراك الصالة/g) ?? []).length
+  step('ودفعة الشهر لا تُحسب مرتين (دفعة + قسط)', gymCount === 1, `ظهرت ${gymCount} مرة`)
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ

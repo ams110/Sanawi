@@ -166,6 +166,8 @@ export const ar = {
     obligations: 'القائمة',
     calendar: 'التقويم',
     partners: 'الشركاء',
+    insights: 'التحليل',
+    forecast: 'التوقّع',
     overview: 'نظرة',
     accounts: 'حسابات',
     assets: 'أصول',
@@ -380,6 +382,21 @@ export const ar = {
     finishedTitle: 'خلّصت هالالتزام 🎉',
     close: 'تمام',
     failed: 'ما قدرنا نسجّل الدفعة',
+  },
+
+  forecast: {
+    title: 'التوقّع النقدي',
+    subtitle: 'وين بيوقف مالك لو ما وصل شي جديد',
+    crossesOn: 'رصيدك بينزل تحت الصفر يوم {{date}}',
+    staysAbove: 'أدنى نقطة بتوصلها هالشهر — وما بتنزل تحت الصفر 👌',
+    lowestOn: 'أدنى نقطة يوم {{date}}',
+    chartStart: 'اليوم ← آخر الشهر',
+    endBalance: 'آخر الشهر: {{amount}}',
+    upcoming: 'شو طالع، وإمتى',
+    noIncomeNote:
+      'الحسبة بلا الدخل اللي لسا ما وصل — عشان التحذير ما يسكت على أمل. كل قبضة بتسجّلها بتظبّط التوقّع.',
+    logIncome: 'سجّل قبضة',
+    loadFailed: 'ما قدرنا نبني التوقّع',
   },
 
   insights: {
