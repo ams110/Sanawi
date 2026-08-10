@@ -161,6 +161,19 @@ function seed(db, userId) {
     created_at: new Date().toISOString(),
   })
 
+  // فاتورة الثلاجة مدفوعة يوم 3 — بها يُفحص أن «إمتى دفعتها» يُعرض لا يُحفظ وحسب.
+  db.bill_payments.push({
+    id: 'bp1',
+    user_id: userId,
+    commitment_id: 'f2',
+    billing_month: `${iso(today).slice(0, 7)}-01`,
+    amount: 250,
+    paid_at: iso(new Date(today.getFullYear(), today.getMonth(), 3)),
+    note: null,
+    method_id: null,
+    created_at: new Date().toISOString(),
+  })
+
   const obligations = [
     // حصّتي 50٪ — النصف الآخر على الشريك المزروع تحت، وبه يُفحص مركز الشركاء.
     { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500, share: 50, group: 'g1', notes: 'رقم البوليصة 12345' },
@@ -409,6 +422,39 @@ try {
   const billBox = await billCard.boundingBox()
   step('وتسبق فاتورة الشهر في الترتيب', Boolean(annualBox && billBox && annualBox.y < billBox.y))
 
+  /*
+   * «كل التزاماتك الشهرية بمحل واحد»: أقساط الصناديق صفوفٌ في القائمة نفسها —
+   * المودَع بحاله وتاريخ آخر إيداع، والفارغ بحاله، ومن حلّ موعده هذا الشهر
+   * (الصالة) دفعتُه وحدها لا قسطٌ معها — نفس المال لا يُعرض مرتين.
+   */
+  const instCards = page.locator('li').filter({ hasText: 'قسط صندوق' })
+  const instCount = await instCards.count()
+  step('أقساط الصناديق صفوفٌ في قائمة الفواتير', instCount === 2, `عددها ${instCount}`)
+
+  const insuranceInst = instCards.filter({ hasText: 'تأمين السيارة' }).first()
+  const insuranceInstText = (await insuranceInst.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step(
+    'المودَع فيه يقول حطّيت ومعه تاريخ آخر إيداع',
+    /حطّيت/.test(insuranceInstText) && /آخر إيداع/.test(insuranceInstText),
+    insuranceInstText.slice(0, 160),
+  )
+
+  const testInst = instCards.filter({ hasText: 'טסט' }).first()
+  const testInstText = (await testInst.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('والفارغ يقول بعدك ومعه زرّ القسط', /بعدك ما حطّيته/.test(testInstText) && /حطّ القسط/.test(testInstText), testInstText.slice(0, 160))
+
+  const gymInstCount = await instCards.filter({ hasText: 'اشتراك الصالة' }).count()
+  step('ومن حلّ موعده دفعتُه وحدها لا قسطٌ معها', gymInstCount === 0, `ظهر ${gymInstCount} قسطاً`)
+
+  const billsBody = await page.locator('body').innerText()
+  step('والحمل الشهري يجمع أقساط الصناديق', billsBody.includes('أقساط صناديقك'))
+
+  // الفاتورة المدفوعة تقول إمتى — بشارة «✓ دفعتها» لا بحالٍ بلا تاريخ.
+  const fridgeCard = page.locator('li').filter({ hasText: 'قسط الثلاجة' }).first()
+  const fridgeText = (await fridgeCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('والفاتورة المدفوعة تقول إمتى اندفعت', /✓ دفعتها 3\//.test(fridgeText), fridgeText.slice(0, 160))
+  await page.screenshot({ path: `${OUT}/bills-installments.png`, fullPage: true })
+
   /* زرّ الدفع يفتح نفس حوار صفحة التفاصيل — تأكيدٌ قبل أي أثر. */
   await annualCard.getByRole('button', { name: 'اندفع ✓' }).click()
   await page.waitForTimeout(600)
@@ -515,6 +561,44 @@ try {
   const secondPass = await page.locator('body').innerText()
   step('ولصقُه ثانيةً لا يكتب مرتين', (secondPass.match(/موجودة/g) ?? []).length === 2, secondPass.slice(0, 160))
   step('والمختار صفر من تلقائه', secondPass.includes('مختار 0 من 2'))
+
+  /*
+   * القبضة الداخلة توجَّه لصندوق: تصير إيداعاً لا دخلاً — تحويلة التوفير
+   * تظهر في كشفها قبضةً وليست دخلاً — بيوم الحركة نفسه. ومع كل صندوقٍ
+   * رصيدُه في المنتقى، ولصق الكشف ثانيةً يجدها «موجودة»: حارس التكرار
+   * يعرف إيداعات الصناديق أيضاً.
+   */
+  await page.getByRole('button', { name: 'إلغاء' }).click()
+  await page.waitForTimeout(300)
+  const fundStatement = `תאריך,תיאור,סכום\n05/${impMonth}/${impDate.getFullYear()},הפקדה לחסכון,350`
+  await page.locator('textarea').fill(fundStatement)
+  await page.getByRole('button', { name: 'اقرأ الكشف' }).click()
+  await page.waitForTimeout(1500)
+
+  const destSelect = page.locator('li select').first()
+  const destVisible = await destSelect.isVisible().catch(() => false)
+  const destText = destVisible ? await destSelect.innerText() : ''
+  step('وللقبضة منتقى وجهةٍ ومع كل صندوقٍ رصيدُه', destVisible && /טסט/.test(destText) && /فيه/.test(destText), destText.replace(/\n/g, ' · ').slice(0, 160))
+
+  const testOptionValue = await destSelect
+    .locator('option', { hasText: 'טסט' })
+    .getAttribute('value')
+  await destSelect.selectOption(testOptionValue)
+  await page.screenshot({ path: `${OUT}/bank-import-fund.png` })
+  await page.getByRole('button', { name: /سجّل 1 حركة/ }).click()
+  await page.waitForTimeout(2000)
+  const fundDone = await page.locator('body').innerText()
+  step('والقبضة الموجَّهة تُسجَّل إيداعاً بصندوقها', /راح لصندوقه/.test(fundDone), fundDone.slice(0, 160))
+
+  await page.locator('textarea').fill(fundStatement)
+  await page.getByRole('button', { name: 'اقرأ الكشف' }).click()
+  await page.waitForTimeout(1500)
+  const fundSecond = await page.locator('body').innerText()
+  step(
+    'ولصقُها ثانيةً يجدها موجودة — الحارس يعرف الصناديق',
+    fundSecond.includes('موجودة') && fundSecond.includes('مختار 0 من 1'),
+    fundSecond.slice(0, 160),
+  )
 
   /*
    * كشف PDF حقيقي: يُولَّد ملفٌّ صالح هنا ويُرفع، فيمرّ بالأنبوب كاملاً —
@@ -712,6 +796,8 @@ try {
     })
   }
   for (const c of fake.db.fixed_commitments) {
+    // المدفوعة منذ البذرة لا تُدفع ثانيةً — صفّان لفاتورةٍ واحدة يكذبان.
+    if (fake.db.bill_payments.some((b) => b.commitment_id === c.id)) continue
     fake.db.bill_payments.push({
       id: `seed-bill-${c.id}`,
       user_id: fake.userId,

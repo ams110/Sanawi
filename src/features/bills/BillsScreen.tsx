@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { formatMoney, formatMonthYear } from '@/lib/format'
+import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { useAmount } from '@/features/record/amount'
 import { Button } from '@/components/ui/Button'
@@ -24,12 +24,18 @@ import {
 import { billSortKey, dueInfo, dueInfoForDate, sortKeyFromDaysAway } from '@/lib/commitments/due'
 import { duesInMonth } from '@/lib/obligations/calendar'
 import {
+  listMonthDeposits,
   listObligations,
   markPaid,
   track,
   type ObligationWithCalc,
   type PaymentResult,
 } from '@/features/obligations/api'
+import {
+  installmentRowsForMonth,
+  type InstallmentRow,
+} from '@/lib/obligations/monthInstallments'
+import { InstallmentCard } from './InstallmentCard'
 import { listAccounts } from '@/features/accounts/api'
 import { PaymentDialog } from '@/features/obligations/PaymentDialog'
 import { AnnualDueCard } from './AnnualDueCard'
@@ -37,6 +43,7 @@ import type {
   Account,
   CommitmentDetail,
   CommitmentPartnerShare,
+  FundDeposit,
   ObligationPartner,
   PaymentMethod,
 } from '@/lib/db/types'
@@ -67,7 +74,7 @@ export function BillsScreen() {
   } = useQuery({
     queryKey: ['bills', month],
     queryFn: async () => {
-      const [rows, details, partners, shares, methods, obligations, accounts] =
+      const [rows, details, partners, shares, methods, obligations, accounts, deposits] =
         await Promise.all([
           listBills(month),
           listCommitmentDetails(),
@@ -77,12 +84,13 @@ export function BillsScreen() {
           // فشل جلب الالتزامات لا يُسقط الفواتير الشهرية معه — القائمتان جارتان لا توأمان.
           listObligations().catch(() => [] as ObligationWithCalc[]),
           listAccounts().catch(() => [] as Account[]),
+          listMonthDeposits(month).catch(() => []),
         ])
-      return { rows, details, partners, shares, methods, obligations, accounts }
+      return { rows, details, partners, shares, methods, obligations, accounts, deposits }
     },
   })
   // مرجعٌ مستقر للفراغ: بدائل تُخلق كل رسمةٍ تُفسد اعتماديات كل useMemo تحتها.
-  const { rows, details, partners, shares, methods, obligations, accounts } = useMemo(
+  const { rows, details, partners, shares, methods, obligations, accounts, deposits } = useMemo(
     () =>
       screen ?? {
         rows: [] as BillRow[],
@@ -92,6 +100,7 @@ export function BillsScreen() {
         methods: [] as PaymentMethod[],
         obligations: [] as ObligationWithCalc[],
         accounts: [] as Account[],
+        deposits: [] as FundDeposit[],
       },
     [screen],
   )
@@ -140,6 +149,39 @@ export function BillsScreen() {
   const annualTotal = useMemo(() => dues.reduce((sum, d) => sum + d.myAmount, 0), [dues])
 
   /*
+   * أقساط الصناديق صفوفٌ في القائمة نفسها — «كل التزاماتي الشهرية بمحل واحد».
+   * كانت في لوحة «ضلّ عليك» وحدها: تظهر ناقصةً وتختفي مكتملةً، فمن أودع لا
+   * يجد سطراً يقول له حطّيت كم وإمتى.
+   *
+   * ومن حلّ موعده هذا الشهر له بطاقة دفعته وحدها لا قسطٌ معها — نفس قاعدة
+   * التوقّع النقدي: دفعةٌ وقسطٌ لالتزامٍ واحد هما نفس المال مرتين.
+   */
+  const installmentRows = useMemo(() => {
+    const dueIds = new Set(dues.map((d) => d.obligationId))
+    return installmentRowsForMonth(
+      obligations
+        .filter((i) => !dueIds.has(i.obligation.id))
+        .map((i) => ({
+          obligationId: i.obligation.id,
+          name: i.obligation.name,
+          monthlyInstallment: i.calc.monthlyInstallment,
+        })),
+      deposits.map((d) => ({
+        obligationId: d.obligation_id,
+        partnerId: d.partner_id,
+        amount: Number(d.amount),
+        depositDate: d.deposit_date,
+      })),
+      isCurrentMonth,
+    )
+  }, [obligations, dues, deposits, isCurrentMonth])
+
+  const fundMonthly = useMemo(
+    () => installmentRows.reduce((sum, r) => sum + r.installment, 0),
+    [installmentRows],
+  )
+
+  /*
    * الترتيب بالموعد لا بالإضافة: قائمةٌ بترتيب الإضافة ترتيبٌ لا يعني شيئاً،
    * وترتيبها بالاستحقاق يحوّل الشاشة من سجلٍّ إلى قائمة عملٍ لهذا الأسبوع.
    * ودفعة الالتزام تدخل الترتيب نفسه بمفتاح استعجالها — لا فوق القائمة تشريفاً
@@ -148,6 +190,7 @@ export function BillsScreen() {
   type WorkRow =
     | { kind: 'bill'; row: BillRow; key: number }
     | { kind: 'due'; due: (typeof dues)[number]; key: number }
+    | { kind: 'installment'; inst: InstallmentRow; key: number }
 
   const ordered = useMemo(() => {
     const monthStart = new Date(`${month}T00:00:00`)
@@ -172,9 +215,20 @@ export function BillsScreen() {
         due: d,
         key: sortKeyFromDaysAway(dueInfoForDate(d.dueDate).daysAway),
       })),
+      /*
+       * القسط بلا يوم استحقاق — موعده «هذا الشهر». فيقف بعد الفواتير المؤرَّخة
+       * والآلية وقبل الفواتير بلا موعد، والمودَع ينزل مع المدفوع أسفل الكل.
+       */
+      ...installmentRows
+        .filter((r) => obligationById.has(r.obligationId))
+        .map((r) => ({
+          kind: 'installment' as const,
+          inst: r,
+          key: r.state === 'done' ? 40_000 : 29_000,
+        })),
     ]
     return workRows.sort((a, b) => a.key - b.key)
-  }, [rows, dues, month, methodById])
+  }, [rows, dues, installmentRows, month, methodById, obligationById])
 
   /* دفع التزامٍ من هنا — نفس مسار صفحة التفاصيل، بنفس المحرّك والحوار. */
   const [payTarget, setPayTarget] = useState<ObligationWithCalc | null>(null)
@@ -267,11 +321,11 @@ export function BillsScreen() {
         </p>
       )}
 
-      <MonthlyLoadPanel details={details} />
+      <MonthlyLoadPanel details={details} fundMonthly={fundMonthly} />
 
       {user && <AddCommitmentForm userId={user.id} onAdded={load} />}
 
-      {rows.length === 0 && dues.length === 0 ? (
+      {rows.length === 0 && dues.length === 0 && installmentRows.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-border bg-surface p-8 text-center">
           <p className="text-[15px] leading-relaxed text-text-muted">{t('bills.empty')}</p>
           <Link to="/money" className="mt-4 block">
@@ -340,12 +394,20 @@ export function BillsScreen() {
                     await load()
                   }}
                 />
-              ) : (
+              ) : entry.kind === 'due' ? (
                 <AnnualDueCard
                   key={`due-${entry.due.obligationId}-${entry.due.dueDate.getTime()}`}
                   due={entry.due}
                   item={obligationById.get(entry.due.obligationId)!}
                   onPay={() => setPayTarget(obligationById.get(entry.due.obligationId) ?? null)}
+                />
+              ) : (
+                <InstallmentCard
+                  key={`inst-${entry.inst.obligationId}`}
+                  row={entry.inst}
+                  item={obligationById.get(entry.inst.obligationId)!}
+                  isCurrentMonth={isCurrentMonth}
+                  onDone={load}
                 />
               ),
             )}
@@ -668,7 +730,7 @@ function BillCard({
       </p>
 
       {/* الموعد قبل كل شيء: هو ما يحوّل السطر من معلومة إلى مهمّة. */}
-      {(due || isAutomatic) && (
+      {(due || isAutomatic || (paid && row.payment?.paid_at)) && (
         <div className="flex flex-wrap items-center gap-2">
           {due && day != null && !paid && (
             <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${DUE_PILL[due.urgency]}`}>
@@ -684,6 +746,12 @@ function BillCard({
           {due && day != null && paid && (
             <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
               {t('bills.dayValue', { day })}
+            </span>
+          )}
+          {/* «إمتى دفعتها؟» — التاريخ كان محفوظاً في `paid_at` ولا يُعرض في مكان. */}
+          {paid && row.payment?.paid_at && (
+            <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-[11px] font-bold text-brand">
+              ✓ {t('bills.paidOn', { date: formatDate(row.payment.paid_at) })}
             </span>
           )}
           {isAutomatic && (

@@ -7,15 +7,25 @@ import { failureText } from '@/lib/i18n/failure'
 import { bankRowKey, parseBankText, type BankRow } from '@/lib/bank/parse'
 import { addExpense, listExpenses } from '@/features/expenses/api'
 import { addIncomeEntry, listIncomeEntries } from '@/features/money/income'
+import {
+  addDeposit,
+  listMonthDeposits,
+  listObligations,
+  type ObligationWithCalc,
+} from '@/features/obligations/api'
 import { Button } from '@/components/ui/Button'
 
 /**
- * سجّل من البنك — كشف حسابك يصير مصاريف وقبضات.
+ * سجّل من البنك — كشف حسابك يصير مصاريف وقبضات وإيداعات صناديق.
  *
  * لا ربطَ ولا كلمة سرّ: تنزّل الكشف من موقع بنكك أو تنسخ جدوله وتلصقه
  * هنا، والتطبيق يقرؤه ويعرض ما فهمه **للمراجعة قبل الحفظ** — أنت توافق
  * على كل سطر. والحركة المستورَدة سابقاً تُعلَّم وتُطفأ من تلقائها:
  * لصقُ الكشف نفسه مرتين لا يكتب شيئاً مرتين.
+ *
+ * والقبضة الداخلة لها وجهتان: دخلٌ وصلني، أو قسطٌ حطّيته بصندوق التزامٍ
+ * (تحويلةٌ لحساب التوفير مثلاً — تظهر في كشفه قبضةً وهي ليست دخلاً).
+ * فلكل قبضةٍ منتقى وجهة، ومع كل صندوقٍ رصيدُه — «بطريقةٍ أضل متذكّر».
  */
 export function BankImportScreen() {
   const { t } = useTranslation()
@@ -28,9 +38,15 @@ export function BankImportScreen() {
   const [skipped, setSkipped] = useState(0)
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [existing, setExisting] = useState<Set<string>>(new Set())
+  /** صناديق الالتزامات — للمنتقى ولرصيد كل صندوق بجانب اسمه. */
+  const [funds, setFunds] = useState<ObligationWithCalc[]>([])
+  /** وجهة كل قبضة: مفتاح الصف ← معرّف الالتزام. الغائب = دخل عادي. */
+  const [fundChoice, setFundChoice] = useState<Map<string, string>>(new Map())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState<{ expenses: number; incomes: number } | null>(null)
+  const [done, setDone] = useState<{ expenses: number; incomes: number; deposits: number } | null>(
+    null,
+  )
 
   const keyOf = (row: BankRow, index: number) => `${index}:${bankRowKey(row)}`
 
@@ -38,27 +54,45 @@ export function BankImportScreen() {
    * حارس التكرار: حركات الأشهر المعنيّة تُجلب وتُقارن بمفتاح
    * (يوم + مبلغ + اتجاه). المطابِقة تُعلَّم «موجودة» وتُطفأ — لا تُخفى:
    * قد تكون حركةً مختلفة بنفس الرقم صدفةً، والقرار قرار صاحبها.
+   *
+   * وإيداعات الصناديق في الحارس أيضاً: القبضة التي وُجّهت لصندوقٍ في
+   * استيرادٍ سابق تصير `fund_deposit` لا دخلاً، ولولا عدُّها هنا لعاد
+   * الكشف نفسه يعرضها نظيفةً فتُودَع مرتين.
    */
   const analyze = async (parsed: BankRow[]) => {
     const months = [...new Set(parsed.map((r) => `${r.date.slice(0, 7)}-01`))]
     const found = new Set<string>()
-    await Promise.all(
-      months.map(async (month) => {
-        const [expenses, entries] = await Promise.all([
+    const [, ...monthResults] = await Promise.all([
+      listObligations()
+        .then(setFunds)
+        .catch(() => setFunds([])),
+      ...months.map(async (month) => {
+        const [expenses, entries, deposits] = await Promise.all([
           listExpenses(month).catch(() => []),
           listIncomeEntries(month).catch(() => []),
+          listMonthDeposits(month).catch(() => []),
         ])
-        for (const e of expenses) {
-          found.add(bankRowKey({ date: e.spent_at, amount: Number(e.amount), direction: 'out' }))
-        }
-        for (const e of entries) {
+        return { expenses, entries, deposits }
+      }),
+    ])
+    for (const { expenses, entries, deposits } of monthResults) {
+      for (const e of expenses) {
+        found.add(bankRowKey({ date: e.spent_at, amount: Number(e.amount), direction: 'out' }))
+      }
+      for (const e of entries) {
+        found.add(bankRowKey({ date: e.received_at, amount: Number(e.amount), direction: 'in' }))
+      }
+      for (const d of deposits) {
+        // إيداعاتي الموجبة وحدها — السحب عند الدفع ليس قبضةً في كشف أحد.
+        if (d.partner_id === null && Number(d.amount) > 0) {
           found.add(
-            bankRowKey({ date: e.received_at, amount: Number(e.amount), direction: 'in' }),
+            bankRowKey({ date: d.deposit_date, amount: Number(d.amount), direction: 'in' }),
           )
         }
-      }),
-    )
+      }
+    }
     setExisting(found)
+    setFundChoice(new Map())
     setChecked(
       new Set(
         parsed
@@ -119,9 +153,11 @@ export function BankImportScreen() {
     try {
       let expenses = 0
       let incomes = 0
+      let deposits = 0
       // تسلسلياً لا بالتوازي: كشفٌ طويل بالتوازي يفتح عشرات الطلبات دفعةً.
       for (const [i, row] of rows.entries()) {
-        if (!checked.has(keyOf(row, i))) continue
+        const key = keyOf(row, i)
+        if (!checked.has(key)) continue
         if (row.direction === 'out') {
           await addExpense(user.id, {
             amount: row.amount,
@@ -131,6 +167,17 @@ export function BankImportScreen() {
             note: row.name,
           })
           expenses++
+          continue
+        }
+        const fundId = fundChoice.get(key)
+        if (fundId) {
+          /*
+           * قبضةٌ وُجّهت لصندوق: إيداعٌ لا دخل — تحويلةُ توفيرٍ تُعدّ دخلاً
+           * تنفخ الشهر بمالٍ لم يصل. بيوم الحركة لا يوم الاستيراد، وباسم
+           * سطر الكشف ملاحظةً — «بطريقةٍ أضل متذكّر» تعني أن يبقى الأصل.
+           */
+          await addDeposit(fundId, user.id, row.amount, null, null, row.date, row.name)
+          deposits++
         } else {
           await addIncomeEntry(user.id, {
             amount: row.amount,
@@ -141,7 +188,7 @@ export function BankImportScreen() {
           incomes++
         }
       }
-      setDone({ expenses, incomes })
+      setDone({ expenses, incomes, deposits })
       setRows(null)
       setText('')
       await client.invalidateQueries()
@@ -167,6 +214,7 @@ export function BankImportScreen() {
       {done && (
         <p role="status" className="rounded-2xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm font-semibold text-brand">
           ✅ {t('bank.done', { expenses: done.expenses, incomes: done.incomes })}
+          {done.deposits > 0 && ` · ${t('bank.doneDeposits', { count: done.deposits })}`}
         </p>
       )}
 
@@ -277,6 +325,37 @@ export function BankImportScreen() {
                       {formatMoney(row.amount)}
                     </span>
                   </label>
+
+                  {/*
+                    * وجهة القبضة: دخلٌ أم قسطٌ بصندوق. مع كل صندوقٍ رصيدُه —
+                    * فمن نسي أيّها لأيّ شيءٍ يقرأ ولا يخمّن.
+                    */}
+                  {row.direction === 'in' && isChecked && funds.length > 0 && (
+                    <select
+                      value={fundChoice.get(key) ?? ''}
+                      onChange={(e) =>
+                        setFundChoice((prev) => {
+                          const next = new Map(prev)
+                          if (e.target.value === '') next.delete(key)
+                          else next.set(key, e.target.value)
+                          return next
+                        })
+                      }
+                      aria-label={t('bank.fundFor', { name: row.name })}
+                      className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3 py-2 text-[13px] text-text outline-none focus:border-brand"
+                    >
+                      <option value="">💰 {t('bank.asIncome')}</option>
+                      {funds.map((f) => (
+                        <option key={f.obligation.id} value={f.obligation.id}>
+                          🎯{' '}
+                          {t('bank.asFund', {
+                            name: f.obligation.name,
+                            balance: formatMoney(Number(f.balance?.my_fund_balance ?? 0)),
+                          })}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </li>
               )
             })}

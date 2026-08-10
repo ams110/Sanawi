@@ -178,6 +178,10 @@ export async function addDeposit(
   amount: number,
   partnerId: string | null = null,
   accountId: string | null = null,
+  // الافتراض «اليوم» يخدم الإيداع الحيّ؛ والمستورَد من كشف البنك وقع في
+  // يومه هو، وكتابته بيوم الاستيراد تجعل حارس «حطّيت هالشهر» يكذب.
+  depositDate: string = toDateKey(),
+  note: string | null = null,
 ): Promise<FundDeposit> {
   const { data, error } = await supabase
     .from('fund_deposits')
@@ -187,7 +191,8 @@ export async function addDeposit(
       partner_id: partnerId,
       amount,
       account_id: accountId,
-      deposit_date: toDateKey(),
+      deposit_date: depositDate,
+      note,
     })
     .select()
     .single()

@@ -4,12 +4,23 @@ import { summarizeMonthlyLoad } from '@/lib/commitments/calc'
 import type { CommitmentDetail } from '@/lib/db/types'
 
 /**
- * الحمل الشهري مفصولاً: ما يتكرّر بلا نهاية، وما ينتهي.
+ * الحمل الشهري مفصولاً: ما يتكرّر بلا نهاية، وما ينتهي، وما تدفعه لنفسك.
  *
  * الفصل هو الرسالة. مديونٌ يرى 1,820 شيكلاً شهرياً يرى عبئاً دائماً؛ ويرى
  * "420 دائم و1,400 ينتهي، وأقربه بعد ثلاثة شهور" فيرى نفقاً له آخر.
+ *
+ * والرقم الكبير يشمل أقساط الصناديق: «قديش بتكلّف التزاماتي الشهرية؟» سؤالٌ
+ * واحد، وكانت الفواتير وحدها تجيبه هنا وأقساط الصناديق تسكن لوحة الشهر —
+ * فيقرأ المستخدم رقماً ناقصاً ثلث الحقيقة ويظن نفسه مرتاحاً.
  */
-export function MonthlyLoadPanel({ details }: { details: CommitmentDetail[] }) {
+export function MonthlyLoadPanel({
+  details,
+  fundMonthly = 0,
+}: {
+  details: CommitmentDetail[]
+  /** مجموع أقساط صناديق الالتزامات السنوية هذا الشهر. */
+  fundMonthly?: number
+}) {
   const { t } = useTranslation()
 
   const load = summarizeMonthlyLoad(
@@ -21,18 +32,21 @@ export function MonthlyLoadPanel({ details }: { details: CommitmentDetail[] }) {
     })),
   )
 
-  if (load.total === 0) return null
+  if (load.total + fundMonthly === 0) return null
 
   return (
     <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-bold text-text">{t('bills.loadTitle')}</h2>
-        <span className="num text-2xl font-black text-text">{formatMoney(load.total)}</span>
+        <span className="num text-2xl font-black text-text">
+          {formatMoney(load.total + fundMonthly)}
+        </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid gap-2 ${fundMonthly > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
         <Cell label={t('bills.recurring')} amount={load.recurring} />
         <Cell label={t('bills.installments')} amount={load.installments} accent />
+        {fundMonthly > 0 && <Cell label={t('bills.fundInstallments')} amount={fundMonthly} />}
       </div>
 
       {load.nextRelief && (
