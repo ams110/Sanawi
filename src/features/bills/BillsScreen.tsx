@@ -433,6 +433,9 @@ function BillCard({
   const [editMethod, setEditMethod] = useState<string | null>(row.commitment.default_method_id)
   const [editStartsOn, setEditStartsOn] = useState(row.commitment.starts_on ?? '')
   const [editEndsOn, setEditEndsOn] = useState(row.commitment.ends_on ?? '')
+  const [editInterest, setEditInterest] = useState(
+    String(Number(row.commitment.annual_interest_percent ?? 0) || ''),
+  )
   const [editError, setEditError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -443,6 +446,7 @@ function BillCard({
     setEditMethod(row.commitment.default_method_id)
     setEditStartsOn(row.commitment.starts_on ?? '')
     setEditEndsOn(row.commitment.ends_on ?? '')
+    setEditInterest(String(Number(row.commitment.annual_interest_percent ?? 0) || ''))
     setEditError(null)
     setEditing(false)
   }
@@ -527,6 +531,8 @@ function BillCard({
               defaultMethodId: editMethod,
               startsOn: editStartsOn || null,
               endsOn: editEndsOn || null,
+              // تُقصّ إلى [0..100]: فائدةٌ سالبة أو بثلاثة أرقام غلطة إدخال.
+              annualInterestPercent: Math.min(100, Math.max(0, Number(editInterest) || 0)),
             })
             setEditing(false)
             await onReload()
@@ -631,6 +637,29 @@ function BillCard({
             />
           </label>
         </div>
+
+        {/*
+         * الفائدة تظهر للدين وحده: كانت حقلاً يتيماً يكتبه كلود ويقرأه ترتيبُ
+         * السداد (الانهيار يبدأ بالأغلى)، ولا سبيل لضبطه من التلفون.
+         */}
+        {(editEndsOn || row.commitment.total_amount !== null) && (
+          <label className="block space-y-1">
+            <span className="text-[11px] font-semibold text-text-muted">
+              {t('bills.interestLabel')}
+            </span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              step="0.1"
+              value={editInterest}
+              onChange={(e) => setEditInterest(e.target.value)}
+              placeholder={t('bills.interestHint')}
+              className={`num ${editInputClass}`}
+            />
+          </label>
+        )}
       </InlineEdit>
 
       <p className="text-xs text-text-muted">
@@ -697,6 +726,11 @@ function BillCard({
               {t('bills.remainingForMe', {
                 amount: formatMoney(Number(detail.my_amount) * left),
               })}
+            </span>
+          )}
+          {Number(row.commitment.annual_interest_percent) > 0 && (
+            <span className="num rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
+              {t('bills.interestChip', { percent: Number(row.commitment.annual_interest_percent) })}
             </span>
           )}
         </div>

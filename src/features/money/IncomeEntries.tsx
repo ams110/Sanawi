@@ -72,6 +72,8 @@ function EntryRow({
             {entry.name ?? source?.name ?? t('panel.incomeActual')}
           </p>
           <p className="num text-xs text-text-muted">{formatDate(entry.received_at)}</p>
+          {/* ملاحظة كلود («مكافأة المشروع») كانت تُحفظ ولا تُعرض. */}
+          {entry.note && <p className="truncate text-xs text-text-muted">{entry.note}</p>}
         </div>
         <span className="num text-sm font-bold text-brand">{formatMoney(Number(entry.amount))}</span>
         {!editing && (

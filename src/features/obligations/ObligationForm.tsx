@@ -19,12 +19,13 @@ import {
 import {
   createObligation,
   getObligation,
+  listGroups,
   listTemplates,
   track,
   updateObligation,
   type ObligationDraft,
 } from './api'
-import type { ObligationTemplate } from '@/lib/db/types'
+import type { ObligationGroup, ObligationTemplate } from '@/lib/db/types'
 import { useTranslation } from 'react-i18next'
 import { toDateKey } from '@/lib/date'
 
@@ -59,6 +60,9 @@ export function ObligationForm() {
   const [sharePercent, setSharePercent] = useState(100)
   const [partners, setPartners] = useState<PartnerShareDraft[]>([])
   const [fundBalance, setFundBalance] = useState(0)
+  const [notes, setNotes] = useState('')
+  const [groupId, setGroupId] = useState<string | null>(null)
+  const [groups, setGroups] = useState<ObligationGroup[]>([])
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -85,12 +89,19 @@ export function ObligationForm() {
         setRecurrenceMonths(o.recurrence_months)
         setSharePercent(Number(o.my_share_percent))
         setFundBalance(Number(found.balance?.my_fund_balance ?? 0))
+        setNotes(o.notes ?? '')
+        setGroupId(o.group_id)
       })
       .catch((err) => setError(failureText(err, t, t('form.loadFailed'))))
 
     // حصص الشركاء تُجلب على حدة: فشلها لا يمنع تعديل بقية الحقول.
     listShares(id).then(setPartners).catch(() => setPartners([]))
   }, [isEdit, id, t])
+
+  // المجموعات تُعرض إن وُجدت: فشل جلبها لا يمنع الحفظ ولا يستحق رسالة.
+  useEffect(() => {
+    listGroups().then(setGroups).catch(() => setGroups([]))
+  }, [])
 
   // المعاينة الحية: تُحسب من نفس المحرّك الذي تستعمله الشاشات، لا نسخة ثانية منه.
   const calc = useMemo(
@@ -133,8 +144,11 @@ export function ObligationForm() {
     setError(null)
     setSaving(true)
 
-    // ما لا يعرضه النموذج لا يرسله: كان يضع `group_id: null` و`notes: null`
-    // فيمحو من كلٍّ منهما ما كتبه المستخدم من كلود عند أول تعديلٍ من هنا.
+    /*
+     * كانت الملاحظات والمجموعة حقلين يتيمين: يكتبهما كلود ولا يعرضهما
+     * النموذج — فكان لا يرسلهما لئلا يمحوهما. صارا معروضين، فإرسالهما
+     * صار صحيحاً: ما تراه العين هو ما يُحفظ.
+     */
     const draft: ObligationDraft = {
       name: name.trim(),
       category,
@@ -142,6 +156,8 @@ export function ObligationForm() {
       next_due_date: nextDueDate,
       recurrence_months: recurrenceMonths,
       my_share_percent: sharePercent,
+      notes: notes.trim() || null,
+      group_id: groupId,
     }
 
     try {
@@ -271,6 +287,42 @@ export function ObligationForm() {
             })}
           </p>
         )}
+
+        {/* المجموعة تُعرض إن وُجدت مجموعات — تُنشأ من كلود، وتُسند من هنا. */}
+        {groups.length > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-sm font-semibold text-text">{t('form.group')}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {groups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => setGroupId(groupId === g.id ? null : g.id)}
+                  aria-pressed={groupId === g.id}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold ${
+                    groupId === g.id
+                      ? 'border-brand bg-brand-soft text-brand'
+                      : 'border-border bg-bg text-text-muted'
+                  }`}
+                >
+                  {g.icon && <span aria-hidden="true">{g.icon} </span>}
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <label className="block space-y-1.5">
+          <span className="text-sm font-semibold text-text">{t('form.notes')}</span>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            placeholder={t('form.notesPlaceholder')}
+            className="w-full rounded-xl border border-border bg-bg px-3 py-3 text-[15px] text-text outline-none focus:border-brand"
+          />
+        </label>
       </section>
 
       {error && (
