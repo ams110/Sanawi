@@ -1,39 +1,35 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { ObligationCard } from './ObligationCard'
 import { scheduleObligationReminders } from '@/features/reminders/schedule'
-import { listObligations, type ObligationWithCalc } from './api'
+import { listObligations } from './api'
 import { useTranslation } from 'react-i18next'
-import { useRefresh } from '@/lib/refresh'
 import { failureText } from '@/lib/i18n/failure'
 
 export function ObligationsScreen() {
-  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
-  const [items, setItems] = useState<ObligationWithCalc[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      setError(null)
+  const client = useQueryClient()
+  const {
+    data: items = [],
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['obligations'],
+    queryFn: async () => {
       const loaded = await listObligations()
-      setItems(loaded)
       // فشل الجدولة لا يُفشل عرض الالتزامات: التنبيه مساعِد لا شرط.
       void scheduleObligationReminders(loaded).catch(() => {})
-    } catch (err) {
-      setError(failureText(err, t, t('obligations.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
+      return loaded
+    },
+  })
+  const error = loadError ? failureText(loadError, t, t('obligations.loadFailed')) : null
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  // الإيداع يغيّر الصندوق ولوحة الشهر معاً — الإبطال عامٌّ لا محليّ.
+  const reload = async () => {
+    await client.invalidateQueries()
+  }
 
   const totalMonthly = items.reduce((sum, i) => sum + i.calc.monthlyInstallment, 0)
 
@@ -76,7 +72,7 @@ export function ObligationsScreen() {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <ObligationCard key={item.obligation.id} item={item} onDeposited={load} />
+            <ObligationCard key={item.obligation.id} item={item} onDeposited={reload} />
           ))}
         </div>
       )}

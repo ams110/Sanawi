@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { summarizeMonth, type MonthlySummary } from '@/lib/budget/calc'
-import { listMonthDeposits, listObligations, type ObligationWithCalc } from '@/features/obligations/api'
+import { summarizeMonth } from '@/lib/budget/calc'
+import { listMonthDeposits, listObligations } from '@/features/obligations/api'
 import { listBills } from '@/features/bills/api'
-import { pendingThisMonth, type PendingResult } from '@/lib/month/pending'
+import { pendingThisMonth } from '@/lib/month/pending'
 import { viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
 import { PendingPanel } from './PendingPanel'
 import { listFixedCommitments, listIncomes } from '@/features/money/api'
@@ -20,29 +21,28 @@ import type { MonthPanelInput } from '@/lib/budget/month'
 import { MonthPanel } from './MonthPanel'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { Button } from '@/components/ui/Button'
-import { useRefresh } from '@/lib/refresh'
 import { useNavigate } from 'react-router-dom'
 
 /**
  * لوحة الشهر — الشاشة التي تجيب على سؤال واحد:
  * كم يجب أن يخرج من حسابي هذا الشهر، وكم يبقى لي.
+ *
+ * الاستعلام يجلب الخام وحده، والاشتقاق كلّه في `useMemo` تحته: هدف
+ * الادخار من الملف الشخصي يدخل الحسبة بلا إعادة جلبٍ حين يتغيّر.
  */
 export function MonthScreen() {
-  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { profile } = useProfile()
   const navigate = useNavigate()
-  const [summary, setSummary] = useState<MonthlySummary | null>(null)
-  const [panel, setPanel] = useState<MonthPanelInput | null>(null)
-  const [pending, setPending] = useState<PendingResult | null>(null)
-  const [obligationRows, setObligationRows] = useState<ObligationWithCalc[]>([])
-  const [hasIncome, setHasIncome] = useState(true)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const client = useQueryClient()
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
+  const {
+    data: raw,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['month', monthKey()],
+    queryFn: async () => {
       const month = monthKey()
       const [obligations, incomes, fixed, details, expenses, entries, deposits, bills] =
         await Promise.all([
@@ -55,145 +55,150 @@ export function MonthScreen() {
           listMonthDeposits(month),
           listBills(month),
         ])
-      setHasIncome(incomes.length > 0)
-      setObligationRows(obligations)
+      return { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills }
+    },
+  })
+  const error = loadError ? failureText(loadError, t, t('money.loadFailed')) : null
 
-      /*
-       * «ضلّ عليك» — الشاشة تبدأ الكلام.
-       *
-       * المحرّك في src/lib/month/pending.ts، والشاشة تعطيه ما جلبته ولا تحسب
-       * سطراً واحداً بنفسها: هو نفسه الذي سيقوله كلود، فيتّفق الاثنان بنيةً
-       * لا انضباطاً.
-       */
-      const depositsByObligation = new Map<string, typeof deposits>()
-      for (const d of deposits) {
-        const list = depositsByObligation.get(d.obligation_id) ?? []
-        list.push(d)
-        depositsByObligation.set(d.obligation_id, list)
-      }
+  // كل فعلٍ من «ضلّ عليك» يغيّر شاشاتٍ أخرى معه — الإبطال عامٌّ.
+  const reload = async () => {
+    await client.invalidateQueries()
+  }
 
-      const receivedBySource = new Map<string, number>()
-      for (const entry of entries) {
-        if (!entry.source_id) continue
-        receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
-      }
+  const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
+  const derived = useMemo(() => {
+    if (!raw) return null
+    const { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills } = raw
 
-      setPending(
-        pendingThisMonth({
-          obligations: obligations.map((o) => ({
-            id: o.obligation.id,
-            name: o.obligation.name,
-            monthlyInstallment: o.calc.monthlyInstallment,
-            isOverdue: o.calc.isOverdue,
-            deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
-              id: d.id,
-              amount: Number(d.amount),
-              depositDate: d.deposit_date,
-              createdAt: d.created_at,
-              partnerId: d.partner_id,
-              note: d.note,
-            })),
-          })),
-          incomes: incomes.map((i) => ({
-            id: i.id,
-            name: i.name,
-            amount: Number(i.amount),
-            frequency: i.frequency,
-            isVariable: Boolean(i.is_variable),
-            receivedCount: receivedBySource.get(i.id) ?? 0,
-          })),
-          bills: bills.map((row) => {
-            const view = viewBillCommitment({
-              amount: Number(row.commitment.amount),
-              startsOn: row.commitment.starts_on,
-              endsOn: row.commitment.ends_on,
-              mySharePercent: Number(row.commitment.my_share_percent ?? 100),
-            })
-            return {
-              id: row.commitment.id,
-              name: row.commitment.name,
-              // حصّتي لا المبلغ الكامل: من ينصّف الإنترنت لا يدفع كلّه.
-              amount: view.myAmount,
-              average: Number(row.average?.average_amount ?? 0),
-              isDueThisMonth: view.hasStarted && !view.isFinished,
-              isRecorded: row.payment !== null,
-              dayOfMonth: row.commitment.day_of_month,
-            }
-          }),
-        }),
-      )
-
-      const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
-      const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
-
-      // التقدير يرى ما تراه اللوحة: بندٌ انتهى قسطه أو لم يبدأ بعد لا دفعة
-      // له هذا الشهر، فحسابه يجعل الرقمين يختلفان لغير السبب المقصود.
-      const dueThisMonth = fixed.filter((f) => {
-        const view = viewCommitment({
-          amount: Number(f.amount),
-          startsOn: f.starts_on,
-          endsOn: f.ends_on,
-          mySharePercent: 100,
-        })
-        return view.hasStarted && !view.isFinished
-      })
-
-      setSummary(
-        summarizeMonth({
-          incomes: incomes.map((i) => ({
-            amount: Number(i.amount),
-            frequency: i.frequency,
-            isVariable: Boolean(i.is_variable),
-          })),
-          fixedCommitments: dueThisMonth.map((f) => Number(f.amount)),
-          obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
-          monthlySavingsTarget: savingsTarget,
-        }),
-      )
-
-      /*
-       * الحمل الشهري يأتي من commitment_details لا من fixed_commitments:
-       * الأول يحمل حصّتي بالشيكل ويعرف أيّ بندٍ انتهى قسطه، والثاني يعطي
-       * المبلغ الكامل لكل بندٍ حيّاً كان أو ميتاً.
-       */
-      const load = summarizeMonthlyLoad(
-        details.map((d) => ({
-          amount: Number(d.amount),
-          startsOn: d.starts_on,
-          endsOn: d.ends_on,
-          mySharePercent: Number(d.my_share_percent),
-        })),
-      )
-      const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
-
-      setPanel({
-        expectedIncome: monthlyIncomeFrom(
-          incomes.map((i) => ({
-            amount: Number(i.amount),
-            frequency: i.frequency,
-            isVariable: Boolean(i.is_variable),
-          })),
-        ),
-        receivedIncome: sumIncomeEntries(entries),
-        obligationInstallments: Math.round(obligationsTotal * 100) / 100,
-        recurringBills: load.recurring,
-        installments: load.installments,
-        dailyExpenses: spending.total,
-        savingsTarget,
-        daysElapsed: spending.daysElapsed,
-        daysInMonth: spending.daysInMonth,
-      })
-    } catch (err) {
-      setError(failureText(err, t, t('money.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
+    /*
+     * «ضلّ عليك» — الشاشة تبدأ الكلام.
+     *
+     * المحرّك في src/lib/month/pending.ts، والشاشة تعطيه ما جلبته ولا تحسب
+     * سطراً واحداً بنفسها: هو نفسه الذي سيقوله كلود، فيتّفق الاثنان بنيةً
+     * لا انضباطاً.
+     */
+    const depositsByObligation = new Map<string, typeof deposits>()
+    for (const d of deposits) {
+      const list = depositsByObligation.get(d.obligation_id) ?? []
+      list.push(d)
+      depositsByObligation.set(d.obligation_id, list)
     }
-  }, [profile?.monthly_savings_target, t, refreshToken, setBusy])
 
-  useEffect(() => {
-    void load()
-  }, [load])
+    const receivedBySource = new Map<string, number>()
+    for (const entry of entries) {
+      if (!entry.source_id) continue
+      receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
+    }
+
+    const pending = pendingThisMonth({
+      obligations: obligations.map((o) => ({
+        id: o.obligation.id,
+        name: o.obligation.name,
+        monthlyInstallment: o.calc.monthlyInstallment,
+        isOverdue: o.calc.isOverdue,
+        deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
+          id: d.id,
+          amount: Number(d.amount),
+          depositDate: d.deposit_date,
+          createdAt: d.created_at,
+          partnerId: d.partner_id,
+          note: d.note,
+        })),
+      })),
+      incomes: incomes.map((i) => ({
+        id: i.id,
+        name: i.name,
+        amount: Number(i.amount),
+        frequency: i.frequency,
+        isVariable: Boolean(i.is_variable),
+        receivedCount: receivedBySource.get(i.id) ?? 0,
+      })),
+      bills: bills.map((row) => {
+        const view = viewBillCommitment({
+          amount: Number(row.commitment.amount),
+          startsOn: row.commitment.starts_on,
+          endsOn: row.commitment.ends_on,
+          mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+        })
+        return {
+          id: row.commitment.id,
+          name: row.commitment.name,
+          // حصّتي لا المبلغ الكامل: من ينصّف الإنترنت لا يدفع كلّه.
+          amount: view.myAmount,
+          average: Number(row.average?.average_amount ?? 0),
+          isDueThisMonth: view.hasStarted && !view.isFinished,
+          isRecorded: row.payment !== null,
+          dayOfMonth: row.commitment.day_of_month,
+        }
+      }),
+    })
+
+    const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
+
+    // التقدير يرى ما تراه اللوحة: بندٌ انتهى قسطه أو لم يبدأ بعد لا دفعة
+    // له هذا الشهر، فحسابه يجعل الرقمين يختلفان لغير السبب المقصود.
+    const dueThisMonth = fixed.filter((f) => {
+      const view = viewCommitment({
+        amount: Number(f.amount),
+        startsOn: f.starts_on,
+        endsOn: f.ends_on,
+        mySharePercent: 100,
+      })
+      return view.hasStarted && !view.isFinished
+    })
+
+    const summary = summarizeMonth({
+      incomes: incomes.map((i) => ({
+        amount: Number(i.amount),
+        frequency: i.frequency,
+        isVariable: Boolean(i.is_variable),
+      })),
+      fixedCommitments: dueThisMonth.map((f) => Number(f.amount)),
+      obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
+      monthlySavingsTarget: savingsTarget,
+    })
+
+    /*
+     * الحمل الشهري يأتي من commitment_details لا من fixed_commitments:
+     * الأول يحمل حصّتي بالشيكل ويعرف أيّ بندٍ انتهى قسطه، والثاني يعطي
+     * المبلغ الكامل لكل بندٍ حيّاً كان أو ميتاً.
+     */
+    const monthlyLoad = summarizeMonthlyLoad(
+      details.map((d) => ({
+        amount: Number(d.amount),
+        startsOn: d.starts_on,
+        endsOn: d.ends_on,
+        mySharePercent: Number(d.my_share_percent),
+      })),
+    )
+    const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
+
+    const panel: MonthPanelInput = {
+      expectedIncome: monthlyIncomeFrom(
+        incomes.map((i) => ({
+          amount: Number(i.amount),
+          frequency: i.frequency,
+          isVariable: Boolean(i.is_variable),
+        })),
+      ),
+      receivedIncome: sumIncomeEntries(entries),
+      obligationInstallments: Math.round(obligationsTotal * 100) / 100,
+      recurringBills: monthlyLoad.recurring,
+      installments: monthlyLoad.installments,
+      dailyExpenses: spending.total,
+      savingsTarget,
+      daysElapsed: spending.daysElapsed,
+      daysInMonth: spending.daysInMonth,
+    }
+
+    return { pending, summary, panel, hasIncome: incomes.length > 0 }
+  }, [raw, savingsTarget])
+
+  const summary = derived?.summary ?? null
+  const panel = derived?.panel ?? null
+  const pending = derived?.pending ?? null
+  const obligationRows = raw?.obligations ?? []
+  const hasIncome = derived?.hasIncome ?? true
 
   if (loading) {
     return (
@@ -239,7 +244,7 @@ export function MonthScreen() {
         <PendingPanel
           result={pending}
           obligations={obligationRows}
-          onDone={load}
+          onDone={reload}
           onGo={(kind) => navigate(kind === 'bill' ? '/bills' : '/money')}
         />
       )}
