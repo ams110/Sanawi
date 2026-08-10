@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useProfile } from '@/features/profile/ProfileProvider'
@@ -12,7 +13,6 @@ import { Button } from '@/components/ui/Button'
 import { IncomeEntries } from './IncomeEntries'
 import { IncomeHistory } from './IncomeHistory'
 import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
-import { useRefresh } from '@/lib/refresh'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import {
   addFixedCommitment,
@@ -32,33 +32,29 @@ const FREQUENCIES = [
 ] as const satisfies readonly { value: IncomeFrequency; key: string }[]
 
 export function MoneyScreen() {
-  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
   const { user } = useAuth()
   const { profile, patchLocal } = useProfile()
+  const client = useQueryClient()
 
-  const [incomes, setIncomes] = useState<IncomeSource[]>([])
-  const [fixed, setFixed] = useState<FixedCommitment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    data: money = { incomes: [] as IncomeSource[], fixed: [] as FixedCommitment[] },
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['money'],
+    queryFn: async () => {
+      const [incomes, fixed] = await Promise.all([listIncomes(), listFixedCommitments()])
+      return { incomes, fixed }
+    },
+  })
+  const { incomes, fixed } = money
+  const error = loadError ? failureText(loadError, t, t('money.loadFailed')) : null
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      const [i, f] = await Promise.all([listIncomes(), listFixedCommitments()])
-      setIncomes(i)
-      setFixed(f)
-    } catch (err) {
-      setError(failureText(err, t, t('money.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  // المصادر والبنود تدخل لوحة الشهر والفواتير والشركاء — الإبطال عامٌّ.
+  const load = async () => {
+    await client.invalidateQueries()
+  }
 
   // المتوقَّع من المصادر الثابتة وحدها — المتغيّر لا تقدير له، واختراعُ رقمٍ
   // له يضخّم الدخل ويجعل كل حسبةٍ بعده مبنيّةً على ما لم يصل.

@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { useRefresh } from '@/lib/refresh'
 import { failureText } from '@/lib/i18n/failure'
 import { AccountsSection } from './AccountsSection'
-import { loadAccountsPicture, type AccountsPicture } from './api'
+import { loadAccountsPicture } from './api'
 
 /**
  * صفحة الحسابات — السيولة صارت درجةً أولى.
@@ -17,27 +16,19 @@ import { loadAccountsPicture, type AccountsPicture } from './api'
 export function AccountsScreen() {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { token: refreshToken, setBusy } = useRefresh()
+  const client = useQueryClient()
 
-  const [picture, setPicture] = useState<AccountsPicture | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    data: picture = null,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({ queryKey: ['accounts'], queryFn: loadAccountsPicture })
+  const error = loadError ? failureText(loadError, t, t('accounts.loadFailed')) : null
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      setPicture(await loadAccountsPicture())
-    } catch (err) {
-      setError(failureText(err, t, t('accounts.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  // الرصيد والتحويل والربط تدخل الثروة ولوحة الشهر معاً — الإبطال عامٌّ.
+  const reload = async () => {
+    await client.invalidateQueries()
+  }
 
   if (loading) {
     return (
@@ -62,7 +53,7 @@ export function AccountsScreen() {
         <p className="text-sm text-text-muted">{t('accounts.entryHint')}</p>
       </div>
 
-      <AccountsSection picture={picture} userId={user.id} onChanged={load} />
+      <AccountsSection picture={picture} userId={user.id} onChanged={reload} />
     </div>
   )
 }

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { useRefresh } from '@/lib/refresh'
 import type { IncomeEntry, IncomeSource } from '@/lib/db/types'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import { useAmount } from '@/features/record/amount'
@@ -172,9 +172,8 @@ export function IncomeEntries({
   sources: IncomeSource[]
 }) {
   const { t } = useTranslation()
-  const { token: refreshToken } = useRefresh()
+  const client = useQueryClient()
 
-  const [rows, setRows] = useState<IncomeEntry[]>([])
   const amount = useAmount()
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -196,17 +195,11 @@ export function IncomeEntries({
   })()
   const isCurrent = shift === 0
 
-  const load = useCallback(async () => {
-    try {
-      setRows(await listIncomeEntries(viewMonth))
-    } catch (err) {
-      setError(failureText(err, t, t('panel.incomeLoadFailed')))
-    }
-  }, [t, refreshToken, viewMonth])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  // الشهر جزءٌ من المفتاح: كل شهرٍ تصفّحته يبقى في كاشه ويعود فوراً.
+  const { data: rows = [], error: loadError } = useQuery({
+    queryKey: ['income-entries', viewMonth],
+    queryFn: () => listIncomeEntries(viewMonth),
+  })
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -222,13 +215,15 @@ export function IncomeEntries({
       })
       amount.reset()
       setName('')
-      await load()
+      // الدخل الواصل يغيّر لوحة الشهر وسجلّ المصادر معاً.
+      await client.invalidateQueries()
     } catch (err) {
       setError(failureText(err, t, t('panel.incomeFailed')))
     } finally {
       setBusy(false)
     }
   }
+  const shownError = error ?? (loadError ? failureText(loadError, t, t('panel.incomeLoadFailed')) : null)
 
   const total = sumIncomeEntries(rows)
 
@@ -265,9 +260,9 @@ export function IncomeEntries({
         </div>
       </div>
 
-      {error && (
+      {shownError && (
         <p role="alert" className="rounded-xl bg-danger-soft px-3 py-2 text-xs text-danger">
-          {error}
+          {shownError}
         </p>
       )}
 
@@ -282,7 +277,9 @@ export function IncomeEntries({
               key={row.id}
               entry={row}
               sources={sources}
-              onChanged={load}
+              onChanged={async () => {
+                await client.invalidateQueries()
+              }}
             />
           ))}
         </ul>

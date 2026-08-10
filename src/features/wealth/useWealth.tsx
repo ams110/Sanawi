@@ -1,47 +1,44 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { useProfile } from '@/features/profile/ProfileProvider'
-import { useRefresh } from '@/lib/refresh'
 import { failureText } from '@/lib/i18n/failure'
 import { computeNetWorth, type NetWorthResult } from '@/lib/wealth/networth'
 import { updateProfile } from '@/features/profile/api'
 import type { Profile } from '@/lib/db/types'
-import { loadWealthSources, toAssetInputs, type WealthSources } from './api'
+import { loadWealthSources, toAssetInputs } from './api'
 
 /**
  * مصادر الثروة وحسبتها — خطّاف واحد لصفحات المحور.
  *
  * كانت الحسبة والجلب وكتابة الملف الشخصي كلها داخل `WealthScreen`
  * الواحدة؛ ومع تقسيمها إلى أربع صفحاتٍ صار تكرارها في كلٍّ منها نسخاً
- * ينحرف بعد أول تعديل. الجلب هنا يتكرّر بين الصفحات مؤقتاً — طبقة
- * الكاش في مرحلتها تجعله مشتركاً بلا تغيير هذه الواجهة.
+ * ينحرف بعد أول تعديل. والمفتاح الواحد `['wealth']` يجعل الجلب مشتركاً:
+ * التنقّل بين صفحات المحور الأربع يقرأ كاشاً واحداً لا أربعة نداءات.
  */
 export function useWealth() {
   const { t } = useTranslation()
   const { user } = useAuth()
   const { profile, patchLocal } = useProfile()
-  const { token: refreshToken, setBusy } = useRefresh()
+  const client = useQueryClient()
 
-  const [sources, setSources] = useState<WealthSources | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    data: sources = null,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({ queryKey: ['wealth'], queryFn: loadWealthSources })
 
+  /** خطأ كتابةٍ محلي — الجلب له خطؤه من الاستعلام نفسه. */
+  const [actionError, setActionError] = useState<string | null>(null)
+  const error = loadError
+    ? failureText(loadError, t, t('wealth.loadFailed'))
+    : actionError
+
+  // الحسابات تدخل لوحة الشهر وصناديق الالتزامات معاً — الإبطال عامٌّ لا محليّ.
   const load = useCallback(async () => {
-    try {
-      setError(null)
-      setSources(await loadWealthSources())
-    } catch (err) {
-      setError(failureText(err, t, t('wealth.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+    await client.invalidateQueries()
+  }, [client])
 
   const emergencyMonths = Number(profile?.emergency_months ?? 3)
 
@@ -57,11 +54,12 @@ export function useWealth() {
       ) as Partial<Profile>
 
       patchLocal(patch)
+      setActionError(null)
       try {
         await updateProfile(user.id, patch)
       } catch (err) {
         patchLocal(before)
-        setError(failureText(err, t, t('wealth.saveFailed')))
+        setActionError(failureText(err, t, t('wealth.saveFailed')))
       }
     },
     [user, profile, patchLocal, t],

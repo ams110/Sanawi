@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { summarizeExpenses } from '@/lib/expenses/calc'
-import { useRefresh } from '@/lib/refresh'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
 import { useAmount } from '@/features/record/amount'
 import { AddExpenseForm } from './AddExpenseForm'
@@ -22,31 +22,29 @@ import {
 export function ExpensesScreen() {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { token: refreshToken, setBusy } = useRefresh()
+  const client = useQueryClient()
 
   const [month, setMonth] = useState(() => monthKey())
-  const [rows, setRows] = useState<Expense[]>([])
-  const [categories, setCategories] = useState<ExpenseCategory[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      const [e, c] = await Promise.all([listExpenses(month), listCategories()])
-      setRows(e)
-      setCategories(c)
-    } catch (err) {
-      setError(failureText(err, t, t('expenses.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [month, t, refreshToken, setBusy])
+  // الشهر جزءٌ من المفتاح: كل شهرٍ تصفّحته يبقى في كاشه ويعود فوراً.
+  const {
+    data = { rows: [] as Expense[], categories: [] as ExpenseCategory[] },
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['expenses', month],
+    queryFn: async () => {
+      const [rows, categories] = await Promise.all([listExpenses(month), listCategories()])
+      return { rows, categories }
+    },
+  })
+  const { rows, categories } = data
+  const error = loadError ? failureText(loadError, t, t('expenses.loadFailed')) : null
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  // المصروف يغيّر لوحة الشهر معه — الإبطال عامٌّ لا محليّ.
+  const load = async () => {
+    await client.invalidateQueries()
+  }
 
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
   const summary = useMemo(

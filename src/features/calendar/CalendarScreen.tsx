@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { buildCalendar, calendarTotal, heaviestMonth } from '@/lib/obligations/calendar'
-import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
-import { useRefresh } from '@/lib/refresh'
+import { listObligations } from '@/features/obligations/api'
 
 /**
  * تقويم الاثني عشر شهراً — أوضح شاشة في التطبيق عمداً.
@@ -13,27 +13,14 @@ import { useRefresh } from '@/lib/refresh'
  * لا رسوم بيانية هنا: شريط بطول نسبي يُقرأ أسرع من أي مخطط.
  */
 export function CalendarScreen() {
-  const { token: refreshToken, setBusy } = useRefresh()
   const { t } = useTranslation()
-  const [items, setItems] = useState<ObligationWithCalc[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      setItems(await listObligations())
-    } catch (err) {
-      setError(failureText(err, t, t('obligations.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  // نفس مفتاح قائمة الالتزامات: المقطعان جاران في المحور ويقرآن مشهداً واحداً.
+  const {
+    data: items = [],
+    isPending: loading,
+    error: loadError,
+  } = useQuery({ queryKey: ['obligations'], queryFn: listObligations })
+  const error = loadError ? failureText(loadError, t, t('obligations.loadFailed')) : null
 
   const calendar = useMemo(
     () =>

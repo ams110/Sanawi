@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { useRefresh } from '@/lib/refresh'
 import { summarizeBySource, totalOf, type SourceTotal } from '@/lib/budget/bySource'
 import { listRecentIncomeEntries } from './income'
 import { listAllIncomeSources } from './api'
@@ -17,35 +16,24 @@ import { listAllIncomeSources } from './api'
  */
 export function IncomeHistory() {
   const { t } = useTranslation()
-  const { token: refreshToken } = useRefresh()
-  const [rows, setRows] = useState<SourceTotal[]>([])
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      setError(null)
+  const { data: rows = [], error: loadError } = useQuery({
+    queryKey: ['income-history'],
+    queryFn: async (): Promise<SourceTotal[]> => {
       const [entries, sources] = await Promise.all([
         listRecentIncomeEntries(),
         listAllIncomeSources(),
       ])
-      setRows(
-        summarizeBySource(
-          entries.map((e) => ({
-            amount: Number(e.amount),
-            sourceId: e.source_id,
-            name: e.name,
-          })),
-          sources.map((s) => ({ id: s.id, name: s.name, isActive: s.is_active !== false })),
-        ),
+      return summarizeBySource(
+        entries.map((e) => ({
+          amount: Number(e.amount),
+          sourceId: e.source_id,
+          name: e.name,
+        })),
+        sources.map((s) => ({ id: s.id, name: s.name, isActive: s.is_active !== false })),
       )
-    } catch (err) {
-      setError(failureText(err, t, t('panel.incomeLoadFailed')))
-    }
-  }, [t, refreshToken])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+    },
+  })
+  const error = loadError ? failureText(loadError, t, t('panel.incomeLoadFailed')) : null
 
   // قسمٌ فارغ لا يشرح نفسه — من لا قبضات له لا يحتاج سجلاً لها.
   if (rows.length === 0 && !error) return null

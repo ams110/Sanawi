@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { computeGroupCost } from '@/lib/budget/groupCost'
 import { projectSavings } from '@/lib/budget/calc'
-import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
+import { listObligations } from '@/features/obligations/api'
 import { failureText } from '@/lib/i18n/failure'
-import { useRefresh } from '@/lib/refresh'
 
 const CATEGORIES = ['car', 'health', 'events', 'home', 'lifestyle', 'other'] as const
 
@@ -16,33 +16,18 @@ const CATEGORIES = ['car', 'health', 'events', 'home', 'lifestyle', 'other'] as 
  */
 export function InsightsScreen() {
   const { t } = useTranslation()
-  const { setBusy } = useRefresh()
-  const [items, setItems] = useState<ObligationWithCalc[]>([])
   const [category, setCategory] = useState<string>('car')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
   /*
-   * فشل القراءة يُقال.
-   *
-   * كانت `try/finally` بلا `catch`: تسقط الشبكة فتظهر الشاشة **فارغةً** —
-   * «ما في التزامات» — وهي جملةٌ كاذبة تجعل صاحبها يظن أن بياناته ضاعت.
+   * فشل القراءة يُقال — لا شاشة «ما في التزامات» الكاذبة عند سقوط الشبكة.
+   * والمفتاح مفتاح قائمة الالتزامات نفسه: مشهدٌ واحد لا نسختان.
    */
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      setItems(await listObligations())
-    } catch (err) {
-      setError(failureText(err, t, t('obligations.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  const {
+    data: items = [],
+    isPending: loading,
+    error: loadError,
+  } = useQuery({ queryKey: ['obligations'], queryFn: listObligations })
+  const error = loadError ? failureText(loadError, t, t('obligations.loadFailed')) : null
 
   const cost = useMemo(
     () =>

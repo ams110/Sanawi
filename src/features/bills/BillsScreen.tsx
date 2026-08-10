@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/features/auth/AuthProvider'
-import { useRefresh } from '@/lib/refresh'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { useAmount } from '@/features/record/amount'
@@ -56,50 +56,51 @@ import type {
 export function BillsScreen() {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { token: refreshToken, setBusy } = useRefresh()
 
   const [month, setMonth] = useState(() => monthKey())
-  const [rows, setRows] = useState<BillRow[]>([])
-  const [details, setDetails] = useState<CommitmentDetail[]>([])
-  const [partners, setPartners] = useState<ObligationPartner[]>([])
-  const [shares, setShares] = useState<CommitmentPartnerShare[]>([])
-  const [methods, setMethods] = useState<PaymentMethod[]>([])
-  const [obligations, setObligations] = useState<ObligationWithCalc[]>([])
-  const [accounts, setAccounts] = useState<Account[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const client = useQueryClient()
 
-  const load = useCallback(async () => {
-    try {
-      setError(null)
-      const [b, d, p, s, m, o, a] = await Promise.all([
-        listBills(month),
-        listCommitmentDetails(),
-        listPartners(),
-        listCommitmentShares(),
-        listPaymentMethods(),
-        // فشل جلب الالتزامات لا يُسقط الفواتير الشهرية معه — القائمتان جارتان لا توأمان.
-        listObligations().catch(() => [] as ObligationWithCalc[]),
-        listAccounts().catch(() => [] as Account[]),
-      ])
-      setRows(b)
-      setDetails(d)
-      setPartners(p)
-      setShares(s)
-      setMethods(m)
-      setObligations(o)
-      setAccounts(a)
-    } catch (err) {
-      setError(failureText(err, t, t('bills.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [month, t, refreshToken, setBusy])
+  const {
+    data: screen,
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['bills', month],
+    queryFn: async () => {
+      const [rows, details, partners, shares, methods, obligations, accounts] =
+        await Promise.all([
+          listBills(month),
+          listCommitmentDetails(),
+          listPartners(),
+          listCommitmentShares(),
+          listPaymentMethods(),
+          // فشل جلب الالتزامات لا يُسقط الفواتير الشهرية معه — القائمتان جارتان لا توأمان.
+          listObligations().catch(() => [] as ObligationWithCalc[]),
+          listAccounts().catch(() => [] as Account[]),
+        ])
+      return { rows, details, partners, shares, methods, obligations, accounts }
+    },
+  })
+  // مرجعٌ مستقر للفراغ: بدائل تُخلق كل رسمةٍ تُفسد اعتماديات كل useMemo تحتها.
+  const { rows, details, partners, shares, methods, obligations, accounts } = useMemo(
+    () =>
+      screen ?? {
+        rows: [] as BillRow[],
+        details: [] as CommitmentDetail[],
+        partners: [] as ObligationPartner[],
+        shares: [] as CommitmentPartnerShare[],
+        methods: [] as PaymentMethod[],
+        obligations: [] as ObligationWithCalc[],
+        accounts: [] as Account[],
+      },
+    [screen],
+  )
+  const error = loadError ? failureText(loadError, t, t('bills.loadFailed')) : null
 
-  useEffect(() => {
-    void load()
-  }, [load])
+  // الفاتورة والدفعة تغيّران لوحة الشهر والشركاء معاً — الإبطال عامٌّ.
+  const load = async () => {
+    await client.invalidateQueries()
+  }
 
   // الاستحقاق يُقاس بالشهر المعروض لا باليوم: من يتصفّح شهراً ماضياً يسأل عمّا
   // كان مستحقّاً فيه، وقسطٌ انتهى بعده لم يكن منتهياً حينها.

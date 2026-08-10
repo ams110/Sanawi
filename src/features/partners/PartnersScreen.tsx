@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { useRefresh } from '@/lib/refresh'
 import { viewCommitment } from '@/lib/commitments/calc'
 import {
   summarizePartners,
@@ -22,14 +22,13 @@ import { listFixedCommitments } from '@/features/money/api'
  */
 export function PartnersScreen() {
   const { t } = useTranslation()
-  const { token: refreshToken, setBusy } = useRefresh()
-  const [summaries, setSummaries] = useState<PartnerSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      setError(null)
+  const {
+    data: summaries = [],
+    isPending: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: ['partners-center'],
+    queryFn: async (): Promise<PartnerSummary[]> => {
       const [partners, settlements, obligationNames, commitments, shares] = await Promise.all([
         listPartners(),
         listAllSettlements(),
@@ -42,52 +41,42 @@ export function PartnersScreen() {
       const commitmentById = new Map(commitments.map((c) => [c.id, c]))
       const today = new Date()
 
-      setSummaries(
-        summarizePartners(
-          partners.map((p) => ({ id: p.id, name: p.name })),
-          settlements.map((s) => ({
-            partnerId: s.partner_id,
-            obligationId: s.obligation_id,
-            obligationName: nameById.get(s.obligation_id) ?? null,
-            owed: Number(s.owed),
-            deposited: Number(s.deposited),
-          })),
-          shares.flatMap((share) => {
-            const commitment = commitmentById.get(share.commitment_id)
-            if (!commitment) return []
-            // البند الذي لم تبدأ دفعاته أو انتهت لا يحمل أحدٌ منه شيئاً هذا الشهر.
-            const view = viewCommitment(
-              {
-                amount: Number(commitment.amount),
-                startsOn: commitment.starts_on,
-                endsOn: commitment.ends_on,
-                mySharePercent: Number(commitment.my_share_percent ?? 100),
-              },
-              today,
-            )
-            if (!view.hasStarted || view.isFinished) return []
-            return [
-              {
-                partnerId: share.partner_id,
-                commitmentId: share.commitment_id,
-                commitmentName: commitment.name,
-                monthlyAmount: (Number(commitment.amount) * Number(share.share_percent)) / 100,
-              },
-            ]
-          }),
-        ),
+      return summarizePartners(
+        partners.map((p) => ({ id: p.id, name: p.name })),
+        settlements.map((s) => ({
+          partnerId: s.partner_id,
+          obligationId: s.obligation_id,
+          obligationName: nameById.get(s.obligation_id) ?? null,
+          owed: Number(s.owed),
+          deposited: Number(s.deposited),
+        })),
+        shares.flatMap((share) => {
+          const commitment = commitmentById.get(share.commitment_id)
+          if (!commitment) return []
+          // البند الذي لم تبدأ دفعاته أو انتهت لا يحمل أحدٌ منه شيئاً هذا الشهر.
+          const view = viewCommitment(
+            {
+              amount: Number(commitment.amount),
+              startsOn: commitment.starts_on,
+              endsOn: commitment.ends_on,
+              mySharePercent: Number(commitment.my_share_percent ?? 100),
+            },
+            today,
+          )
+          if (!view.hasStarted || view.isFinished) return []
+          return [
+            {
+              partnerId: share.partner_id,
+              commitmentId: share.commitment_id,
+              commitmentName: commitment.name,
+              monthlyAmount: (Number(commitment.amount) * Number(share.share_percent)) / 100,
+            },
+          ]
+        }),
       )
-    } catch (err) {
-      setError(failureText(err, t, t('partners.loadFailed')))
-    } finally {
-      setLoading(false)
-      setBusy(false)
-    }
-  }, [t, refreshToken, setBusy])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+    },
+  })
+  const error = loadError ? failureText(loadError, t, t('partners.loadFailed')) : null
 
   const total = useMemo(() => totalOutstanding(summaries), [summaries])
 
