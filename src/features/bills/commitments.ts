@@ -72,6 +72,8 @@ export async function addCommitment(
     mySharePercent: number
     dayOfMonth: number | null
     defaultMethodId: string | null
+    /** فائدة الدين السنوية — يقرأها ترتيب السداد. */
+    annualInterestPercent?: number
   },
 ): Promise<string> {
   const { data, error } = await supabase
@@ -87,6 +89,7 @@ export async function addCommitment(
       my_share_percent: input.mySharePercent,
       day_of_month: input.dayOfMonth,
       default_method_id: input.defaultMethodId,
+      annual_interest_percent: input.annualInterestPercent ?? 0,
     })
     .select('id')
     .single()
@@ -111,6 +114,8 @@ export async function updateCommitment(
     startsOn?: string | null
     endsOn?: string | null
     totalAmount?: number | null
+    /** فائدة الدين السنوية — يقرأها ترتيب السداد (الانهيار يبدأ بالأغلى). */
+    annualInterestPercent?: number
   },
 ): Promise<void> {
   const row: Partial<FixedCommitment> = {}
@@ -122,6 +127,8 @@ export async function updateCommitment(
   if (patch.startsOn !== undefined) row.starts_on = patch.startsOn
   if (patch.endsOn !== undefined) row.ends_on = patch.endsOn
   if (patch.totalAmount !== undefined) row.total_amount = patch.totalAmount
+  if (patch.annualInterestPercent !== undefined)
+    row.annual_interest_percent = patch.annualInterestPercent
 
   if (Object.keys(row).length === 0) return
   const { error } = await supabase.from('fixed_commitments').update(row).eq('id', id)

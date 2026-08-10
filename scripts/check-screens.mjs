@@ -85,9 +85,22 @@ function seed(db, userId) {
     created_at: new Date().toISOString(),
   })
 
+  /*
+   * مجموعة وملاحظات — الحقلان اليتيمان: يكتبهما كلود، وبهما يُفحص أن
+   * التطبيق صار يعرضهما لا يبتلعهما.
+   */
+  db.obligation_groups.push({
+    id: 'g1',
+    user_id: userId,
+    name: 'العيلة',
+    icon: '👨‍👩‍👦',
+    color: null,
+    created_at: new Date().toISOString(),
+  })
+
   const obligations = [
     // حصّتي 50٪ — النصف الآخر على الشريك المزروع تحت، وبه يُفحص مركز الشركاء.
-    { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500, share: 50 },
+    { id: 'o1', name: 'تأمين السيارة', total: 6000, due: `${year + 1}-01-15`, baseline: 500, share: 50, group: 'g1', notes: 'رقم البوليصة 12345' },
     { id: 'o2', name: 'טסט (فحص سنوي)', total: 1200, due: `${year + 1}-03-01`, baseline: 100 },
     /*
      * التزامٌ فات موعده بيومين — به تُفحص قائمة الفواتير الموحّدة: دفعته
@@ -105,7 +118,7 @@ function seed(db, userId) {
     db.obligations.push({
       id: o.id,
       user_id: userId,
-      group_id: null,
+      group_id: o.group ?? null,
       account_id: null,
       name: o.name,
       category: 'car',
@@ -116,7 +129,7 @@ function seed(db, userId) {
       baseline_installment: o.baseline,
       my_share_percent: o.share ?? 100,
       is_active: true,
-      notes: null,
+      notes: o.notes ?? null,
       created_at: new Date().toISOString(),
     })
   }
@@ -167,7 +180,7 @@ function seed(db, userId) {
     account_id: null,
     amount: 500,
     deposit_date: iso(new Date(today.getFullYear(), today.getMonth(), 2)),
-    note: null,
+    note: 'دفعة أولى',
     created_at: new Date(Date.now() - 86_400_000).toISOString(),
   })
 
@@ -180,7 +193,7 @@ function seed(db, userId) {
     name: null,
     amount: 11000,
     received_at: iso(new Date(today.getFullYear(), today.getMonth() - 1, 20)),
-    note: null,
+    note: 'شيك آخر الشهر',
     created_at: new Date().toISOString(),
   })
 
@@ -303,6 +316,12 @@ try {
   const historyText = (await historyCard.innerText().catch(() => '')).replace(/\n/g, ' · ')
   step('وقبضة الشهر الماضي فيه لا ضائعة', /11,000/.test(historyText), historyText.slice(0, 140))
 
+  // ملاحظة القبضة — كانت تُحفظ ولا تُعرض. تظهر عند تصفّح شهرها.
+  await page.getByRole('button', { name: '◀' }).first().click()
+  await page.waitForTimeout(800)
+  const lastMonthList = await page.locator('body').innerText()
+  step('وملاحظة القبضة ظاهرة في شهرها', lastMonthList.includes('شيك آخر الشهر'))
+
   /*
    * قائمة الفواتير الموحّدة: دفعة الالتزام التي حلّ موعدها تظهر مع فواتير
    * الشهر، مرتّبةً بالاستعجال نفسه، ومعها جاهزية صندوقها وزرُّ دفعها.
@@ -387,6 +406,15 @@ try {
   /* الزرّ العائم: موجود على كل تبويب، ولا يغطّي محتوى الصفحة. */
   await page.goto(`${BASE}/obligations/o1`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1500)
+
+  /*
+   * الحقول اليتيمة صارت مرئية: الملاحظات والمجموعة وملاحظة الحركة —
+   * يكتبها كلود وكان التطبيق يبتلعها.
+   */
+  const detailBody = await page.locator('body').innerText()
+  step('ملاحظات الالتزام ظاهرة في التفاصيل', detailBody.includes('رقم البوليصة 12345'))
+  step('ومجموعته ظاهرة', detailBody.includes('العيلة'))
+  step('وملاحظة الإيداع ظاهرة في الحركات', detailBody.includes('دفعة أولى'))
 
   const fab = page.getByRole('button', { name: 'ضيف إشي' })
   step('الزرّ العائم ظاهر', await fab.isVisible())

@@ -3,6 +3,7 @@ import { toDateKey } from '@/lib/date'
 import type {
   Obligation,
   ObligationBalance,
+  ObligationGroup,
   ObligationTemplate,
   FundDeposit,
 } from '@/lib/db/types'
@@ -253,6 +254,22 @@ export async function listMonthDeposits(month: string): Promise<FundDeposit[]> {
 export async function deleteDeposit(id: string): Promise<void> {
   const { error } = await supabase.from('fund_deposits').delete().eq('id', id)
   if (error) throw error
+}
+
+/**
+ * مجموعات الالتزامات — السيارة، العيلة، شخصي.
+ *
+ * كانت حقلاً يتيماً: يكتبها كلود وتُحسب تكلفتها من الخادم، والتطبيق لا
+ * يعرضها ولا يعدّلها — فمن ضمّ التزاماته إلى مجموعاتٍ من المحادثة لا يرى
+ * لذلك أثراً على شاشته.
+ */
+export async function listGroups(): Promise<ObligationGroup[]> {
+  const { data, error } = await supabase
+    .from('obligation_groups')
+    .select('*')
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as ObligationGroup[]
 }
 
 export async function listTemplates(country = 'IL'): Promise<ObligationTemplate[]> {

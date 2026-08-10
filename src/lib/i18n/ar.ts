@@ -476,6 +476,11 @@ export const ar = {
     addFailed: 'ما قدرنا نضيف البند',
     templatesFailed: 'ما قدرنا نجيب الجاهز',
 
+    /* الفائدة السنوية للدين — كانت حقلاً يتيماً يقرأه ترتيب السداد وحده. */
+    interestLabel: 'فايدة الدين السنوية %',
+    interestHint: 'صفر إذا بلا فايدة',
+    interestChip: 'فايدة {{percent}}%',
+
     paymentsLeft: 'بقي {{count}} دفعة',
     lastPayment: 'آخر دفعة 🎉',
     remainingForMe: 'باقي عليك {{amount}}',
@@ -684,6 +689,10 @@ export const ar = {
     previewLabel: 'قسطك الشهري',
     name: 'الاسم',
     namePlaceholder: 'تأمين السيارة',
+    /* المجموعة والملاحظات — كانا حقلين يتيمين يكتبهما كلود ولا يعرضهما التطبيق. */
+    group: 'المجموعة',
+    notes: 'ملاحظات',
+    notesPlaceholder: 'رقم البوليصة، اسم الوكيل، أي إشي بدك تتذكره',
     amount: 'المبلغ الكامل',
     dueDate: 'الموعد الجاي',
     recurrence: 'بيتكرر',

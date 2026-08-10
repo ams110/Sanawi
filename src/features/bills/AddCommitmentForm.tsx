@@ -34,6 +34,7 @@ export function AddCommitmentForm({
   const [name, setName] = useState('')
   const amount = useAmount()
   const [isInstallment, setIsInstallment] = useState(false)
+  const [interest, setInterest] = useState('')
   const [startsOn, setStartsOn] = useState('')
   const [endsOn, setEndsOn] = useState('')
   const totalAmount = useAmount()
@@ -82,6 +83,10 @@ export function AddCommitmentForm({
         mySharePercent: 100,
         dayOfMonth,
         defaultMethodId: methodId,
+        // تُقصّ إلى [0..100]: فائدةٌ سالبة أو بثلاثة أرقام غلطة إدخال.
+        annualInterestPercent: isInstallment
+          ? Math.min(100, Math.max(0, Number(interest) || 0))
+          : 0,
       })
       setPicked(null)
       setName('')
@@ -90,6 +95,7 @@ export function AddCommitmentForm({
       setStartsOn('')
       setEndsOn('')
       totalAmount.reset()
+      setInterest('')
       setDayOfMonth(null)
       setMethodId(null)
       setOpen(false)
@@ -266,6 +272,18 @@ export function AddCommitmentForm({
           <input
             {...totalAmount.props}
             placeholder={t('bills.totalAmount')}
+            className={`num ${inputClass}`}
+          />
+          {/* الفائدة كانت حقلاً يتيماً يقرأه ترتيب السداد ولا يكتبه التطبيق. */}
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={100}
+            step="0.1"
+            value={interest}
+            onChange={(e) => setInterest(e.target.value)}
+            placeholder={t('bills.interestLabel')}
             className={`num ${inputClass}`}
           />
         </div>

@@ -14,12 +14,13 @@ import { PaymentDialog } from './PaymentDialog'
 import { summarizeDeposits, type DepositView } from '@/lib/obligations/deposits'
 import { DepositField, DepositResult, type DepositDone } from '@/features/record/DepositField'
 import { failureText } from '@/lib/i18n/failure'
-import type { FundDeposit } from '@/lib/db/types'
+import type { FundDeposit, ObligationGroup } from '@/lib/db/types'
 import {
   archiveObligation,
   deleteDeposit,
   getObligation,
   listDeposits,
+  listGroups,
   markPaid,
   track,
   type ObligationWithCalc,
@@ -36,6 +37,7 @@ export function ObligationDetail() {
   const [settlements, setSettlements] = useState<PartnerSettlement[]>([])
   const [deposits, setDeposits] = useState<FundDeposit[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [groups, setGroups] = useState<ObligationGroup[]>([])
   /** فارغ = حساب الصندوق، وهو الافتراضي. */
   const [paidFrom, setPaidFrom] = useState<string | null>(null)
   const [payerId, setPayerId] = useState<string | null>(null)
@@ -51,17 +53,19 @@ export function ObligationDetail() {
   const load = useCallback(async () => {
     if (!id) return
     try {
-      const [found, shares, movements, accountRows] = await Promise.all([
+      const [found, shares, movements, accountRows, groupRows] = await Promise.all([
         getObligation(id),
         // فشل التسوية لا يمنع عرض الالتزام نفسه.
         listSettlements(id).catch(() => [] as PartnerSettlement[]),
         listDeposits(id).catch(() => [] as FundDeposit[]),
         listAccounts().catch(() => [] as Account[]),
+        listGroups().catch(() => [] as ObligationGroup[]),
       ])
       setItem(found)
       setSettlements(shares)
       setDeposits(movements)
       setAccounts(accountRows)
+      setGroups(groupRows)
     } catch (err) {
       setError(failureText(err, t, t('form.loadFailed')))
     } finally {
@@ -148,6 +152,9 @@ export function ObligationDetail() {
   }
 
   const { obligation, calc } = item
+  const group = obligation.group_id
+    ? (groups.find((g) => g.id === obligation.group_id) ?? null)
+    : null
   const myBalance = Number(item.balance?.my_fund_balance ?? 0)
   const fundBalance = Number(item.balance?.fund_balance ?? 0)
 
@@ -178,8 +185,24 @@ export function ObligationDetail() {
               {formatMonthsRemaining(calc.monthsRemaining, calc.isOverdue)} ·{' '}
               {formatDate(obligation.next_due_date)}
             </p>
+            {group && (
+              <span className="mt-1 inline-block rounded-full bg-surface-muted px-2.5 py-0.5 text-[11px] font-bold text-text-muted">
+                {group.icon && <span aria-hidden="true">{group.icon} </span>}
+                {group.name}
+              </span>
+            )}
           </div>
         </div>
+
+        {/*
+         * الملاحظات كانت حقلاً يتيماً: يكتبها كلود («رقم البوليصة كذا»)
+         * وتُحفظ، ولا شاشة تعرضها — فكأنها لم تُكتب.
+         */}
+        {obligation.notes && (
+          <p className="mt-3 whitespace-pre-wrap rounded-xl bg-surface-muted px-3 py-2.5 text-[13px] leading-relaxed text-text">
+            📝 {obligation.notes}
+          </p>
+        )}
 
         <dl className="mt-5 grid grid-cols-2 gap-3">
           <Stat label={t('detail.installment')} value={formatMoney(calc.monthlyInstallment)} accent />
@@ -346,6 +369,8 @@ function MovementRow({
           {partner ? ` · ${partner}` : ''}
         </p>
         <p className="num text-xs text-text-muted">{formatDate(entry.depositDate)}</p>
+        {/* الملاحظة كانت تُكتب («سحب عند الدفع») ولا تُعرض — سياق الحركة يضيع. */}
+        {entry.note && <p className="truncate text-xs text-text-muted">{entry.note}</p>}
       </div>
       <span className={`num text-sm font-bold ${withdrawal ? 'text-text-muted' : 'text-brand'}`}>
         {withdrawal ? '−' : '+'}
