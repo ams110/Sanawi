@@ -47,6 +47,49 @@ const iso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /**
+ * ‏PDF صالحٌ من سطور [تاريخ، وصف، مبلغ] — لفحص مسار الاستيراد كاملاً.
+ *
+ * الإزاحات في جدول xref تُحسب لا تُخمَّن: pdfjs قد يرمّم جدولاً مكسوراً
+ * وقد لا يفعل، وفحصٌ يعتمد على الترميم يفشل لسببٍ لا علاقة له بالمفحوص.
+ */
+function buildPdfStatement(rows) {
+  const content = rows
+    .map(([date, name, amount], i) => {
+      const y = 700 - i * 20
+      return [
+        `BT /F1 12 Tf 300 ${y} Td (${date}) Tj ET`,
+        `BT /F1 12 Tf 150 ${y} Td (${name}) Tj ET`,
+        `BT /F1 12 Tf 50 ${y} Td (${amount}) Tj ET`,
+      ].join('\n')
+    })
+    .join('\n')
+
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+
+  let pdf = '%PDF-1.4\n'
+  const offsets = []
+  objects.forEach((body, i) => {
+    offsets.push(pdf.length)
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`
+  })
+
+  const xrefStart = pdf.length
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const offset of offsets) {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`
+
+  return Buffer.from(pdf, 'latin1')
+}
+
+/**
  * حسابٌ يشبه حساب مستخدمٍ حقيقي.
  *
  * الفارغ يمرّ على كل شيء: شاشةٌ بلا صفوف لا تكشف تداخلاً ولا نصّاً مفقوداً.
@@ -472,6 +515,28 @@ try {
   const secondPass = await page.locator('body').innerText()
   step('ولصقُه ثانيةً لا يكتب مرتين', (secondPass.match(/موجودة/g) ?? []).length === 2, secondPass.slice(0, 160))
   step('والمختار صفر من تلقائه', secondPass.includes('مختار 0 من 2'))
+
+  /*
+   * كشف PDF حقيقي: يُولَّد ملفٌّ صالح هنا ويُرفع، فيمرّ بالأنبوب كاملاً —
+   * pdfjs يستخرج القطع، والمنطق النقي يعيد بناء الجدول، والقارئ يقرؤه.
+   */
+  await page.getByRole('button', { name: 'إلغاء' }).click()
+  await page.waitForTimeout(400)
+
+  const pdfLines = [
+    ['03/' + impMonth + '/' + impDate.getFullYear(), 'Market', '-77.70'],
+    ['04/' + impMonth + '/' + impDate.getFullYear(), 'Transfer In', '850'],
+  ]
+  const pdfPath = `${OUT}/bank-statement.pdf`
+  writeFileSync(pdfPath, buildPdfStatement(pdfLines))
+  await page.locator('input[type="file"]').setInputFiles(pdfPath)
+  await page.waitForTimeout(3000)
+
+  const pdfReview = await page.locator('body').innerText()
+  step('كشف الـPDF يُقرأ للمراجعة', pdfReview.includes('Market') && pdfReview.includes('مختار 2 من 2'), pdfReview.replace(/\n/g, ' · ').slice(0, 200))
+  step('واتجاها الـPDF مقروءان', /[−-]₪ 78/.test(pdfReview) && pdfReview.includes('850'))
+  await page.getByRole('button', { name: 'إلغاء' }).click()
+  await page.waitForTimeout(300)
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ
