@@ -296,7 +296,7 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast|subs|report)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast|subs|report|bank)\.[a-zA-Z]/
 
   // كل مقاطع المحاور الجديدة، لا الأبواب الخمسة وحدها.
   const TABS = [
@@ -304,6 +304,7 @@ try {
     { path: '/flow/expenses', name: 'expenses' },
     { path: '/flow/income', name: 'money' },
     { path: '/flow/bills', name: 'bills' },
+    { path: '/flow/import', name: 'bank-import' },
     { path: '/obligations', name: 'obligations' },
     { path: '/obligations/calendar', name: 'calendar' },
     { path: '/obligations/partners', name: 'partners' },
@@ -430,6 +431,47 @@ try {
   await page.waitForTimeout(1000)
   const prevReport = await page.locator('body').innerText()
   step('والشهر الماضي يروي قبضته', /11,000/.test(prevReport))
+
+  /*
+   * «سجّل من البنك» — المسار كاملاً: لصقُ كشفٍ عبري، قراءةٌ ومراجعة،
+   * تسجيلٌ، ثم لصقُ الكشف نفسه ثانيةً ليُعلَّم مكرَّراً لا ليُكتب مرتين.
+   */
+  await page.goto(`${BASE}/flow/import`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1000)
+
+  const impDate = new Date()
+  const impMonth = String(impDate.getMonth() + 1).padStart(2, '0')
+  const statement = [
+    'תאריך,תיאור,סכום',
+    `03/${impMonth}/${impDate.getFullYear()},סופר פארם,-89.90`,
+    `04/${impMonth}/${impDate.getFullYear()},העברה נכנסת,1200`,
+  ].join('\n')
+
+  await page.locator('textarea').fill(statement)
+  await page.getByRole('button', { name: 'اقرأ الكشف' }).click()
+  await page.waitForTimeout(1500)
+
+  const reviewBody = await page.locator('body').innerText()
+  // ‏89.90 تُعرض ₪ 90: التنسيق بالشيكل الكامل كبقية التطبيق — والمخزون بدقّته.
+  step(
+    'الكشف الملصوق يُقرأ للمراجعة',
+    reviewBody.includes('סופר פארם') && /[−-]₪ 90/.test(reviewBody),
+    reviewBody.replace(/\n/g, ' · ').slice(0, 200),
+  )
+  step('والاتجاهان مميّزان داخلاً وخارجاً', reviewBody.includes('1,200'))
+
+  await page.getByRole('button', { name: /سجّل 2 حركة/ }).click()
+  await page.waitForTimeout(2000)
+  const afterCommit = await page.locator('body').innerText()
+  step('التسجيل يقول ما سجّل', afterCommit.includes('انسجّلت'), afterCommit.slice(0, 120))
+
+  // الكشف نفسه ثانيةً: الحارس يعلّم الحركتين «موجودة» ويطفئهما.
+  await page.locator('textarea').fill(statement)
+  await page.getByRole('button', { name: 'اقرأ الكشف' }).click()
+  await page.waitForTimeout(1500)
+  const secondPass = await page.locator('body').innerText()
+  step('ولصقُه ثانيةً لا يكتب مرتين', (secondPass.match(/موجودة/g) ?? []).length === 2, secondPass.slice(0, 160))
+  step('والمختار صفر من تلقائه', secondPass.includes('مختار 0 من 2'))
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ

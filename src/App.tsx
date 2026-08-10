@@ -26,6 +26,7 @@ import { ReportsHub } from '@/features/reports/ReportsHub'
 import { ForecastScreen } from '@/features/reports/ForecastScreen'
 import { SubscriptionsScreen } from '@/features/reports/SubscriptionsScreen'
 import { MonthlyReportScreen } from '@/features/reports/MonthlyReportScreen'
+import { BankImportScreen } from '@/features/bank/BankImportScreen'
 import { SettingsScreen } from '@/features/settings/SettingsScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { UpdateBanner } from '@/features/update/UpdateBanner'
@@ -118,6 +119,7 @@ function Shell() {
             <Route path="expenses" element={<ExpensesScreen />} />
             <Route path="income" element={<MoneyScreen />} />
             <Route path="bills" element={<BillsScreen />} />
+            <Route path="import" element={<BankImportScreen />} />
           </Route>
 
           <Route path="/obligations" element={<ObligationsHub />}>

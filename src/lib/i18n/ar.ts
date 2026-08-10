@@ -170,6 +170,7 @@ export const ar = {
     forecast: 'التوقّع',
     subscriptions: 'اشتراكات',
     monthlyReport: 'التقرير',
+    bankImport: 'من البنك',
     overview: 'نظرة',
     accounts: 'حسابات',
     assets: 'أصول',
@@ -384,6 +385,25 @@ export const ar = {
     finishedTitle: 'خلّصت هالالتزام 🎉',
     close: 'تمام',
     failed: 'ما قدرنا نسجّل الدفعة',
+  },
+
+  bank: {
+    title: 'سجّل من البنك',
+    subtitle: 'كشف حسابك يصير مصاريف وقبضات — بلا ربط وبلا كلمة سر',
+    privacyNote:
+      'ولا معلومة دخول بنكية بتنحفظ ولا بتنطلب. بتنزّل الكشف من موقع بنكك أو بتنسخ الجدول، وبس.',
+    pasteLabel: 'الصق سطور الكشف',
+    pastePlaceholder: 'انسخ الجدول من موقع البنك أو من إكسل والصقه هون…',
+    parse: 'اقرأ الكشف',
+    or: 'أو',
+    pickFile: 'اختار ملف CSV',
+    nothingParsed: 'ما قدرنا نقرأ ولا حركة — تأكّد إنك ناسخ الجدول مع عمود التاريخ والمبلغ',
+    reviewCount: 'مختار {{selected}} من {{total}} حركة',
+    skipped: '{{count}} سطر ما انقرأ',
+    duplicate: 'موجودة',
+    commit: 'سجّل {{count}} حركة',
+    done: 'انسجّلت {{expenses}} مصاريف و{{incomes}} قبضات 👌',
+    saveFailed: 'ما قدرنا نسجّل الحركات — جرّب كمان مرة',
   },
 
   report: {
