@@ -256,6 +256,38 @@ export async function deleteDeposit(id: string): Promise<void> {
   if (error) throw error
 }
 
+/** دفعة التزامٍ وقعت — باسم التزامها، لتقرير الشهر. */
+export interface MonthObligationPayment {
+  amount_paid: number
+  paid_date: string
+  obligationName: string
+}
+
+export async function listMonthObligationPayments(
+  month: string,
+): Promise<MonthObligationPayment[]> {
+  const start = new Date(`${month}T00:00:00`)
+  const end = toDateKey(new Date(start.getFullYear(), start.getMonth() + 1, 0))
+
+  const { data, error } = await supabase
+    .from('obligation_payments')
+    .select('amount_paid, paid_date, obligations(name)')
+    .gte('paid_date', month)
+    .lte('paid_date', end)
+  if (error) throw error
+
+  return (data ?? []).map((row) => {
+    // العلاقة تعود كائناً أو مصفوفة حسب طريقة الاستنتاج — نتعامل مع الحالتين.
+    const rel = (row as { obligations?: { name?: string } | { name?: string }[] }).obligations
+    const name = Array.isArray(rel) ? (rel[0]?.name ?? '') : (rel?.name ?? '')
+    return {
+      amount_paid: Number(row.amount_paid),
+      paid_date: row.paid_date as string,
+      obligationName: name,
+    }
+  })
+}
+
 /**
  * مجموعات الالتزامات — السيارة، العيلة، شخصي.
  *

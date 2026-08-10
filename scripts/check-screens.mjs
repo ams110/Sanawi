@@ -296,7 +296,7 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast|subs)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast|subs|report)\.[a-zA-Z]/
 
   // كل مقاطع المحاور الجديدة، لا الأبواب الخمسة وحدها.
   const TABS = [
@@ -314,6 +314,7 @@ try {
     { path: '/reports', name: 'insights' },
     { path: '/reports/forecast', name: 'forecast' },
     { path: '/reports/subscriptions', name: 'subscriptions' },
+    { path: '/reports/monthly', name: 'monthly-report' },
     { path: '/settings', name: 'settings' },
   ]
 
@@ -411,6 +412,24 @@ try {
   const subsBody = await page.locator('body').innerText()
   step('الاشتراك يُقرأ بكلفته السنوية', /كهرباء[\s\S]*4,800/.test(subsBody))
   step('والقسط ذو النهاية ليس اشتراكاً', !subsBody.includes('قسط الثلاجة'))
+
+  /*
+   * التقرير الشهري: الشهر الحالي فيه مصروف البنزين، والشهر الماضي —
+   * بسهمٍ واحد — فيه قبضة الـ11,000. والصافي وزرّ CSV حاضران.
+   */
+  await page.goto(`${BASE}/reports/monthly`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const reportBody = await page.locator('body').innerText()
+  step('التقرير يعرض صافي الشهر', reportBody.includes('صافي حركة الشهر'))
+  step('ومصاريف الشهر فيه', /مصاريف[\s\S]*120/.test(reportBody))
+  // التصنيف القديم («car») يُترجم لا يُطبع خاماً.
+  step('والتصنيف القديم مترجمٌ لا خام', reportBody.includes('السيارة') && !/\bcar\b/.test(reportBody))
+  step('وزرّ التصدير حاضر', await page.getByRole('button', { name: /CSV/ }).isVisible())
+
+  await page.getByRole('button', { name: 'الشهر السابق' }).click()
+  await page.waitForTimeout(1000)
+  const prevReport = await page.locator('body').innerText()
+  step('والشهر الماضي يروي قبضته', /11,000/.test(prevReport))
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ

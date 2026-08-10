@@ -169,6 +169,7 @@ export const ar = {
     insights: 'التحليل',
     forecast: 'التوقّع',
     subscriptions: 'اشتراكات',
+    monthlyReport: 'التقرير',
     overview: 'نظرة',
     accounts: 'حسابات',
     assets: 'أصول',
@@ -383,6 +384,27 @@ export const ar = {
     finishedTitle: 'خلّصت هالالتزام 🎉',
     close: 'تمام',
     failed: 'ما قدرنا نسجّل الدفعة',
+  },
+
+  report: {
+    title: 'التقرير الشهري',
+    subtitle: 'الشهر كامل بصفحة — وورقة بتطلع معك',
+    netLabel: 'صافي حركة الشهر',
+    netDetail: 'وصل {{income}} وطلع من إيدك {{out}}',
+    incomeSection: 'الدخل الواصل',
+    expenseSection: 'المصاريف',
+    billsSection: 'الفواتير والصناديق',
+    billsPaid: 'دفعت {{count}} فاتورة',
+    billsOutstanding: 'وباقي {{count}} مسجّلة بلا دفع',
+    deposited: 'حطّيت بصناديقك',
+    obligationsPaid: 'دفعت {{count}} التزام كبير',
+    obligationsNote:
+      'برّا الصافي عمداً: مصاريها طلعت من جيبك شهر بشهر عبر الإيداعات — عدّها هون بيعدّها مرتين.',
+    downloadCsv: 'نزّل CSV',
+    unnamedIncome: 'بلا مصدر',
+    unnamedCategory: 'غير مصنّف',
+    nothing: 'ولا إشي مسجّل',
+    loadFailed: 'ما قدرنا نبني التقرير',
   },
 
   subs: {
