@@ -21,6 +21,7 @@ import { PlansScreen } from '@/features/wealth/PlansScreen'
 import { AccountsScreen } from '@/features/accounts/AccountsScreen'
 import { FlowHub } from '@/features/flow/FlowHub'
 import { ObligationsHub } from '@/features/obligations/ObligationsHub'
+import { PartnersScreen } from '@/features/partners/PartnersScreen'
 import { SettingsScreen } from '@/features/settings/SettingsScreen'
 import { QuickAdd } from '@/features/quickadd/QuickAdd'
 import { UpdateBanner } from '@/features/update/UpdateBanner'
@@ -118,6 +119,7 @@ function Shell() {
           <Route path="/obligations" element={<ObligationsHub />}>
             <Route index element={<ObligationsScreen />} />
             <Route path="calendar" element={<CalendarScreen />} />
+            <Route path="partners" element={<PartnersScreen />} />
           </Route>
           {/* صفحات التفاصيل خارج المحور: ملء شاشةٍ بزرّ رجوع، لا شريط مقاطع فوقها. */}
           <Route path="/obligations/new" element={<ObligationForm />} />
@@ -247,10 +249,11 @@ function Header() {
    *
    * المحاور ومقاطعها كلها «أعلى التطبيق» فتحمل اسمه؛ ما يحتاج رجوعاً
    * هو صفحات ملء الشاشة: تفاصيل الالتزام إلى قائمته، والإعدادات إلى
-   * لوحة الشهر. والتقويم غرفةٌ في محور الالتزامات لا صفحة تفاصيل.
+   * لوحة الشهر. والتقويم والشركاء غرفتان في محور الالتزامات لا تفاصيل.
    */
+  const OBLIGATION_HUB_TABS = ['/obligations/calendar', '/obligations/partners']
   const obligationDeep =
-    pathname.startsWith('/obligations/') && pathname !== '/obligations/calendar'
+    pathname.startsWith('/obligations/') && !OBLIGATION_HUB_TABS.includes(pathname)
 
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">

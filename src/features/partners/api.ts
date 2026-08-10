@@ -38,6 +38,25 @@ export async function listShares(obligationId: string): Promise<PartnerShareDraf
   })
 }
 
+/**
+ * تسويات كل الالتزامات دفعةً واحدة — لمركز الشركاء.
+ *
+ * النسخة المرشّحة بالتزامٍ تخدم صفحة تفاصيله؛ والمركز يسأل السؤال المعكوس:
+ * «هذا الشريك، عبر كل شيء، كم عليه؟» — فيجلب المشهد كاملاً ويجمع محلياً.
+ */
+export async function listAllSettlements(): Promise<PartnerSettlement[]> {
+  const { data, error } = await supabase.from('partner_settlements').select('*')
+  if (error) throw error
+  return (data ?? []) as PartnerSettlement[]
+}
+
+/** أسماء الالتزامات كلها — حتى المؤرشف: تسويته الباقية دَينٌ لم يُقبض. */
+export async function listObligationNames(): Promise<{ id: string; name: string }[]> {
+  const { data, error } = await supabase.from('obligations').select('id,name')
+  if (error) throw error
+  return (data ?? []) as { id: string; name: string }[]
+}
+
 export async function listSettlements(obligationId: string): Promise<PartnerSettlement[]> {
   const { data, error } = await supabase
     .from('partner_settlements')
