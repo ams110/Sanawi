@@ -85,6 +85,26 @@ function seed(db, userId) {
     created_at: new Date().toISOString(),
   })
 
+  // قسطٌ له نهاية: به يُفحص أن شاشة الاشتراكات لا تعدّه اشتراكاً دائماً.
+  // بلا موعدٍ عمداً: موعدٌ ثابت يقلب ترتيب قائمة الفواتير حسب يوم إجراء الفحص.
+  db.fixed_commitments.push({
+    id: 'f2',
+    user_id: userId,
+    name: 'قسط الثلاجة',
+    amount: 250,
+    day_of_month: null,
+    default_method_id: null,
+    icon: null,
+    starts_on: null,
+    ends_on: iso(new Date(year + 1, 5, 5)),
+    total_amount: 3000,
+    annual_interest_percent: 0,
+    my_share_percent: 100,
+    account_id: null,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  })
+
   /*
    * مجموعة وملاحظات — الحقلان اليتيمان: يكتبهما كلود، وبهما يُفحص أن
    * التطبيق صار يعرضهما لا يبتلعهما.
@@ -276,7 +296,7 @@ try {
    * ‏i18next يعيد المفتاح حين لا يجد نصّاً، فيظهر «detail.undo» في الشاشة —
    * وهو عطلٌ لا يكسر شيئاً ولا يلتقطه بناءٌ ولا اختبار وحدة.
    */
-  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast)\.[a-zA-Z]/
+  const RAW_KEY = /\b(month|detail|quickAdd|expenses|bills|money|wealth|nav|common|payment|settings|backup|update|accounts|panel|hub|flow|reports|partners|forecast|subs)\.[a-zA-Z]/
 
   // كل مقاطع المحاور الجديدة، لا الأبواب الخمسة وحدها.
   const TABS = [
@@ -293,6 +313,7 @@ try {
     { path: '/wealth/plans', name: 'wealth-plans' },
     { path: '/reports', name: 'insights' },
     { path: '/reports/forecast', name: 'forecast' },
+    { path: '/reports/subscriptions', name: 'subscriptions' },
     { path: '/settings', name: 'settings' },
   ]
 
@@ -380,6 +401,16 @@ try {
   // التزامٌ موعدُه هذا الشهر: دفعتُه لا تُعدّ دفعةً وقسطاً معاً — نفس المال مرتين.
   const gymCount = (forecastBody.match(/اشتراك الصالة/g) ?? []).length
   step('ودفعة الشهر لا تُحسب مرتين (دفعة + قسط)', gymCount === 1, `ظهرت ${gymCount} مرة`)
+
+  /*
+   * الاشتراكات: المتكرّر الدائم بعدسته السنوية — كهرباء 400 شهرياً تُقرأ
+   * 4,800 سنوياً، والقسط ذو النهاية لا يتسلّل إلى القائمة.
+   */
+  await page.goto(`${BASE}/reports/subscriptions`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1200)
+  const subsBody = await page.locator('body').innerText()
+  step('الاشتراك يُقرأ بكلفته السنوية', /كهرباء[\s\S]*4,800/.test(subsBody))
+  step('والقسط ذو النهاية ليس اشتراكاً', !subsBody.includes('قسط الثلاجة'))
 
   /*
    * المسارات القديمة تعيش في متصفحات المستخدمين — إعادة التوجيه عهدٌ
