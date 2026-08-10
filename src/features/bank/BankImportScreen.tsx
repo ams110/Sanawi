@@ -85,7 +85,17 @@ export function BankImportScreen() {
   const onFile = async (file: File | undefined) => {
     if (!file) return
     setText('')
-    await parse(await file.text())
+    try {
+      if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+        // ‏pdfjs تُحمَّل كسولاً هنا وحدها — من لا يرفع PDF لا يدفع ثمنها.
+        const { extractPdfText } = await import('./pdf')
+        await parse(await extractPdfText(await file.arrayBuffer()))
+      } else {
+        await parse(await file.text())
+      }
+    } catch {
+      setError(t('bank.fileFailed'))
+    }
   }
 
   const selectedCount = checked.size
@@ -196,13 +206,14 @@ export function BankImportScreen() {
           <input
             ref={fileRef}
             type="file"
-            accept=".csv,.txt,.tsv"
+            accept=".csv,.txt,.tsv,.pdf"
             className="hidden"
             onChange={(e) => void onFile(e.target.files?.[0])}
           />
           <Button variant="secondary" className="w-full" onClick={() => fileRef.current?.click()}>
             📄 {t('bank.pickFile')}
           </Button>
+          <p className="text-center text-[11px] text-text-muted">{t('bank.pdfHint')}</p>
         </section>
       )}
 
