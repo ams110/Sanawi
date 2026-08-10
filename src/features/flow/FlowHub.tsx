@@ -10,6 +10,7 @@ const TABS = [
   { to: '/flow/expenses', labelKey: 'hub.expenses' },
   { to: '/flow/income', labelKey: 'hub.income' },
   { to: '/flow/bills', labelKey: 'hub.bills' },
+  { to: '/flow/import', labelKey: 'hub.bankImport' },
 ] as const
 
 export function FlowHub() {
