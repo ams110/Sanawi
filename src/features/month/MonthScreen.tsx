@@ -14,11 +14,14 @@ import { listFixedCommitments, listIncomes } from '@/features/money/api'
 import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
+import { listAccounts } from '@/features/accounts/api'
+import { summarizeAccounts } from '@/lib/accounts/calc'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
 import { monthlyIncomeFrom } from '@/lib/budget/calc'
 import type { MonthPanelInput } from '@/lib/budget/month'
 import { MonthPanel } from './MonthPanel'
+import { FundsPanel, type FundRowView, type FundsAccountView } from './FundsPanel'
 import { useProfile } from '@/features/profile/ProfileProvider'
 import { Button } from '@/components/ui/Button'
 import { useNavigate } from 'react-router-dom'
@@ -44,7 +47,7 @@ export function MonthScreen() {
     queryKey: ['month', monthKey()],
     queryFn: async () => {
       const month = monthKey()
-      const [obligations, incomes, fixed, details, expenses, entries, deposits, bills] =
+      const [obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts] =
         await Promise.all([
           listObligations(),
           listIncomes(),
@@ -54,8 +57,12 @@ export function MonthScreen() {
           listIncomeEntries(month),
           listMonthDeposits(month),
           listBills(month),
+          // المؤرشفة أيضاً: صندوقٌ مربوط بحسابٍ أُرشف يبقى اسمُ حسابه
+          // مقروءاً، وإخفاؤه يجعله يبدو «بلا حساب» وهو مربوط — نفس القاعدة
+          // الموثَّقة في mcp/data.ts.
+          listAccounts(true),
         ])
-      return { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills }
+      return { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts }
     },
   })
   const error = loadError ? failureText(loadError, t, t('money.loadFailed')) : null
@@ -68,7 +75,8 @@ export function MonthScreen() {
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
   const derived = useMemo(() => {
     if (!raw) return null
-    const { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills } = raw
+    const { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts } =
+      raw
 
     /*
      * «ضلّ عليك» — الشاشة تبدأ الكلام.
@@ -191,7 +199,56 @@ export function MonthScreen() {
       daysInMonth: spending.daysInMonth,
     }
 
-    return { pending, summary, panel, hasIncome: incomes.length > 0 }
+    /*
+     * الصناديق بعلامة بنكها — نفس تجميع `loadAccountsPicture` لكن على ما
+     * جلبته هذه الشاشة أصلاً: الالتزامات محمَّلة فلا تُجلب ثانيةً لأجل
+     * المظاريف. والصندوق الفارغ يسقط (صفرٌ لا يخصّص شيئاً)، وغير المربوط
+     * يبقى بعلامة خطر لا يُخفى.
+     */
+    const accountNames = new Map(accounts.map((account) => [account.id, account.name]))
+    const envelopesByAccount = new Map<
+      string,
+      { name: string; balance: number; obligationId: string }[]
+    >()
+    const funds: FundRowView[] = []
+    for (const item of obligations) {
+      const balance = Number(item.balance?.my_fund_balance ?? 0)
+      if (balance === 0) continue
+
+      const accountId = item.obligation.account_id
+      funds.push({
+        obligationId: item.obligation.id,
+        name: item.obligation.name,
+        balance,
+        accountName: accountId ? (accountNames.get(accountId) ?? null) : null,
+      })
+      if (!accountId) continue
+      const list = envelopesByAccount.get(accountId) ?? []
+      list.push({ name: item.obligation.name, balance, obligationId: item.obligation.id })
+      envelopesByAccount.set(accountId, list)
+    }
+    // الأكبر أولاً — كما ترتّب المظاريف نفسها في محرّك الحسابات.
+    funds.sort((a, b) => b.balance - a.balance)
+
+    // «غير المخصّص» للحسابات الحيّة وحدها — المؤرشف خارج اللوحات كلها.
+    const fundsAccounts: FundsAccountView[] = summarizeAccounts(
+      accounts
+        .filter((account) => !account.archived_at)
+        .map((account) => ({
+        id: account.id,
+        name: account.name,
+        kind: account.kind,
+        balance: Number(account.balance),
+        balanceUpdatedAt: account.balance_updated_at,
+        envelopes: envelopesByAccount.get(account.id) ?? [],
+      })),
+    ).accounts.map((account) => ({
+      name: account.name,
+      available: account.available,
+      shortfall: account.shortfall,
+    }))
+
+    return { pending, summary, panel, hasIncome: incomes.length > 0, funds, fundsAccounts }
   }, [raw, savingsTarget])
 
   const summary = derived?.summary ?? null
@@ -287,6 +344,13 @@ export function MonthScreen() {
           </Link>
         </section>
       )}
+
+      {/*
+       * الصناديق قبل مدخل الحسابات: من قرأ «بيضل معك» يسأل بعدها مباشرةً
+       * «وين المصاري الملتزَم فيها؟» — وكل صندوقٍ هنا برصيده وعلامة بنكه،
+       * وتحتها «غير المخصّص» لكل حساب لأن سالبه لا يُرى من صندوقٍ واحد.
+       */}
+      {derived && <FundsPanel funds={derived.funds} accounts={derived.fundsAccounts} />}
 
       {/*
        * التفصيل حُذف من هنا.

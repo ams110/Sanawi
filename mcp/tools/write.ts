@@ -17,6 +17,7 @@ import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
 import { viewAccount } from '../../src/lib/accounts/calc.js'
 import { summarizeDeposits } from '../../src/lib/obligations/deposits.js'
+import { adviseOnIncome, type IncomeAdviceItem } from '../../src/lib/month/advice.js'
 import type {
   Account,
   AccountSettlement,
@@ -38,8 +39,10 @@ import {
   findIncomeSource,
   findObligation,
   loadAccounts,
+  loadAccountsPicture,
   loadDeposits,
   loadIncomeEntries,
+  loadMonth,
   loadObligations,
   loadOpenSettlements,
   monthKey,
@@ -1824,7 +1827,9 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
   - received_at (YYYY-MM-DD): يوم الاستلام، افتراضياً اليوم
   - note (string): ملاحظة
 
-المخرجات: id و amount و received_at و source_name، مع مجموع ما وصل هذا الشهر.`,
+المخرجات: id و amount و received_at و source_name، مع مجموع ما وصل هذا الشهر،
+و advice: نصائح مرتّبةً على حالة اللحظة — عجزٌ يُسدّ أولاً، ثم أقساط الشهر التي
+بلا إيداع، ثم رصيدٌ قديم، ثم تحذير الإسقاط وفجوة الدخل. اعرضها للمستخدم كما هي.`,
       inputSchema: {
         amount: z.number().positive().describe('المبلغ الذي وصل'),
         source: z.string().max(80).optional().describe('اسم المصدر كما ينطقه المستخدم'),
@@ -1838,6 +1843,23 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
         received_at: z.string(),
         source_name: z.string().nullable(),
         month_total: z.number(),
+        advice: z.array(
+          z.object({
+            kind: z.enum([
+              'cover_shortfall',
+              'fund_installments',
+              'stale_balance',
+              'projection_negative',
+              'income_gap',
+              'all_clear',
+            ]),
+            text: z.string(),
+            /** المبلغ حين تكون النصيحة عن مال، وإلا فارغ. */
+            amount: z.number().nullable(),
+            account_name: z.string().nullable(),
+            items: z.array(z.object({ name: z.string(), amount: z.number() })).nullable(),
+          }),
+        ),
       },
       annotations: WRITES,
     },
@@ -1907,11 +1929,81 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       const total = Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
       const currency = connection.currency
 
+      /*
+       * النصيحة من حالة اللحظة لا من شهر القبضة: من يسجّل دخلاً بأثرٍ رجعي
+       * يؤرّخ ماضيه، لكن «شو أعمل بالمصاري» سؤالُ الحاضر دائماً. والمنطق في
+       * `src/lib/month/advice.ts` لا هنا — الشاشة التي ستعرض نفس النصيحة
+       * يوماً يجب أن تقول نفس الجملة.
+       */
+      const [picture, accountsPicture] = await Promise.all([
+        loadMonth(connection),
+        loadAccountsPicture(connection),
+      ])
+      const advice = adviseOnIncome({
+        amount: input.amount,
+        pendingInstallments: picture.pending.items
+          .filter((item) => item.kind === 'deposit')
+          .map((item) => ({ name: item.name, amount: Number(item.amount ?? 0) })),
+        accounts: accountsPicture.accounts.map((account) => ({
+          name: account.name,
+          available: account.available,
+          balanceIsStale: account.balanceIsStale,
+          daysSinceBalanceUpdate: account.daysSinceBalanceUpdate,
+        })),
+        expectedIncome: picture.expectedIncome,
+        receivedIncome: picture.receivedIncome,
+        projectedRemaining: picture.panel.projectedRemaining,
+        projectedIsOverspent: picture.panel.projectedIsOverspent,
+      })
+
+      const adviceLine = (item: IncomeAdviceItem): string => {
+        switch (item.kind) {
+          case 'cover_shortfall':
+            return (
+              `سُدَّ العجز أولاً: «غير المخصّص» في ${item.accountName} سالبٌ بـ ` +
+              `${money(item.amount, currency)} — حوِّل إليه قبل أي تخصيص.`
+            )
+          case 'fund_installments':
+            return (
+              `خصِّص من القبضة أقساط الشهر الباقية (${money(item.total, currency)}): ` +
+              item.items.map((row) => `${row.name} ${money(row.amount, currency)}`).join('، ') +
+              (item.covered ? ' — القبضة تغطّيها كلّها.' : ' — القبضة لا تغطّيها، فابدأ بالأهمّ.')
+            )
+          case 'stale_balance':
+            return `رصيد ${item.accountName} عمره ${item.days} يوماً — حدّثه ليصحّ كل ما يُبنى عليه.`
+          case 'projection_negative':
+            return `بوتيرة الصرف الحالية ينتهي الشهر بعجز ${money(item.amount, currency)}.`
+          case 'income_gap':
+            return `ما زال من دخلك المتوقَّع ${money(item.amount, currency)} لم يصل هذا الشهر.`
+          case 'all_clear':
+            return 'وضعك مضبوط: لا عجز في حساباتك ولا أقساط بلا إيداع هذا الشهر. ✅'
+        }
+      }
+
+      const adviceOut = advice.map((item) => ({
+        kind: item.kind,
+        text: adviceLine(item),
+        amount:
+          item.kind === 'cover_shortfall' ||
+          item.kind === 'projection_negative' ||
+          item.kind === 'income_gap'
+            ? item.amount
+            : item.kind === 'fund_installments'
+              ? item.total
+              : null,
+        account_name:
+          item.kind === 'cover_shortfall' || item.kind === 'stale_balance'
+            ? item.accountName
+            : null,
+        items: item.kind === 'fund_installments' ? item.items : null,
+      }))
+
       return ok(
         `سُجّل دخل ${money(input.amount, currency)}` +
           (sourceName ? ` من **${sourceName}**` : '') +
           ` بتاريخ ${longDate(receivedAt)}.\n` +
-          `مجموع ما وصل في ${monthYear(month)}: ${money(total, currency)}.`,
+          `مجموع ما وصل في ${monthYear(month)}: ${money(total, currency)}.\n\n` +
+          `نصائح على وضعك الآن:\n${adviceOut.map((item) => `- ${item.text}`).join('\n')}`,
         {
           currency,
           id: data.id,
@@ -1919,6 +2011,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           received_at: data.received_at,
           source_name: sourceName,
           month_total: total,
+          advice: adviceOut,
         },
       )
     }),
