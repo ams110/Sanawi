@@ -413,6 +413,19 @@ const received = await call('sanawi_record_income', {
 expect('المبلغ كما سُجّل', received?.amount, 9000)
 expect('ورُبط بالمصدر المعرَّف', received?.source_name, 'راتب')
 expect('ومجموع الشهر', received?.month_total, 9000)
+// النصائح تصاحب كل قبضة، وتُحسب من الحالة لا تُخترع: لا حسابات بعدُ فلا
+// عجز ولا رصيد قديم، والفجوة هي المتوقَّع 13300 ناقص الواصل 9000.
+expect('النصائح مرفقة', Array.isArray(received?.advice) && received.advice.length > 0, true)
+expect(
+  'لا نصيحة عجز بلا حسابات',
+  received?.advice.some((a) => a.kind === 'cover_shortfall'),
+  false,
+)
+expect(
+  'فجوة الدخل محسوبة',
+  received?.advice.find((a) => a.kind === 'income_gap')?.amount,
+  4300,
+)
 
 const actual = await call('sanawi_month_overview')
 expect('الدخل صار واقعاً', actual?.income_is_actual, true)
@@ -668,6 +681,12 @@ await expectError('sanawi_month_overview', {}, 'انتهت صلاحية الجل
 const oneOff = await call('sanawi_record_income', { amount: 400, source: 'عيدية' })
 expect('التسمية الحرّة تُحفظ', oneOff?.source_name, 'عيدية')
 expect('والمجموع يضمّها', oneOff?.month_total, 9400)
+// والنصيحة تلاحق الحالة: الفجوة نقصت بمقدار القبضة — 13300 ناقص 9400.
+expect(
+  'فجوة الدخل تتحدّث مع القبضة',
+  oneOff?.advice.find((a) => a.kind === 'income_gap')?.amount,
+  3900,
+)
 expect('ولم يُنشأ مصدر دائم', (await call('sanawi_list_reference', { kind: 'money' }))?.incomes.length, 2)
 
 /* ─── الشركاء ─── */

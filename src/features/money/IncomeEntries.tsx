@@ -65,17 +65,33 @@ function EntryRow({
   }
 
   return (
-    <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
+    /*
+     * صفٌّ بهيئة حركة البنك — نفس وصفة «سجّل من البنك» و«صندوق Financy»:
+     * الاسم، ثم سطرُ التاريخ ومعه وسمُ المصدر، والمبلغ بإشارة + لأنه داخل.
+     * فتُقرأ القبضات كما يُقرأ كشف الحساب، لا كنموذج تحرير.
+     */
+    <li className="space-y-2 rounded-2xl border border-border bg-surface-muted p-3">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-text">
+          <p className="truncate text-sm font-semibold text-text" dir="auto">
             {entry.name ?? source?.name ?? t('panel.incomeActual')}
           </p>
-          <p className="num text-xs text-text-muted">{formatDate(entry.received_at)}</p>
+          <p className="num text-xs text-text-muted">
+            {formatDate(entry.received_at)}
+            {/* الوسم فقط حين يضيف خبراً: عنوانٌ هو اسم المصدر لا يحتاج تكراره. */}
+            {source && entry.name && (
+              <span className="ms-1.5 rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                {source.is_variable && <span aria-hidden="true">〜 </span>}
+                {source.name}
+              </span>
+            )}
+          </p>
           {/* ملاحظة كلود («مكافأة المشروع») كانت تُحفظ ولا تُعرض. */}
           {entry.note && <p className="truncate text-xs text-text-muted">{entry.note}</p>}
         </div>
-        <span className="num text-sm font-bold text-brand">{formatMoney(Number(entry.amount))}</span>
+        <span className="num shrink-0 text-sm font-bold text-brand">
+          +{formatMoney(Number(entry.amount))}
+        </span>
         {!editing && (
           <>
             <EditButton onClick={() => setEditing(true)} />
