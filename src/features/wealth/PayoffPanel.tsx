@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
-import type { Translate } from '@/lib/i18n/translate'
+import { narrowT, type Translate } from '@/lib/i18n/translate'
 import { comparePayoff, type PayoffDebt, type PayoffStrategy } from '@/lib/commitments/payoff'
 
 /**
@@ -166,5 +166,6 @@ export function PayoffPanel({ debts }: { debts: readonly PayoffDebt[] }) {
  * الذي يقرأه المستخدم في كشف حسابه.
  */
 function monthsLabel(months: number, t: Translate): string {
-  return t('common.durMonths', { count: months })
+  // ‏narrowT لا `t` مباشرةً — انظر تعليقه في translate.ts.
+  return narrowT<'common.durMonths'>(t)('common.durMonths', { count: months })
 }

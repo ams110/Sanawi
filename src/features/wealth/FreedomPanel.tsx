@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Translate } from '@/lib/i18n/translate'
+import { narrowT, type Translate } from '@/lib/i18n/translate'
 import { formatDate, formatMoney } from '@/lib/format'
 import { freedomSensitivity, projectFreedom, type FreedomInput } from '@/lib/wealth/freedom'
 import type { Profile } from '@/lib/db/types'
@@ -282,11 +282,13 @@ function sensitivityTone(s: {
  * يحتاج قسمةً ليعني شيئاً، وثلاث سنواتٍ وشهران تُفهم بلا حساب.
  */
 function durationLabel(months: number, t: Translate): string {
+  // ‏narrowT لا `t` مباشرةً — انظر تعليقه في translate.ts.
+  const tt = narrowT<'common.durMonths' | 'common.durYears' | 'common.durYearsMonths'>(t)
   const years = Math.floor(months / 12)
   const rest = months % 12
-  if (years === 0) return t('common.durMonths', { count: rest })
-  if (rest === 0) return t('common.durYears', { years })
-  return t('common.durYearsMonths', { years, months: rest })
+  if (years === 0) return tt('common.durMonths', { count: rest })
+  if (rest === 0) return tt('common.durYears', { years })
+  return tt('common.durYearsMonths', { years, months: rest })
 }
 
 /**

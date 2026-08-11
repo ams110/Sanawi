@@ -417,6 +417,38 @@ export const ar = {
     fundFor: 'وين بتنحسب «{{name}}»؟',
     asIncome: 'دخل وصلني',
     asFund: 'قسط بصندوق {{name}} — فيه {{balance}}',
+
+    financyTitle: 'الربط الحي مع البنك',
+    financyPitch:
+      'اربط حسابك عبر Financy (بنكاءوت مفتوحة تحت رقابة بنك إسرائيل — قراءة فقط، ما حدا بيقدر يحرّك مصاري) وحركاتك بتوصل لهون لحالها. بتظل إنت اللي بتقرر شو بينسجّل.',
+    financyConnect: 'اربط حسابك',
+    financyKeysHint:
+      'من Financy: הגדרות ← גישה ל-API — انسخ الثلاثة من هناك. بتنحفظ بمكان ما بيقرأه حدا، ولا حتى إنت.',
+    financySaveKeys: 'احفظ المفاتيح واسحب',
+    financySaveFailed: 'ما قدرنا نحفظ المفاتيح',
+    financySettings: 'إعدادات الربط',
+    financyDisconnect: 'فكّ الربط (الوارد بيضل محفوظ)',
+    financyInbox: 'وارد البنك',
+    financySync: 'اسحب الجديد',
+    financySynced: 'وصل {{count}} حركة جديدة 📥',
+    financySyncedNothing: 'ولا حركة جديدة — إنت ملحّق 👌',
+    financyEmpty: 'ما في حركات ناطرة قرارك',
+    financySyncFailed: 'ما قدرنا نسحب من Financy — جرّب كمان شوي',
+    financyBadKeys: 'المفاتيح مش صحيحة — راجعها بإعدادات Financy واحفظها من جديد',
+    financyNotConnected: 'اربط حسابك أول',
+    financyRecordExpense: 'سجّلها مصروف',
+    financyRecordIncome: 'سجّلها قبضة',
+    financyRecordDeposit: 'سجّلها بالصندوق',
+    financyRecordFailed: 'ما قدرنا نسجّلها',
+    financyDismiss: 'تجاهل',
+    financyInstallment: 'قسط {{number}} من {{total}}',
+
+    /*
+     * الربط الحي — Financy (Open Finance).
+     *
+     * الحركات تصل وحدها والقرار قرار صاحبها: كل صفٍّ سؤال، ولا شيء يُسجَّل
+     * من تلقائه. والمفاتيح تُكتب ولا تُقرأ — لا تظهر بعد الحفظ ولو لصاحبها.
+     */
   },
 
   report: {

@@ -14,6 +14,7 @@ import {
   type ObligationWithCalc,
 } from '@/features/obligations/api'
 import { Button } from '@/components/ui/Button'
+import { FinancyInbox } from './FinancyInbox'
 
 /**
  * سجّل من البنك — كشف حسابك يصير مصاريف وقبضات وإيداعات صناديق.
@@ -210,6 +211,13 @@ export function BankImportScreen() {
       <p className="rounded-2xl bg-surface-muted px-4 py-3 text-[13px] leading-relaxed text-text-muted">
         🔒 {t('bank.privacyNote')}
       </p>
+
+      {/*
+        * الوارد الحي فوق اللصق اليدوي: من ربط بنكه تصله الحركات هنا وحدها،
+        * ومن لم يربط يجد بطاقة الدعوة — واللصق اليدوي باقٍ تحتهما دائماً:
+        * بنكٌ بلا Financy، أو كشفٌ قديم من قبل الربط، كلاهما ما زال يمرّ منه.
+        */}
+      <FinancyInbox />
 
       {done && (
         <p role="status" className="rounded-2xl border border-brand/30 bg-brand-soft px-4 py-3 text-sm font-semibold text-brand">

@@ -161,6 +161,56 @@ function seed(db, userId) {
     created_at: new Date().toISOString(),
   })
 
+  /*
+   * الربط الحي: مفاتيح محفوظة وحركتان في الوارد — خارجةٌ تُسجَّل مصروفاً
+   * بضغطة، وداخلةٌ لها منتقى وجهةٍ بالصناديق. بهما تُفحص شاشة الوارد كاملة.
+   */
+  db.financy_credentials.push({
+    user_id: userId,
+    client_id: 'check-client',
+    client_secret: 'check-secret',
+    financy_user_id: 'check-user',
+    updated_at: new Date().toISOString(),
+  })
+  db.bank_inbox.push(
+    {
+      id: 'bi1',
+      user_id: userId,
+      tx_sk: 'TX#seed-out',
+      provider_id: 'max',
+      account_external_id: null,
+      name: 'סופר יוחננוף',
+      amount: 45.5,
+      direction: 'out',
+      tx_date: iso(new Date(today.getFullYear(), today.getMonth(), 4)),
+      category_main: 'FOOD_&_DRINKS',
+      category_sub: 'GROCERIES',
+      installment_number: null,
+      installment_total: null,
+      status: 'pending',
+      recorded_kind: null,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: 'bi2',
+      user_id: userId,
+      tx_sk: 'TX#seed-in',
+      provider_id: 'leumi',
+      account_external_id: null,
+      name: 'העברה נכנסת',
+      amount: 800,
+      direction: 'in',
+      tx_date: iso(new Date(today.getFullYear(), today.getMonth(), 5)),
+      category_main: null,
+      category_sub: null,
+      installment_number: null,
+      installment_total: null,
+      status: 'pending',
+      recorded_kind: null,
+      created_at: new Date().toISOString(),
+    },
+  )
+
   // فاتورة الثلاجة مدفوعة يوم 3 — بها يُفحص أن «إمتى دفعتها» يُعرض لا يُحفظ وحسب.
   db.bill_payments.push({
     id: 'bp1',
@@ -526,7 +576,27 @@ try {
    * تسجيلٌ، ثم لصقُ الكشف نفسه ثانيةً ليُعلَّم مكرَّراً لا ليُكتب مرتين.
    */
   await page.goto(`${BASE}/flow/import`, { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1000)
+  await page.waitForTimeout(1200)
+
+  /*
+   * الوارد الحي: الحركات المزروعة ظاهرة، الخارجة تُسجَّل مصروفاً بضغطةٍ
+   * فتغادر الوارد، والداخلة معها منتقى وجهةٍ بالصناديق وأرصدتها.
+   */
+  const financyCard = page.locator('section').filter({ hasText: 'وارد البنك' }).first()
+  step('وارد البنك الحي ظاهر وفيه الحركتان', await financyCard.isVisible() && (await financyCard.locator('li').count()) === 2)
+
+  const inRow = financyCard.locator('li').filter({ hasText: 'העברה נכנסת' }).first()
+  const inRowText = (await inRow.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('والداخلة معها منتقى وجهةٍ بالصناديق', (await inRow.locator('select option').count()) > 1, inRowText.slice(0, 140))
+
+  const outRow = financyCard.locator('li').filter({ hasText: 'סופר יוחננוף' }).first()
+  const outRowText = (await outRow.innerText().catch(() => '')).replace(/\n/g, ' · ')
+  step('والخارجة بتصنيف Financy مترجماً', /أكل وشرب/.test(outRowText), outRowText.slice(0, 140))
+
+  await page.screenshot({ path: `${OUT}/financy-inbox.png` })
+  await outRow.getByRole('button', { name: 'سجّلها مصروف' }).click()
+  await page.waitForTimeout(2000)
+  step('وتسجيلها مصروفاً يخرجها من الوارد', (await financyCard.locator('li').count()) === 1)
 
   const impDate = new Date()
   const impMonth = String(impDate.getMonth() + 1).padStart(2, '0')
@@ -575,7 +645,12 @@ try {
   await page.getByRole('button', { name: 'اقرأ الكشف' }).click()
   await page.waitForTimeout(1500)
 
-  const destSelect = page.locator('li select').first()
+  // صفوف اللصق وحدها فيها checkbox — الوارد الحي فوقها له select آخر.
+  const destSelect = page
+    .locator('li')
+    .filter({ has: page.locator('input[type="checkbox"]') })
+    .locator('select')
+    .first()
   const destVisible = await destSelect.isVisible().catch(() => false)
   const destText = destVisible ? await destSelect.innerText() : ''
   step('وللقبضة منتقى وجهةٍ ومع كل صندوقٍ رصيدُه', destVisible && /טסט/.test(destText) && /فيه/.test(destText), destText.replace(/\n/g, ' · ').slice(0, 160))

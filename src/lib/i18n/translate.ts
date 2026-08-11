@@ -9,3 +9,20 @@ import type { useTranslation } from 'react-i18next'
  * ويجعل مفتاحاً مكسوراً في دالّةٍ مساعدة خطأَ بناءٍ كما هو في المكوّن.
  */
 export type Translate = ReturnType<typeof useTranslation>['t']
+
+/**
+ * توقيعٌ ضيّق للدوال المساعدة التي تأخذ `t` وسيطاً.
+ *
+ * نداء `t` على النوع المعمَّم `Translate` يُشعل استنتاج مفاتيح i18next
+ * كاملاً عند كل نداء — وهو أثقل استنتاجٍ في المشروع كله. كبُرت شجرة المفاتيح
+ * حتى فاض عمق المترجم (TS2589) في هذه المواقع بالذات، بينما `t` القادمة من
+ * `useTranslation` في المكوّنات رخيصةٌ ومدقّقة كما هي.
+ *
+ * فالدالّة المساعدة تحصر مفاتيحها اتحاداً حرفياً عبر هذا الغلاف: الاستنتاج
+ * الغالي يسقط، والاتحاد يوثّق المفاتيح في التوقيع — والتدقيق الكامل ضد
+ * `ar.ts` باقٍ عند كل `t('...')` في الشاشات، وهي كل من عداها.
+ */
+export const narrowT = <K extends string>(
+  t: Translate,
+): ((key: K, options?: Record<string, unknown>) => string) =>
+  t as unknown as (key: K, options?: Record<string, unknown>) => string
