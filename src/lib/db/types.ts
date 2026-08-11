@@ -345,6 +345,37 @@ export type ObligationBalance = {
   deposit_count: number
 }
 
+/**
+ * وارد البنك الحي (Financy) — حركات معلّقة بانتظار قرار صاحبها.
+ *
+ * دالّة الحافة `financy-sync` وحدها تُدرج هنا (لا سياسة إدراجٍ للمستخدم)،
+ * والواجهة تقرأ وتُعلّم القرار في `status` — لا حذف: المتجاهَل يبقى متجاهَلاً
+ * لا ممحواً.
+ */
+export type BankInboxStatus = 'pending' | 'recorded' | 'dismissed'
+
+export type BankInboxRow = {
+  id: string
+  user_id: string
+  /** مفتاح Financy الفريد — به لا تُدرَج الحركة مرتين مهما تكرّر السحب. */
+  tx_sk: string
+  provider_id: string | null
+  account_external_id: string | null
+  name: string
+  /** موجب دائماً — الاتجاه في `direction` لا في الإشارة. */
+  amount: number
+  direction: 'in' | 'out'
+  tx_date: string
+  /** تصنيف Financy كما وصل — اقتراحٌ للشاشة لا قرار. */
+  category_main: string | null
+  category_sub: string | null
+  installment_number: number | null
+  installment_total: number | null
+  status: BankInboxStatus
+  recorded_kind: 'expense' | 'income' | 'deposit' | null
+  created_at: string
+}
+
 /** مشهد محسوب — لا يُكتب فيه. */
 export type PartnerSettlement = {
   obligation_id: string
@@ -398,6 +429,7 @@ export type Database = {
       accounts: Table<Account>
       account_transfers: Table<AccountTransfer>
       account_settlements: Table<AccountSettlement>
+      bank_inbox: Table<BankInboxRow>
     }
     Views: {
       obligation_balances: View<ObligationBalance>
@@ -405,7 +437,11 @@ export type Database = {
       bill_averages: View<BillAverage>
       commitment_details: View<CommitmentDetail>
     }
-    // نفس شكل ما يولّده `supabase gen types` للمجموعات الفارغة.
+    /*
+     * تُترك فارغة عمداً رغم وجود دوال rpc فعلية (دوال Financy الثلاث):
+     * تعبئتها تفجّر عمق أنواع المترجم — TS2589 يظهر في failure.ts الذي لا
+     * علاقة له — والدوال معدودة فتُغلَّف بتوقيعٍ يدوي في features/bank/financy.
+     */
     Functions: { [_ in never]: never }
     Enums: { [_ in never]: never }
     CompositeTypes: { [_ in never]: never }

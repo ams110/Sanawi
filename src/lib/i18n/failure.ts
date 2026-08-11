@@ -1,5 +1,5 @@
-import { readFailure } from '@/lib/errors'
-import type { Translate } from './translate'
+import { readFailure, type FailureKind } from '@/lib/errors'
+import { narrowT, type Translate } from './translate'
 
 /**
  * الفشل جملةً عربية: ما فشل، ثم لماذا.
@@ -15,26 +15,18 @@ import type { Translate } from './translate'
  * وهو اتحادٌ ضخم يُفشل المترجم بـ«type instantiation is excessively deep».
  * وتمريرُ النصّ يُبقي التدقيق حيث يجب أن يكون: عند `t('...')` في الشاشة.
  */
+/*
+ * وهنا وقع المرض نفسه ثانيةً من الباب الآخر، فجاء `narrowT` (انظر تعليقه في
+ * translate.ts). أصناف `FailureKind` تطابق مفاتيح `errors.*` واحداً لواحد
+ * بالبناء، فالمفتاح يُركَّب قالباً والاتحاد في التوقيع يحفظ ذلك.
+ */
 export function failureText(error: unknown, t: Translate, context?: string): string {
   const { kind, detail } = readFailure(error)
 
   // الأصل يبقى مقروءاً لمن يفتح الطرفية، ولا يصل الشاشة أبداً.
   console.error('[sanawi]', detail, error)
 
-  const reason =
-    kind === 'offline'
-      ? t('errors.offline')
-      : kind === 'denied'
-        ? t('errors.denied')
-        : kind === 'expired'
-          ? t('errors.expired')
-          : kind === 'duplicate'
-            ? t('errors.duplicate')
-            : kind === 'invalid'
-              ? t('errors.invalid')
-              : kind === 'missing'
-                ? t('errors.missing')
-                : t('errors.unknown')
+  const reason = narrowT<`errors.${FailureKind}`>(t)(`errors.${kind}`)
 
   return context ? `${context} — ${reason}` : reason
 }

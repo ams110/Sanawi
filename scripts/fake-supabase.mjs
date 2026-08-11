@@ -97,6 +97,8 @@ function seed() {
     assets: [],
     net_worth_snapshots: [],
     accounts: [],
+    bank_inbox: [],
+    financy_credentials: [],
     account_transfers: [],
     account_settlements: [],
     commitment_partner_shares: [],
@@ -471,6 +473,63 @@ export async function startFakeSupabase() {
           return send(400, { error: 'invalid_grant', error_description: 'Invalid login credentials' })
         }
         return send(200, sessionFor(account))
+      }
+
+      /* هوية النادي — تُستخرج مبكراً لأن الدوال والحافة تحتاجانها قبل الجداول. */
+      const callerOf = () => {
+        const jwt = (req.headers.authorization ?? '').replace(/^Bearer /i, '')
+        if (!jwt || jwt === ANON_KEY) return null
+        try {
+          return JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()).sub
+        } catch {
+          return null
+        }
+      }
+
+      /*
+       * دالّة الحافة financy-sync — محاكاةٌ عمياء عن Financy الحقيقية:
+       * الفحص يفحص عقد الواجهة (زرٌّ يسحب ويقرأ العدّ) لا شبكة طرفٍ ثالث.
+       * لا جديد يُدرَج هنا — الوارد يُزرع في بذرة الفحص مباشرةً.
+       */
+      if (url.pathname === '/functions/v1/financy-sync') {
+        if (!callerOf()) return send(401, { error: 'unauthenticated' })
+        if (!db.financy_credentials.some((r) => r.user_id === callerOf()))
+          return send(400, { error: 'not_connected' })
+        return send(200, { fetched: 0, inserted: 0, since: '2026-01-01' })
+      }
+
+      /* دوال قاعدة البيانات (rpc) — الثلاث الخاصة بمفاتيح Financy. */
+      if (url.pathname.startsWith('/rest/v1/rpc/')) {
+        const fn = url.pathname.slice('/rest/v1/rpc/'.length)
+        const caller = callerOf()
+        if (!caller) return send(401, { message: 'not authenticated' })
+
+        if (fn === 'financy_status') {
+          const row = db.financy_credentials.find((r) => r.user_id === caller)
+          return send(
+            200,
+            row ? { connected: true, updated_at: row.updated_at } : { connected: false },
+          )
+        }
+        if (fn === 'save_financy_credentials') {
+          const next = {
+            user_id: caller,
+            client_id: String(body?.p_client_id ?? ''),
+            client_secret: String(body?.p_client_secret ?? ''),
+            financy_user_id: String(body?.p_financy_user_id ?? ''),
+            updated_at: new Date().toISOString(),
+          }
+          if (!next.client_id || !next.client_secret || !next.financy_user_id)
+            return send(400, { message: 'missing credentials' })
+          db.financy_credentials = db.financy_credentials.filter((r) => r.user_id !== caller)
+          db.financy_credentials.push(next)
+          return send(200, null)
+        }
+        if (fn === 'clear_financy_credentials') {
+          db.financy_credentials = db.financy_credentials.filter((r) => r.user_id !== caller)
+          return send(200, null)
+        }
+        return send(404, { message: `rpc غير معروفة في الفحص: ${fn}` })
       }
 
       if (!url.pathname.startsWith('/rest/v1/')) return send(404, { message: 'not found' })
