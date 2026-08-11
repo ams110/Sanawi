@@ -146,9 +146,11 @@ create index if not exists bank_inbox_user_status_date_idx
 
 alter table public.bank_inbox enable row level security;
 
+drop policy if exists "bank_inbox_select_own" on public.bank_inbox;
 create policy "bank_inbox_select_own" on public.bank_inbox
   for select using ((select auth.uid()) = user_id);
 
+drop policy if exists "bank_inbox_update_own" on public.bank_inbox;
 create policy "bank_inbox_update_own" on public.bank_inbox
   for update using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
