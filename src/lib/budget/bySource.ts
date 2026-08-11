@@ -20,6 +20,13 @@ export interface BySourceEntry {
   sourceId: string | null
   /** تسمية القبضة الحرّة — «هدية»، «بيع غرض». */
   name: string | null
+  /** يوم الاستلام — به تُفرد القبضات لا مجموعها وحده. */
+  receivedAt?: string | null
+}
+
+export interface SourceEntryDetail {
+  amount: number
+  receivedAt: string | null
 }
 
 export interface SourceTotal {
@@ -30,6 +37,13 @@ export interface SourceTotal {
   total: number
   count: number
   isArchived: boolean
+  /**
+   * القبضات فرادى، الأحدث أولاً.
+   *
+   * «قبضة 2 — ₪11,000» نصف جواب: من قبض مرّتين في شهرٍ واحد يريد أن يعرف
+   * كم كانت كلُّ واحدة — راتبٌ ودفعةٌ متأخرة رقمان مختلفان تحت مجموعٍ واحد.
+   */
+  entries: SourceEntryDetail[]
 }
 
 const round2 = (v: number): number => Math.round(v * 100) / 100
@@ -57,10 +71,17 @@ export function summarizeBySource(
       total: 0,
       count: 0,
       isArchived: source ? source.isActive === false : false,
+      entries: [],
     }
     bucket.total = round2(bucket.total + entry.amount)
     bucket.count += 1
+    bucket.entries.push({ amount: round2(entry.amount), receivedAt: entry.receivedAt ?? null })
     buckets.set(key, bucket)
+  }
+
+  for (const bucket of buckets.values()) {
+    // الفرز هنا لا عند المستدعي: قبضةٌ بلا تاريخ تنزل آخر القائمة ولا تكسرها.
+    bucket.entries.sort((a, b) => (b.receivedAt ?? '').localeCompare(a.receivedAt ?? ''))
   }
 
   return [...buckets.values()].sort(
