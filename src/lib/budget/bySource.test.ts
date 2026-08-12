@@ -57,6 +57,22 @@ describe('القبضات حسب المصدر', () => {
     expect(rows[0]).toMatchObject({ name: 'قديم', total: 80 })
   })
 
+  it('القبضات فرادى داخل المصدر، الأحدث أولاً وبلا تاريخ آخراً', () => {
+    const rows = summarizeBySource(
+      [
+        { amount: 5000, sourceId: 's1', name: null, receivedAt: '2026-08-03' },
+        { amount: 6000, sourceId: 's1', name: null, receivedAt: '2026-08-20' },
+        { amount: 100, sourceId: 's1', name: null },
+      ],
+      SOURCES,
+    )
+    expect(rows[0]!.entries).toEqual([
+      { amount: 6000, receivedAt: '2026-08-20' },
+      { amount: 5000, receivedAt: '2026-08-03' },
+      { amount: 100, receivedAt: null },
+    ])
+  })
+
   it('التعادل في المجموع يُرتَّب بالاسم — قائمةٌ لا تعيد ترتيب نفسها بين قراءتين', () => {
     const rows = summarizeBySource(
       [
