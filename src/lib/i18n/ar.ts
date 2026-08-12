@@ -344,6 +344,7 @@ export const ar = {
     unlinked: 'بلا حساب',
     availableTitle: 'غير المخصّص بكل حساب',
     shortfallHint: 'في حساب واعد بمصاري مش فيه — سدّه بتحويل من شاشة الحسابات.',
+    runway: 'بوتيرة صرفك، غير المخصّص بيكفيك {{days}} يوم',
   },
 
   calendar: {
@@ -568,6 +569,9 @@ export const ar = {
     title: '{{name}} قرب موعده',
     bodyWithAmount: 'باقي {{days}} يوم على {{name}}. لسا ناقصك {{amount}} بالصندوق.',
     bodyReady: 'باقي {{days}} يوم على {{name}} — وصندوقك جاهز 👌',
+    /* حارس السيولة: «غير مخصّص» سالب يلاحقك على الجهاز، لا ينتظرك بالشاشة. */
+    shortfallTitle: 'في حساب واعد بمصاري مش فيه ⚠️',
+    shortfallBody: 'غير المخصّص سالب في: {{accounts}}. افتح سنوي وسدّه بتحويل.',
   },
 
   bills: {

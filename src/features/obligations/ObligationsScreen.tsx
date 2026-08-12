@@ -4,6 +4,7 @@ import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/Button'
 import { ObligationCard } from './ObligationCard'
 import { scheduleObligationReminders } from '@/features/reminders/schedule'
+import { listAccounts } from '@/features/accounts/api'
 import { listObligations } from './api'
 import { useTranslation } from 'react-i18next'
 import { failureText } from '@/lib/i18n/failure'
@@ -18,9 +19,13 @@ export function ObligationsScreen() {
   } = useQuery({
     queryKey: ['obligations'],
     queryFn: async () => {
-      const loaded = await listObligations()
+      // الحسابات لإشعار العجز — وفشل جلبها لا يمنع التذكيرات العادية.
+      const [loaded, accounts] = await Promise.all([
+        listObligations(),
+        listAccounts().catch(() => []),
+      ])
       // فشل الجدولة لا يُفشل عرض الالتزامات: التنبيه مساعِد لا شرط.
-      void scheduleObligationReminders(loaded).catch(() => {})
+      void scheduleObligationReminders(loaded, accounts).catch(() => {})
       return loaded
     },
   })

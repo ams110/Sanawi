@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type AccountInput, summarizeAccounts, viewAccount } from './calc'
+import { type AccountInput, envelopesByAccount, runwayDays, summarizeAccounts, viewAccount } from './calc'
 
 const TODAY = new Date('2026-08-06T00:00:00')
 
@@ -219,5 +219,36 @@ describe('مجموع الحسابات', () => {
       { today: TODAY },
     )
     expect(stale.staleCount).toBe(1)
+  })
+})
+
+describe('envelopesByAccount', () => {
+  it('يوزّع الصناديق على حساباتها ويُسقط الفارغ وغير المربوط', () => {
+    const map = envelopesByAccount([
+      { obligationId: 'o1', name: 'تأمين', balance: 2778, accountId: 'a1' },
+      { obligationId: 'o2', name: 'إطارات', balance: 300, accountId: 'a1' },
+      { obligationId: 'o3', name: 'فارغ', balance: 0, accountId: 'a1' },
+      { obligationId: 'o4', name: 'بلا حساب', balance: 500, accountId: null },
+    ])
+    expect(map.get('a1')).toEqual([
+      { name: 'تأمين', balance: 2778, obligationId: 'o1' },
+      { name: 'إطارات', balance: 300, obligationId: 'o2' },
+    ])
+    expect(map.size).toBe(1)
+  })
+})
+
+describe('runwayDays', () => {
+  it('يقسم المتاح على الوتيرة وينزل للعدد الصحيح', () => {
+    expect(runwayDays(1622, 130)).toBe(12)
+  })
+
+  it('بلا وتيرة جهلٌ لا لانهاية — null', () => {
+    expect(runwayDays(1622, 0)).toBeNull()
+  })
+
+  it('متاحٌ سالب أو صفر: صفر أيام لا رقم سالب', () => {
+    expect(runwayDays(-678, 55)).toBe(0)
+    expect(runwayDays(0, 55)).toBe(0)
   })
 })

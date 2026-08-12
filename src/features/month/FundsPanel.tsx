@@ -28,9 +28,12 @@ export interface FundsAccountView {
 export function FundsPanel({
   funds,
   accounts,
+  runway = null,
 }: {
   funds: FundRowView[]
   accounts: FundsAccountView[]
+  /** كم يوماً يكفي غير المخصّص بوتيرة الصرف — من `runwayDays`. */
+  runway?: number | null
 }) {
   const { t } = useTranslation()
   if (funds.length === 0) return null
@@ -80,6 +83,11 @@ export function FundsPanel({
               </span>
             </div>
           ))}
+          {/* العدّ التنازلي يُقرأ تحذيراً مبكراً — والصفر لا يُعرض: سطرُ
+              «بيكفيك 0 يوم» يقوله تحذير العجز تحته بوضوحٍ أكبر. */}
+          {runway !== null && runway > 0 && (
+            <p className="num text-xs text-text-muted">{t('funds.runway', { days: runway })}</p>
+          )}
           {accounts.some((account) => account.shortfall) && (
             <p className="rounded-xl bg-danger-soft px-3 py-2 text-xs font-semibold text-danger">
               {t('funds.shortfallHint')}

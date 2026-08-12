@@ -15,7 +15,7 @@ import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
 import { listAccounts } from '@/features/accounts/api'
-import { summarizeAccounts } from '@/lib/accounts/calc'
+import { envelopesByAccount, runwayDays, summarizeAccounts } from '@/lib/accounts/calc'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
 import { monthlyIncomeFrom } from '@/lib/budget/calc'
@@ -200,55 +200,66 @@ export function MonthScreen() {
     }
 
     /*
-     * الصناديق بعلامة بنكها — نفس تجميع `loadAccountsPicture` لكن على ما
+     * الصناديق بعلامة بنكها — التجميع من `envelopesByAccount` النقي، على ما
      * جلبته هذه الشاشة أصلاً: الالتزامات محمَّلة فلا تُجلب ثانيةً لأجل
-     * المظاريف. والصندوق الفارغ يسقط (صفرٌ لا يخصّص شيئاً)، وغير المربوط
-     * يبقى بعلامة خطر لا يُخفى.
+     * المظاريف. والصندوق غير المربوط يبقى بعلامة خطر لا يُخفى.
      */
     const accountNames = new Map(accounts.map((account) => [account.id, account.name]))
-    const envelopesByAccount = new Map<
-      string,
-      { name: string; balance: number; obligationId: string }[]
-    >()
-    const funds: FundRowView[] = []
-    for (const item of obligations) {
-      const balance = Number(item.balance?.my_fund_balance ?? 0)
-      if (balance === 0) continue
-
-      const accountId = item.obligation.account_id
-      funds.push({
+    const fundRows = obligations
+      .map((item) => ({
         obligationId: item.obligation.id,
         name: item.obligation.name,
-        balance,
-        accountName: accountId ? (accountNames.get(accountId) ?? null) : null,
-      })
-      if (!accountId) continue
-      const list = envelopesByAccount.get(accountId) ?? []
-      list.push({ name: item.obligation.name, balance, obligationId: item.obligation.id })
-      envelopesByAccount.set(accountId, list)
-    }
+        balance: Number(item.balance?.my_fund_balance ?? 0),
+        accountId: item.obligation.account_id,
+      }))
+      .filter((row) => row.balance !== 0)
+
     // الأكبر أولاً — كما ترتّب المظاريف نفسها في محرّك الحسابات.
-    funds.sort((a, b) => b.balance - a.balance)
+    const funds: FundRowView[] = fundRows
+      .map((row) => ({
+        obligationId: row.obligationId,
+        name: row.name,
+        balance: row.balance,
+        accountName: row.accountId ? (accountNames.get(row.accountId) ?? null) : null,
+      }))
+      .sort((a, b) => b.balance - a.balance)
+
+    const byAccount = envelopesByAccount(fundRows)
 
     // «غير المخصّص» للحسابات الحيّة وحدها — المؤرشف خارج اللوحات كلها.
-    const fundsAccounts: FundsAccountView[] = summarizeAccounts(
+    const accountsSummary = summarizeAccounts(
       accounts
         .filter((account) => !account.archived_at)
         .map((account) => ({
-        id: account.id,
-        name: account.name,
-        kind: account.kind,
-        balance: Number(account.balance),
-        balanceUpdatedAt: account.balance_updated_at,
-        envelopes: envelopesByAccount.get(account.id) ?? [],
-      })),
-    ).accounts.map((account) => ({
+          id: account.id,
+          name: account.name,
+          kind: account.kind,
+          balance: Number(account.balance),
+          balanceUpdatedAt: account.balance_updated_at,
+          envelopes: byAccount.get(account.id) ?? [],
+        })),
+    )
+    const fundsAccounts: FundsAccountView[] = accountsSummary.accounts.map((account) => ({
       name: account.name,
       available: account.available,
       shortfall: account.shortfall,
     }))
 
-    return { pending, summary, panel, hasIncome: incomes.length > 0, funds, fundsAccounts }
+    // العدّ التنازلي: المتاح كله ÷ وتيرة الصرف اليومية حتى الآن.
+    const runway = runwayDays(
+      accountsSummary.availableTotal,
+      spending.total / Math.max(1, spending.daysElapsed),
+    )
+
+    return {
+      pending,
+      summary,
+      panel,
+      hasIncome: incomes.length > 0,
+      funds,
+      fundsAccounts,
+      runway,
+    }
   }, [raw, savingsTarget])
 
   const summary = derived?.summary ?? null
@@ -350,7 +361,13 @@ export function MonthScreen() {
        * «وين المصاري الملتزَم فيها؟» — وكل صندوقٍ هنا برصيده وعلامة بنكه،
        * وتحتها «غير المخصّص» لكل حساب لأن سالبه لا يُرى من صندوقٍ واحد.
        */}
-      {derived && <FundsPanel funds={derived.funds} accounts={derived.fundsAccounts} />}
+      {derived && (
+        <FundsPanel
+          funds={derived.funds}
+          accounts={derived.fundsAccounts}
+          runway={derived.runway}
+        />
+      )}
 
       {/*
        * التفصيل حُذف من هنا.
