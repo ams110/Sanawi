@@ -200,6 +200,50 @@ export function summarizeAccounts(
   }
 }
 
+export interface LinkedFundRow {
+  obligationId: string
+  name: string
+  balance: number
+  accountId: string | null
+}
+
+/**
+ * توزيع الصناديق غير الصفرية على حساباتها.
+ *
+ * كان هذا التجميع يُكتب في كل واجهةٍ من جديد — شاشة الحسابات، خادم كلود،
+ * لوحة الشهر — وقاعدته ليست بديهية: الصندوق الفارغ يسقط (صفرٌ لا يخصّص
+ * شيئاً)، وغير المربوط لا يدخل أي حساب — ماله محسوبٌ ملكاً وخارج «غير
+ * المخصّص» معاً. نسخةٌ رابعة كانت ستنحرف يوماً عن الثلاث.
+ */
+export function envelopesByAccount(
+  rows: readonly LinkedFundRow[],
+): Map<string, EnvelopeInput[]> {
+  const byAccount = new Map<string, EnvelopeInput[]>()
+  for (const row of rows) {
+    const balance = Number(row.balance)
+    if (balance === 0 || !row.accountId) continue
+    const list = byAccount.get(row.accountId) ?? []
+    list.push({ name: row.name, balance, obligationId: row.obligationId })
+    byAccount.set(row.accountId, list)
+  }
+  return byAccount
+}
+
+/**
+ * كم يوماً تكفي السيولة غير المخصّصة بوتيرة الصرف الحالية.
+ *
+ * التحويل من «بقي ₪1,600» إلى «بيكفيك 12 يوم» — لأن الأولى تُقرأ رصيداً
+ * والثانية تُقرأ عدّاً تنازلياً، والعدّ هو الذي يوقف يد الصرف قبل الأزمة
+ * لا بعدها.
+ *
+ * `null` = لا وتيرة بعد: شهرٌ بلا مصاريف مسجَّلة جهلٌ لا سيولةً لا نهائية.
+ */
+export function runwayDays(available: number, dailyRate: number): number | null {
+  if (!Number.isFinite(dailyRate) || dailyRate <= 0) return null
+  if (!Number.isFinite(available) || available <= 0) return 0
+  return Math.floor(available / dailyRate)
+}
+
 /** عمر الرصيد بالأيام، أو null إن كان التاريخ مجهولاً أو غير مقروء. */
 function daysSince(value: Date | string | null | undefined, today: Date): number | null {
   if (value === null || value === undefined) return null
