@@ -4,6 +4,8 @@ import {
   needsPassphrase,
   normalizeKrakenCoin,
   parseBalances,
+  parseExchangeTotalUsd,
+  usesExchangeTotal,
   type Exchange,
 } from './exchanges'
 
@@ -54,9 +56,14 @@ describe('نصّ التوقيع لكل منصّة', () => {
     expect(r.prehash).toEqual({ sha256Of: `${AT}nonce=${AT}`, prefix: '/0/private/Balance' })
   })
 
-  it('Pionex: الطريقة ملصوقة بالمسار، والباراميترات مرتّبة', () => {
+  /*
+   * المسار `wallet/balancesFull` لا `account/balances`: الثاني موثَّقٌ بأنه
+   * يستثني البوتات وEarn، ومنصّةُ بوتاتٍ يُقرأ سبوتُها وحده تكذب بالنقصان.
+   */
+  it('Pionex: مسار المحفظة الكاملة لا الأرصدة وحدها', () => {
     const r = build('pionex')
-    expect(r.payload).toBe(`GET/api/v1/account/balances?timestamp=${AT}`)
+    expect(r.payload).toBe(`GET/api/v1/wallet/balancesFull?timestamp=${AT}`)
+    expect(r.url).toContain('/api/v1/wallet/balancesFull')
     expect(r.headers['PIONEX-KEY']).toBe('KEY')
   })
 
@@ -121,10 +128,9 @@ describe('قراءة الأرصدة', () => {
     ).toEqual([{ coin: 'BTC', amount: 0.5 }])
   })
 
-  it('Pionex: من data.balances', () => {
-    expect(
-      parseBalances('pionex', { data: { balances: [{ coin: 'BTC', free: '1', frozen: '0.5' }] } }),
-    ).toEqual([{ coin: 'BTC', amount: 1.5 }])
+  // Pionex لا تُقرأ كمياتٍ: مجموعُها يأتي جاهزاً — انظر «مجموع المنصّة».
+  it('Pionex لا تُخرج كميات', () => {
+    expect(parseBalances('pionex', { data: { totalInUsdt: '1000' } })).toEqual([])
   })
 
   /*
@@ -160,5 +166,36 @@ describe('رموز Kraken', () => {
   it('ولا يقصّ رمزاً ثلاثياً حقيقياً يبدأ بالحرف نفسه', () => {
     expect(normalizeKrakenCoin('XTZ')).toBe('XTZ')
     expect(normalizeKrakenCoin('XBT')).toBe('BTC')
+  })
+})
+
+/*
+ * عالَم الرقم مُصرَّحٌ به (قاعدة CLAUDE.md الثانية): Pionex استثناءٌ معلَن
+ * لا مخالفةٌ صامتة — رأسمال بوتاتها لا يظهر كمياتٍ منمَّطة في أي مسار
+ * موثَّق، فحسابُه عندنا اختراعُ بنية، والمجموع من المنصّة يطابق ما يراه
+ * صاحبه في تطبيقها.
+ */
+describe('مجموع المنصّة بالدولار', () => {
+  it('Pionex تعطي المجموع شاملاً البوتات', () => {
+    expect(parseExchangeTotalUsd('pionex', { data: { totalInUsdt: '12345.67' } })).toBe(12345.67)
+    expect(usesExchangeTotal('pionex')).toBe(true)
+  })
+
+  it('وغيرها تُحسب من الكميات', () => {
+    expect(parseExchangeTotalUsd('binance', { data: { totalInUsdt: '999' } })).toBe(null)
+    expect(usesExchangeTotal('binance')).toBe(false)
+  })
+
+  // مجموعٌ مفقودٌ أو مشوّه ليس صفراً: صفرٌ يمحو المحفظة، و`null` تُبقي
+  // آخر قيمةٍ معروفة ومعها رسالة فشل.
+  it('ردٌّ مشوّه يُخرج null لا صفراً', () => {
+    expect(parseExchangeTotalUsd('pionex', null)).toBe(null)
+    expect(parseExchangeTotalUsd('pionex', { data: {} })).toBe(null)
+    expect(parseExchangeTotalUsd('pionex', { data: { totalInUsdt: 'كثير' } })).toBe(null)
+    expect(parseExchangeTotalUsd('pionex', { data: { totalInUsdt: -5 } })).toBe(null)
+  })
+
+  it('ومحفظةٌ فارغة صفرٌ حقيقيّ لا null', () => {
+    expect(parseExchangeTotalUsd('pionex', { data: { totalInUsdt: 0 } })).toBe(0)
   })
 })

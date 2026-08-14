@@ -187,9 +187,18 @@ export function buildBalanceRequest(
       }
     }
 
-    // Pionex: الباراميترات مرتّبة ASCII، والطريقة ملصوقة بالمسار بلا فاصل.
+    /*
+     * Pionex: المسار `wallet/balancesFull` لا `account/balances`.
+     *
+     * الثاني موثَّقٌ صراحةً بأنه *"excludes bot and earn accounts"* — ومنصّةُ
+     * بوتاتٍ يُقرأ منها الـspot وحده تُخرج رقماً ناقصاً بلا أن تقول، وهو
+     * بالضبط صنف العطل الذي وُلد منه تدقيق آب 2026. والأول يشمل حساب
+     * البوتات وحساب العقود (`Spot (Bot Account)` و`Futures (Trader Account)`).
+     *
+     * والباراميترات مرتّبة ASCII، والطريقة ملصوقة بالمسار بلا فاصل.
+     */
     case 'pionex': {
-      const path = '/api/v1/account/balances'
+      const path = '/api/v1/wallet/balancesFull'
       const query = sortedQuery({ timestamp: String(ts) })
       return {
         method: 'GET',
@@ -290,12 +299,46 @@ export function parseBalances(exchange: Exchange, payload: unknown): CoinBalance
       }
       return out
 
-    case 'pionex': {
-      const balances = asObject(data['data'])['balances']
-      for (const row of asArray(balances)) push(row['coin'], row['free'], row['frozen'])
+    /*
+     * Pionex لا تُقرأ كمياتٍ بل مجموعاً — انظر `parseExchangeTotalUsd`.
+     *
+     * `balancesFull` تعطي `totalInUsdt` شاملاً رأسمال البوتات، ولا تعطي
+     * تركيبة كل بوتٍ بشكلٍ منمَّط: حقل `buOrderData` في قائمة البوتات
+     * موصوفٌ في التوثيق بأنه «بنية ديناميكية» بلا أنواع. فتركيبُ المجموع
+     * من الكميات هنا يعني اختراع بنيةٍ لم تُوثَّق.
+     */
+    case 'pionex':
       return out
-    }
   }
+}
+
+
+/**
+ * مجموعُ المحفظة بالدولار **كما تحسبه المنصّة نفسها**.
+ *
+ * القاعدة العامة في هذا الملف أن نحسب نحن (كمية × سعر)، وPionex استثناءٌ
+ * معلَن لا مخالفةٌ صامتة — وهذا هو الفرق الذي تطلبه قاعدة CLAUDE.md
+ * الثانية: عالَم الرقم يُصرَّح به:
+ *
+ * • رأسمال البوتات لا يظهر كميّاتٍ منمَّطة في أيّ مسارٍ موثَّق (`buOrderData`
+ *   «بنية ديناميكية» بلا أنواع)، فحسابُه عندنا اختراعُ بنية.
+ * • ومنصّةُ بوتاتٍ يُقرأ سبوتُها وحده تُخرج رقماً ناقصاً صامتاً — وهو أسوأ
+ *   من رقمٍ من عالمٍ آخر مُعلَن.
+ * • والرقم الناتج يطابق ما يراه صاحبه في تطبيق المنصّة، وهو ما طلبه أصلاً.
+ *
+ * `null` تعني «هذه المنصّة لا تعطي مجموعاً» — فيُحسب من الكميات كالمعتاد.
+ */
+export function parseExchangeTotalUsd(exchange: Exchange, payload: unknown): number | null {
+  if (exchange !== 'pionex') return null
+
+  const data = asObject(asObject(payload)['data'])
+  const total = Number(data['totalInUsdt'])
+  return Number.isFinite(total) && total >= 0 ? total : null
+}
+
+/** هل يأتي المجموع من المنصّة بدل أن نحسبه؟ يُعلَن للواجهة لتقولها. */
+export function usesExchangeTotal(exchange: Exchange): boolean {
+  return exchange === 'pionex'
 }
 
 function asArray(value: unknown): Loose[] {

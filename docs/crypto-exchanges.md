@@ -47,7 +47,7 @@
 | Binance | Funding و Earn | `POST /sapi/v3/asset/getUserAsset` (الأقرب لمسارٍ جامع) |
 | OKX | التمويل والادخار | `/api/v5/asset/balances` و`/api/v5/finance/savings/balance` |
 | Bybit | محفظة التمويل (FUND) | `/v5/asset/transfer/query-account-coins-balance?accountType=FUND` |
-| **Pionex** | **أرصدة البوتات و Earn** — وهي جوهر المنصّة | مسارات البوتات (تحتاج صلاحية Bot reading) — **غير مُتحقَّقة بعد** |
+| **Pionex** | البوتات وEarn عن `account/balances` | ✅ حُلَّ: نستعمل `wallet/balancesFull` (يشمل البوتات) — ويبقى **Earn خارجه** |
 
 الوثائق تنصّ صراحةً أن `/api/v1/account/balances` عند Pionex
 *"excludes bot and earn accounts"*. ومنصّة بوتات يُقرأ منها الـ spot وحده
@@ -109,16 +109,56 @@
 - **الصلاحية:** View.
 - ⚠️ تغطية أرصدة staking/Earn عبر هذا المسار **غير مؤكّدة**.
 
-## Pionex
+## Pionex — المنصّة المُنفَّذة
 
+- **الوثائق الحالية:** `https://www.pionex.com/docs/api-docs` (وكل صفحة متاحة خاماً بإضافة `.md`، والفهرس في `/docs/llms.txt`). النطاق القديم `pionex-doc.gitbook.io` **مهجور**.
 - **Base:** `https://api.pionex.com`
-- **المسار:** `GET /api/v1/account/balances`
-- **التوقيع:** HMAC-SHA256 hex على `METHOD + PATH + "?" + sortedQuery` — الباراميترات **مرتّبة ASCII بالمفتاح**، والطابع منها.
+- **التوقيع:** HMAC-SHA256 hex على `METHOD + PATH + "?" + sortedQuery` — الباراميترات **مرتّبة ASCII بالمفتاح**، والطابع منها. مطابقٌ لكل مسارات Pionex بلا استثناء (spot و bot و earn و wallet).
 - **الترويسات:** `PIONEX-KEY`، `PIONEX-SIGNATURE`.
 - **الزمن:** ms في الـquery، **نافذة ±20 ثانية** فقط.
-- **الرد:** `data.balances[]` بحقول `coin` و`free` و`frozen`.
-- ⚠️ **يستثني البوتات وEarn** — انظر قسم «الرصيد الناقص صامتاً».
 - ❓ لا ذكر لسياسة IP في الوثائق إطلاقاً.
+
+### المسار المعتمد: `GET /api/v1/wallet/balancesFull`
+
+```
+data.totalInUsdt        ← المجموع المعتمد
+data.totalInBtc
+data.prices{coin → {priceInUsd, …}}
+data.botAccount{totalInUsdt, detail[…]}     ← Spot (Bot Account)
+data.traderAccount{totalInUsdt, detail[…]}  ← Futures (Trader Account)
+```
+
+**ولماذا هو لا `account/balances`:** الأخير موثَّقٌ صراحةً بأنه
+*"excludes bot and earn accounts"* — ومنصّةُ بوتاتٍ يُقرأ سبوتُها وحده تُخرج
+رقماً ناقصاً صامتاً.
+
+**ولماذا نأخذ مجموعها لا نحسبه:** لا يوجد **أيّ** حقل «قيمة حالية» لبوت في
+التوثيق؛ أقصى ما يُعطى مكوّنات العملة (`baseAmount` + `quoteAmount`)، وحقل
+`buOrderData` في قائمة البوتات موصوفٌ حرفياً بأنه *"dynamic structure"* بلا
+أنواع. فتركيبُ المجموع عندنا اختراعُ بنيةٍ غير موثَّقة — والمجموع الجاهز
+يطابق ما يراه صاحبه في تطبيق المنصّة. **استثناءٌ معلَن** لقاعدة «نحن نحسب»،
+مصرَّحٌ به في الكود وفي الواجهة (قاعدة CLAUDE.md الثانية).
+
+⚠️ **تناقض في التوثيق:** صفحة `wallet-api/general-info/authentication` تكتب
+المسار `/api/v1/balancesFull` وصلاحية `Trade reading`، بينما مواصفة OpenAPI
+وصفحة الصلاحيات تقولان `/api/v1/wallet/balancesFull` وصلاحية `Enable reading`.
+المصدران الأخيران أرجح (اتفاقهما + كونهما المواصفة).
+
+### ما يبقى خارج المجموع
+
+`balancesFull` نطاقُه *"Spot (Bot Account) and Futures (Trader Account)"* —
+و**Earn غير مذكور**. مساراه:
+
+- `GET /api/v1/earn/dual/balances` — منمَّط: `data.balances[]` بحقول `base`، `coin`، `free`، `frozen`. (بارامتر `merge=true` يدمج العملة عبر عملات الأساس.)
+- `GET /api/v1/earn/arbitrage/fetchUserBalances` — ⚠️ **بلا أسماء حقول موثَّقة إطلاقاً** (`pass-through of the upstream gRPC`). لا يُبنى عليه بلا مفتاح حقيقي يكشف شكله.
+
+الصلاحية لقراءة Earn هي **Enable reading** لا `Earn` (تلك للـstake/invest).
+وقراءة البوتات تفصيلاً تحتاج **Bot reading**، ولا نحتاجها ما دام المجموع كافياً.
+
+### الترقيم
+
+`pageToken` طلباً و`nextPageToken`/`previousPageToken` رداً — **بلا حجم صفحة
+ولا عدد إجمالي**، فلا يُعرف كم بقي حتى تنتهي الرموز.
 
 ---
 
@@ -127,6 +167,7 @@
 يُذكَر صراحةً كي لا يُبنى عليه:
 
 - Binance Simple Earn: المسارات مذكورة في الفهرس ولم تُفتح صفحاتها للتأكّد.
-- Pionex: مسارات أرصدة البوتات — الجزء الأهم في المنصّة.
+- Pionex: شكل `earn/arbitrage/fetchUserBalances` — بلا حقولٍ موثَّقة.
+- Pionex: هل يشمل `botAccount` رأسمال البوتات الجارية أم أرصدةً حرّة فقط؟ عدّاد `detail[].type` غير موثَّق.
 - Coinbase: تغطية staking.
 - Binance: سياسة انتهاء المفاتيح بلا IP بعد إلغاء إعلان 2021.
