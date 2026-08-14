@@ -45,6 +45,7 @@ comment on column public.crypto_wallets.asset_id is
 
 alter table public.crypto_wallets enable row level security;
 
+drop policy if exists "crypto_wallets_own" on public.crypto_wallets;
 create policy "crypto_wallets_own" on public.crypto_wallets
   for all using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
