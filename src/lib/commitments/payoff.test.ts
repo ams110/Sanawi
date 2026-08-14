@@ -346,3 +346,17 @@ describe('الحالات الحدّية', () => {
     expect(orderDebts(dirty, 'snowball').map((d) => d.id)).toEqual(['سالب', 'سليم', 'مجهول'])
   })
 })
+
+// فائدةُ خطةٍ مقطوعةٍ عند السقف ناقصة، وطرحُها كان يُخرج «توفيراً» بلا
+// معنى يُعرض على الشاشة. (تدقيق آب 2026: ل6)
+describe('المقارنة مع خطة مستحيلة', () => {
+  it('لا «توفير فائدة» حين لا تنتهي الخطة', () => {
+    // الحد الأدنى أصغر من فائدة الشهر: الدين يكبر أسرع مما يُدفع فلا ينتهي.
+    const cmp = comparePayoff({
+      debts: [debt({ id: 'a', balance: 100000, minimumPayment: 10, annualInterestPercent: 30 })],
+    })
+    expect(cmp.avalanche.isImpossible).toBe(true)
+    expect(cmp.interestSaved).toBe(null)
+    expect(cmp.monthsSaved).toBe(null)
+  })
+})

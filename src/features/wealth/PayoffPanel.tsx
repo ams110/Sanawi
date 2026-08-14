@@ -84,12 +84,14 @@ export function PayoffPanel({ debts }: { debts: readonly PayoffDebt[] }) {
        */}
       <p
         className={`rounded-2xl px-4 py-3 text-[13px] font-semibold ${
-          comparison.interestSaved > 0 ? 'bg-brand-soft text-brand' : 'bg-surface-muted text-text-muted'
+          comparison.interestSaved !== null && comparison.interestSaved > 0
+            ? 'bg-brand-soft text-brand'
+            : 'bg-surface-muted text-text-muted'
         }`}
       >
         {allZeroInterest
           ? t('payoff.noInterest')
-          : comparison.interestSaved > 0
+          : comparison.interestSaved !== null && comparison.interestSaved > 0
             ? `${t('payoff.saves', { amount: formatMoney(comparison.interestSaved) })}${
                 comparison.monthsSaved && comparison.monthsSaved > 0
                   ? ` · ${t('payoff.savesMonths', { months: monthsLabel(comparison.monthsSaved, t) })}`

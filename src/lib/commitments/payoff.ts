@@ -64,7 +64,8 @@ export interface PayoffComparison {
   avalanche: PayoffPlan
   snowball: PayoffPlan
   /** ما توفّره الأولى على الثانية من فائدة. سالب = العكس. */
-  interestSaved: number
+  /** فرق الفائدة بين الخطتين — أو null حين إحداهما مستحيلة فلا معنى للفرق. */
+  interestSaved: number | null
   /** وكم شهراً تختصر. فارغ إن لم تنتهِ إحداهما. */
   monthsSaved: number | null
 }
@@ -285,11 +286,15 @@ export function comparePayoff(input: Omit<PayoffInput, 'strategy'>): PayoffCompa
   const avalanche = buildPayoffPlan({ ...input, strategy: 'avalanche' })
   const snowball = buildPayoffPlan({ ...input, strategy: 'snowball' })
 
+  // خطةٌ لا تنتهي لا تُطرح من خطةٍ تنتهي: الفرق بينهما ليس عدداً — والفائدة
+  // كذلك: فائدةُ خطةٍ مقطوعةٍ عند السقف ناقصة، وطرحُها كان يُخرج «توفيراً»
+  // بلا معنى يُعرض في PayoffPanel. (تدقيق آب 2026: ل6)
+  const comparable = !avalanche.isImpossible && !snowball.isImpossible
+
   return {
     avalanche,
     snowball,
-    interestSaved: round2(snowball.totalInterest - avalanche.totalInterest),
-    // خطةٌ لا تنتهي لا تُطرح من خطةٍ تنتهي: الفرق بينهما ليس عدداً.
+    interestSaved: comparable ? round2(snowball.totalInterest - avalanche.totalInterest) : null,
     monthsSaved:
       avalanche.months === null || snowball.months === null
         ? null

@@ -103,7 +103,12 @@ export function summarizeExpenses(
     daysElapsed,
     daysInMonth,
     dailyAverage,
-    projectedTotal: round2(dailyAverage * daysInMonth),
+    /*
+     * نفس صيغة `buildMonthPanel` حرفياً — التقريب عند حدّ الناتج وحده.
+     * ضربُ المتوسّط **المقرَّب** كان يزحزح الإسقاط أغوراتٍ عن إسقاط
+     * اللوحة لنفس المدخلات: رقمان لسؤالٍ واحد. (تدقيق آب 2026: ش17)
+     */
+    projectedTotal: round2((total / daysElapsed) * daysInMonth),
   }
 }
 

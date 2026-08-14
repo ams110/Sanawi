@@ -302,3 +302,17 @@ describe('القائمة نفسها', () => {
     expect(r.incomeItems).toHaveLength(1)
   })
 })
+
+// فاتورة يومها أكبر من أيام الشهر تُستحقّ آخرَه، لا «بعد أيام» ليومٍ لا يأتي. (ش16)
+describe('يوم استحقاقٍ خارج الشهر', () => {
+  it('يوم 31 في شباط يُقصّ إلى آخره', () => {
+    const r = pendingThisMonth({
+      obligations: [],
+      incomes: [],
+      bills: [bill({ dayOfMonth: 31 })],
+      today: new Date('2026-02-27T00:00:00'),
+    })
+    // شباط 2026 ينتهي في 28: ‏28 − 27 = بعد يوم واحد، لا «بعد 4 أيام».
+    expect(r.items[0]!.note).toEqual({ type: 'due', days: 1 })
+  })
+})

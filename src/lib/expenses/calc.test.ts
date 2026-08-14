@@ -97,3 +97,15 @@ describe('remainingThisMonth', () => {
     expect(r.isOverspent).toBe(true)
   })
 })
+
+/*
+ * إسقاطٌ واحد لا إسقاطان (تدقيق آب 2026: ش17): نفس صيغة `buildMonthPanel` —
+ * التقريب عند حدّ الناتج، لا متوسّطٌ مقرَّبٌ يُضرب فيزحزح الرقم أغورات.
+ */
+describe('توافق الإسقاط مع اللوحة', () => {
+  it('لا تقريب وسيط في projectedTotal', () => {
+    // 155 في 14 يوماً من آب (31): ‏(155÷14)×31 = 343.21 — لا 11.07×31 = 343.17
+    const s = summarizeExpenses([row(155, { spentAt: '2026-08-10' })], AUG, new Date(2026, 7, 14))
+    expect(s.projectedTotal).toBe(343.21)
+  })
+})

@@ -219,3 +219,19 @@ describe('validateShares', () => {
     expect(validateShares(33.34, [33.33, 33.33]).isValid).toBe(true)
   })
 })
+
+// نفس قصّ `obligations/calc.ts`: حصةٌ خارج المدى كانت تُخرج حصةَ شركاء
+// سالبةً تدخل الجموع والتسويات. (تدقيق آب 2026: ل5)
+describe('قصّ الحصة', () => {
+  it('حصةٌ فوق 100 لا تُخرج شركاءَ سالبين', () => {
+    const v = viewCommitment(bill({ mySharePercent: 120 }), TODAY)
+    expect(v.myAmount).toBe(300)
+    expect(v.partnersAmount).toBe(0)
+  })
+
+  it('وحصةٌ سالبة تُقصّ عند الصفر', () => {
+    const v = viewCommitment(bill({ mySharePercent: -10 }), TODAY)
+    expect(v.myAmount).toBe(0)
+    expect(v.partnersAmount).toBe(300)
+  })
+})

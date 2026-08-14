@@ -85,7 +85,15 @@ export function calculateObligation(input: ObligationCalcInput): ObligationCalcR
   const remainingAmount = Math.max(0, round2(myTotal - myFundBalance))
 
   const rawMonthsRemaining = monthsUntil(input.nextDueDate, today)
-  const isOverdue = rawMonthsRemaining < 0 || (rawMonthsRemaining === 0 && toDate(input.nextDueDate) < today)
+  /*
+   * «فات موعده» يوم تقويميّ فائت لا طابعٌ زمنيّ أصغر: الموعد منتصفُ ليلٍ
+   * و`today` يحمل الساعة، فمقارنتهما الخام كانت تُعلن التأخير صباحَ يوم
+   * الاستحقاق نفسه — بينما `commitments/due.ts` يصنّف اليوم نفسه «اليوم».
+   * (تدقيق آب 2026: ل2)
+   */
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const isOverdue =
+    rawMonthsRemaining < 0 || (rawMonthsRemaining === 0 && toDate(input.nextDueDate) < startOfToday)
   const monthsRemaining = Math.max(1, rawMonthsRemaining)
 
   const monthlyInstallment = remainingAmount === 0 ? 0 : ceilShekel(remainingAmount / monthsRemaining)

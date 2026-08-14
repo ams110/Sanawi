@@ -38,7 +38,9 @@ const toDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(`${
 
 export function renewAfterPayment(input: RenewalInput): RenewalResult {
   const share = Math.min(100, Math.max(0, input.mySharePercent ?? 100))
-  const myTotal = round2((input.totalAmount * share) / 100)
+  // هذا محرّك دفعٍ لا محرّك دَين: مبلغٌ سالب خطأُ إدخال، وتمريره كان يولّد
+  // قيدَ دفعٍ سالباً ورصيداً مرحَّلاً وهمياً موجباً. (تدقيق آب 2026: ل4)
+  const myTotal = round2(Math.max(0, (input.totalAmount * share) / 100))
   const balance = Math.max(0, input.myFundBalance)
   const paidDate = input.paidDate ?? new Date()
 

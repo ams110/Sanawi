@@ -177,10 +177,14 @@ export function pendingThisMonth(input: PendingInput): PendingResult {
    * بلا شرط الدفع، فتأكيدُ المتوسّط بضغطة يكتبه في الجدول الذي وُلد منه —
    * حلقةٌ تُثبّت رقماً لم يدفعه أحد. فيُكتب في الحقل ويصحّحه صاحبه من ورقته.
    */
+  // فاتورة يومها 31 في شباط تُستحقّ آخرَه لا «بعد 3 أيام» ليومٍ لا يأتي. (ش16)
+  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+
   for (const b of input.bills) {
     if (!b.isDueThisMonth || b.isRecorded) continue
 
-    const days = b.dayOfMonth === null ? null : b.dayOfMonth - today.getDate()
+    const days =
+      b.dayOfMonth === null ? null : Math.min(b.dayOfMonth, lastDayOfMonth) - today.getDate()
     const suggestion = b.average > 0 ? b.average : b.amount
 
     items.push({

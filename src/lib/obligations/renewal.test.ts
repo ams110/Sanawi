@@ -108,3 +108,20 @@ describe('التجديد بعد الدفع', () => {
     expect(r.newInstallment).toBe(1000)
   })
 })
+
+// محرّك دفعٍ لا محرّك دَين: مبلغٌ سالب خطأُ إدخالٍ لا يولّد قيداً سالباً
+// ولا رصيداً مرحَّلاً وهمياً. (تدقيق آب 2026: ل4)
+describe('المدخل الفاسد', () => {
+  it('مبلغٌ سالب: لا دفعَ ولا ترحيلَ ولا نقص', () => {
+    const r = renewAfterPayment({
+      totalAmount: -1200,
+      myFundBalance: 0,
+      nextDueDate: '2026-11-01',
+      recurrenceMonths: 6,
+    })
+    expect(r.amountPaid).toBe(0)
+    expect(r.carriedBalance).toBe(0)
+    expect(r.shortfall).toBe(0)
+    expect(r.newInstallment).toBe(0)
+  })
+})

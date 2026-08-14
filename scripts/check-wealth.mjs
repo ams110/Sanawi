@@ -251,7 +251,7 @@ step('الخطتان تنتهيان', avalanche.months !== null && snowball.mont
 step('لا خطة مستحيلة هنا', avalanche.isImpossible === false)
 
 const cmp = comparePayoff({ debts, extraMonthly: 300 })
-step('الانهيار لا يخسر أمام كرة الثلج', cmp.interestSaved >= 0, `${cmp.interestSaved} ₪`)
+step('الانهيار لا يخسر أمام كرة الثلج', cmp.interestSaved !== null && cmp.interestSaved >= 0, `${cmp.interestSaved} ₪`)
 
 /* ── 8) عزل RLS ────────────────────────────────────────────── */
 

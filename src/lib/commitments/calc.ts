@@ -78,7 +78,10 @@ export function viewCommitment(
   input: CommitmentInput,
   today: Date = new Date(),
 ): CommitmentView {
-  const myAmount = round2((input.amount * input.mySharePercent) / 100)
+  // نفس قصّ `obligations/calc.ts` حرفياً: حصةٌ فوق 100 كانت تُخرج حصةَ
+  // شركاء سالبةً تدخل الجموع والتسويات. (تدقيق آب 2026: ل5)
+  const share = Math.min(100, Math.max(0, input.mySharePercent))
+  const myAmount = round2((input.amount * share) / 100)
   const partnersAmount = round2(input.amount - myAmount)
   const started = hasStarted(input.startsOn, today)
 
