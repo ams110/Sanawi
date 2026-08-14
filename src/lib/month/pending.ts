@@ -1,38 +1,35 @@
 import { summarizeDeposits, type DepositRow } from '../obligations/deposits.js'
+import { FREQUENCY_TO_MONTHLY } from '../budget/calc.js'
 
 /**
  * ما زال عليك هذا الشهر.
  *
  * التطبيق كلّه بُني ليجعل فعلاً واحداً عادةً شهرية: أن تدفع لنفسك قسط التزامك
  * قبل أن يحلّ. ثم لم يكن في التطبيق مكانٌ واحد يقول **أيّ صندوقٍ لم يستلم
- * قسطه**. الرقم موجودٌ ومختبَر (`alreadyDepositedThisMonth`)، ولا يُقرأ إلا
- * داخل نموذج إيداعٍ فتحه المستخدم بنفسه — أي بعد أن تذكّر وحده.
- *
- * والنتيجة أن الشاشة الأولى تعرض ثلاثة أرقامٍ كبيرة لا يترتّب على أيٍّ منها
- * فعل، بينما السؤال الوحيد الذي يفتح التطبيق لأجله — «شو لازم أعمل؟» — بلا
- * جواب.
+ * قسطه**. الرقم موجودٌ ومختبَر (`thisMonthTotal`)، ولا يُقرأ إلا داخل نموذج
+ * إيداعٍ فتحه المستخدم بنفسه — أي بعد أن تذكّر وحده.
  *
  * وستّ قواعد تحكم هذه القائمة، مكتوبةٌ هنا لأنها هي الميزة لا العرض:
  *
- * ١. **ما تمّ لا يظهر.** الصندوق الذي أُودع فيه هذا الشهر يسقط، والمصدر الذي
- *    سُجّل له دخلٌ يسقط. فالحارس يصير **تعريفاً للقائمة** لا سؤالاً يُطرح بعد
- *    أن يتحرّك الإصبع — وهذا وحده يقتل الإيداع المكرّر من جذره.
+ * ١. **ما تمّ لا يظهر، وما تمّ بعضُه يظهر بباقيه.** الصندوق الذي استلم قسطه
+ *    كاملاً يسقط، والذي استلم بعضه يبقى بالباقي («ضلّ 400 من 500») — إسقاطُه
+ *    كاملاً بإيداع شيكلٍ واحد كان يكذب. (تدقيق آب 2026: ش13)
  *
- * ٢. **لا بندَ بلا رقمٍ وبلا فعلٍ داخل التطبيق.** «اربط صندوقك بحساب» تحذيرٌ
- *    لا زرَّ له، و«رصيدك قديم» كذلك. وسطرٌ لا يُنفَّذ يدرّب صاحبه على تجاهل
- *    السطور كلها — بما فيها ما سيهمّه يوماً. القاعدة بنيةٌ هنا لا انضباط:
- *    كل `PendingItem` يحمل `id` يُنفَّذ عليه.
+ * ٢. **لا بندَ بلا رقمٍ وبلا فعلٍ داخل التطبيق.** كل `PendingItem` يحمل
+ *    `id` يُنفَّذ عليه — تحذيرٌ بلا زرّ يدرّب صاحبه على تجاهل التحذيرات.
  *
- * ٣. **الدخل المتغيّر يظهر بلا رقم.** من دخلُه غير ثابت يُذكَّر بأن يسجّل ما
- *    وصل، ولا يُقترح عليه رقمٌ مخترَع.
+ * ٣. **الدخل قائمةٌ ثانية لا سطرٌ في «عليك».** «ضلّ عليك» تعني ما يخرج منك،
+ *    والدخل يدخل إليك — عدُّه معها جعل العنوان يكذب. (ش6) فالمحرّك يُخرجه
+ *    في `incomeItems` والواجهة تعنونه «بتستنّى دخل».
  *
- * ٤. **الأسبوعي ونصف الشهري يبقيان حتى يكتمل عددهما**، والسطر يقول «٢ من ٤».
+ * ٤. **اكتمال الدخل بالمبلغ لا بعدد القيود** (ش12)، والمكافئ الشهري من
+ *    `FREQUENCY_TO_MONTHLY` وحدها — لا ثابت `weekly: 4` محلّياً يناقض
+ *    ‏52/12 في بقية التطبيق. (ش8) والمتغيّر وحده يبقى بالعدد، إذ لا مبلغ له.
  *
- * ٥. **لا زرّ إخفاء.** الفعل وحده يُنقص السطر. زرُّ الإخفاء يجعل القائمة رأياً،
- *    والقائمة هنا حقيقةٌ محسوبة.
+ * ٥. **لا زرّ إخفاء.** الفعل وحده يُنقص السطر.
  *
- * ٦. **الترتيب إلحاحٌ لا أبجدية**، والحدّ يُقصّ في المحرّك: قائمةٌ لا تُقرأ في
- *    نظرةٍ واحدة ليست قائمة عمل.
+ * ٦. **الترتيب إلحاحٌ لا أبجدية**، والحدّ يُقصّ في المحرّك — و`totalCount`
+ *    يحمل العدد الحقيقي كي لا يقول العنوان «6» والحقيقة سبعة. (ش7)
  *
  * ملف نقي: لا React ولا Supabase ولا ترجمة — يُخرج بنيةً، والنصّ في الواجهة.
  */
@@ -45,8 +42,10 @@ export type PendingNote =
   | { type: 'installment' }
   /** فات موعد الالتزام ولم يُسجَّل دفعه. */
   | { type: 'overdue' }
-  /** وصل بعضه: «سجّلت 2 من 4». */
-  | { type: 'partial'; done: number; total: number }
+  /** أودعتَ بعض القسط — والمبلغ المعروض هو الباقي. */
+  | { type: 'partialDeposit'; deposited: number; total: number }
+  /** وصل بعض المتوقَّع — بالمبالغ لا بعدد القيود. */
+  | { type: 'partial'; received: number; expected: number }
   /** دخلٌ لا تقدير له. */
   | { type: 'variable' }
   /** دخلٌ متوقَّع من مصدرٍ مسجَّل — رقمه من المصدر لا من قسط. */
@@ -90,16 +89,18 @@ export interface PendingIncomeInput {
   amount: number
   frequency: IncomeCadence
   isVariable: boolean
-  /** كم دفعةً سُجّلت من هذا المصدر هذا الشهر. */
+  /** كم وصل من هذا المصدر هذا الشهر — بالمبلغ. */
+  receivedAmount: number
+  /** وكم قيداً — للمتغيّر الذي لا مبلغ متوقَّعاً له. */
   receivedCount: number
 }
 
 export interface PendingBillInput {
   id: string
   name: string
-  /** المقدَّر في الميزانية. */
+  /** المقدَّر في الميزانية — حصّتي. */
   amount: number
-  /** متوسّط ما دُفع فعلاً، أو 0 إن لم يُدفع شيءٌ بعد. */
+  /** متوسّط ما دُفع فعلاً — حصّتي، أو 0 إن لم يُدفع شيءٌ بعد. */
   average: number
   /** بندٌ لم تبدأ دفعاته أو انتهت لا يُحمَّل على هذا الشهر. */
   isDueThisMonth: boolean
@@ -119,15 +120,20 @@ export interface PendingInput {
 }
 
 export interface PendingResult {
+  /** ما يخرج منك: أقساط الصناديق والفواتير — مقصوصةً عند الحدّ. */
   items: PendingItem[]
   /** ما زاد على الحدّ — يُقال عدده ولا يُخفى. */
   hiddenCount: number
+  /** العدد الحقيقي قبل القصّ — هو ما يصلح للعنوان. */
+  totalCount: number
+  /** ما يدخل إليك: دخلٌ متوقَّع لم يكتمل — قائمةٌ ثانية بعنوانها. */
+  incomeItems: PendingItem[]
   /** كل ما عليه تمّ — حالةٌ تستحقّ أن تُقال لا أن تُترك فراغاً. */
   isClear: boolean
 }
 
-/** كم دفعةً تصل في الشهر من هذه الدورية. */
-const PER_MONTH: Record<IncomeCadence, number> = { monthly: 1, biweekly: 2, weekly: 4 }
+/** سماحية أغورات: قسطٌ سُدّ إلا فتاتَ تقريبٍ سُدّ. */
+const EPSILON = 0.005
 
 const round2 = (n: number): number => Math.round(n * 100) / 100
 
@@ -135,23 +141,32 @@ export function pendingThisMonth(input: PendingInput): PendingResult {
   const today = input.today ?? new Date()
   const limit = Math.max(1, input.limit ?? 6)
   const items: PendingItem[] = []
+  const incomeItems: PendingItem[] = []
 
   /* ── الصناديق ──────────────────────────────────────────────
    *
    * الترتيب: ما فات موعده أولاً — هو الوحيد الذي يكلّف تأخيرُه مالاً.
+   * و`thisMonthTotal` إيداعاتي أنا وحدي — إيداع الشريك لا يسدّ قسطي. (ل1)
    */
   for (const o of input.obligations) {
     if (o.monthlyInstallment <= 0) continue
     const movements = summarizeDeposits(o.deposits, { today })
-    if (movements.alreadyDepositedThisMonth) continue
+    const deposited = movements.thisMonthTotal
+    const left = round2(o.monthlyInstallment - deposited)
+    if (left <= EPSILON) continue
 
+    const partial = deposited > 0
     items.push({
       kind: 'deposit',
       id: o.id,
       name: o.name,
-      amount: round2(o.monthlyInstallment),
+      amount: left,
       isCertain: true,
-      note: o.isOverdue ? { type: 'overdue' } : { type: 'installment' },
+      note: o.isOverdue
+        ? { type: 'overdue' }
+        : partial
+          ? { type: 'partialDeposit', deposited: round2(deposited), total: round2(o.monthlyInstallment) }
+          : { type: 'installment' },
       urgency: o.isOverdue ? 0 : 20,
     })
   }
@@ -183,41 +198,61 @@ export function pendingThisMonth(input: PendingInput): PendingResult {
     })
   }
 
-  /* ── الدخل ─────────────────────────────────────────────────
+  /* ── الدخل — قائمةٌ ثانية ──────────────────────────────────
    *
-   * آخر القائمة عمداً: تسجيل الدخل لا يفوت موعداً، وإنما يحوّل أرقام الشهر
-   * من تقديرٍ إلى واقع. ومن لم يسجّله لا يخسر مالاً — يخسر دقّةَ رقم.
+   * تسجيل الدخل لا يفوت موعداً، وإنما يحوّل أرقام الشهر من تقديرٍ إلى
+   * واقع. ومن لم يسجّله لا يخسر مالاً — يخسر دقّةَ رقم. والاكتمال بالمبلغ:
+   * قيدٌ واحد بنصف الراتب نصفُ اكتمال، لا اكتمالاً يسقط به السطر. (ش12)
    */
   for (const source of input.incomes) {
-    const expected = PER_MONTH[source.frequency] ?? 1
-    if (source.receivedCount >= expected) continue
+    if (source.isVariable) {
+      // المتغيّر لا مبلغ متوقَّعاً له، فيبقى العدّ: تذكيرٌ بأن يُسجَّل ما وصل.
+      const expectedCount = Math.max(1, Math.round(FREQUENCY_TO_MONTHLY[source.frequency] ?? 1))
+      if (source.receivedCount >= expectedCount) continue
+      incomeItems.push({
+        kind: 'income',
+        id: source.id,
+        name: source.name,
+        amount: null,
+        isCertain: false,
+        note: { type: 'variable' },
+        urgency: 40,
+      })
+      continue
+    }
 
-    const partial = source.receivedCount > 0
+    const expectedMonthly = round2(source.amount * (FREQUENCY_TO_MONTHLY[source.frequency] ?? 1))
+    if (expectedMonthly <= 0) continue
+    const left = round2(expectedMonthly - source.receivedAmount)
+    if (left <= EPSILON) continue
 
-    items.push({
+    const partial = source.receivedAmount > 0
+    incomeItems.push({
       kind: 'income',
       id: source.id,
       name: source.name,
-      // المتغيّر بلا رقم: اختراع رقمٍ له هو ما كان يضخّم الدخل المتوقَّع.
-      amount: source.isVariable ? null : round2(source.amount),
-      isCertain: !source.isVariable,
+      amount: left,
+      isCertain: true,
       // «قسطك الشهري» تخصّ الصندوق وحده: الدخل يأتي إليك ولا تدفعه لنفسك.
-      note: source.isVariable
-        ? { type: 'variable' }
-        : partial
-          ? { type: 'partial', done: source.receivedCount, total: expected }
-          : { type: 'expected' },
+      note: partial
+        ? { type: 'partial', received: round2(source.receivedAmount), expected: expectedMonthly }
+        : { type: 'expected' },
       urgency: 40,
     })
   }
 
   // الترتيب ثابتٌ عند تساوي الإلحاح: قائمةٌ تعيد ترتيب نفسها بين قراءتين
   // تجعل الإصبع يخطئ السطر.
-  items.sort((a, b) => a.urgency - b.urgency || a.name.localeCompare(b.name, 'ar'))
+  const byUrgency = (a: PendingItem, b: PendingItem): number =>
+    a.urgency - b.urgency || a.name.localeCompare(b.name, 'ar')
+  items.sort(byUrgency)
+  incomeItems.sort(byUrgency)
 
   return {
     items: items.slice(0, limit),
     hiddenCount: Math.max(0, items.length - limit),
-    isClear: items.length === 0,
+    totalCount: items.length,
+    incomeItems,
+    isClear: items.length === 0 && incomeItems.length === 0,
   }
 }

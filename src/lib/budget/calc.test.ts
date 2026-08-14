@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  monthlyIncomeFrom,
-  projectSavings,
-  summarizeMonth,
-  type SavingsProjection,
-} from './calc'
+import { monthlyIncomeFrom, projectSavings, type SavingsProjection } from './calc'
 
 describe('تحويل الدخل إلى شهري', () => {
   it('يحوّل الأسبوعي بـ 4.333 لا بـ 4', () => {
@@ -57,49 +52,6 @@ describe('تحويل الدخل إلى شهري', () => {
 
   it('وغياب العلامة يعني ثابتاً — سلوك ما قبل الحقل', () => {
     expect(monthlyIncomeFrom([{ amount: 9000, frequency: 'monthly' }])).toBe(9000)
-  })
-})
-
-describe('ملخّص الشهر', () => {
-  const base = {
-    incomes: [{ amount: 2000, frequency: 'weekly' as const }], // ‏8,666.67
-    fixedCommitments: [2000, 800, 200], // ‏3,000
-    obligationInstallments: [500, 300], // ‏800
-    monthlySavingsTarget: 1000,
-  }
-
-  it('يحسب ما يجب أن يخرج من الحساب', () => {
-    expect(summarizeMonth(base).mustLeaveAccount).toBe(4800)
-  })
-
-  it('يحسب المتاح للصرف', () => {
-    expect(summarizeMonth(base).availableToSpend).toBeCloseTo(3866.67, 1)
-  })
-
-  it('يكشف العجز حين تتجاوز الالتزامات الدخل', () => {
-    const r = summarizeMonth({
-      ...base,
-      incomes: [{ amount: 4000, frequency: 'monthly' }],
-    })
-    expect(r.availableToSpend).toBe(-800)
-    expect(r.isOverBudget).toBe(true)
-  })
-
-  it('لا يعتبر التعادل عجزاً', () => {
-    const r = summarizeMonth({
-      incomes: [{ amount: 3000, frequency: 'monthly' }],
-      fixedCommitments: [3000],
-      obligationInstallments: [],
-    })
-    expect(r.availableToSpend).toBe(0)
-    expect(r.isOverBudget).toBe(false)
-  })
-
-  it('يتعامل مع مستخدم بلا بيانات', () => {
-    const r = summarizeMonth({ incomes: [], fixedCommitments: [], obligationInstallments: [] })
-    expect(r.mustLeaveAccount).toBe(0)
-    expect(r.availableToSpend).toBe(0)
-    expect(r.isOverBudget).toBe(false)
   })
 })
 

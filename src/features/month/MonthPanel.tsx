@@ -1,16 +1,20 @@
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
-import { buildMonthPanel, dailyAllowance, type MonthPanelInput } from '@/lib/budget/month'
+import { dailyAllowance, type MonthPanel as MonthPanelView, type MonthPanelInput } from '@/lib/budget/month'
 
 /**
- * الرقم الواحد.
+ * الرقم الواحد — من نداءٍ واحد.
  *
- * التطبيق يعرف الآن خمسة أشياء تخرج من الحساب، ولكلٍّ شاشة. هذه اللوحة
- * تجمعها في جملةٍ واحدة يقرأها المستخدم في نصف ثانية، ثم تفصّلها لمن أراد.
+ * اللوحة تستقبل نتيجة `buildMonthPanel` التي بناها `MonthScreen` ولا تعيد
+ * بناءها: كل بطاقةٍ على الشاشة تقرأ من نفس النتيجة، فيستحيل أن تقول بطاقتان
+ * شيئين متناقضين — وهي العلّة التي وُلد منها تدقيق آب 2026 كلّه. (ش1، ش2)
+ *
+ * والعالمان مصرَّحان: الرقم الكبير من عالم الخطة (المتوقَّع ناقص الملتزَم
+ * ناقص المصروف)، والواصل يُعرض تقدّماً نحو الخطة لا أساسَ حسابٍ بديلاً.
  */
-export function MonthPanel({ input }: { input: MonthPanelInput }) {
+export function MonthPanel({ input, panel: p }: { input: MonthPanelInput; panel: MonthPanelView }) {
   const { t } = useTranslation()
-  const p = buildMonthPanel(input)
+  // «يومية الصرف» من نفس `remaining` المعروض فوقها — مصدرٌ واحد فلا تناقض.
   const allowance = dailyAllowance(p.remaining, input.daysElapsed, input.daysInMonth)
 
   return (
@@ -23,9 +27,19 @@ export function MonthPanel({ input }: { input: MonthPanelInput }) {
         {formatMoney(p.remaining)}
       </p>
 
+      {/* خطةٌ سالبة أصلاً: الدخل لا يغطّي الالتزامات — قبل أي صرف. */}
+      {p.isOverBudget && (
+        <div className="space-y-1 rounded-2xl bg-danger-soft px-4 py-3">
+          <p className="text-sm font-bold text-danger">{t('month.overBudget')}</p>
+          <p className="text-[13px] text-text">{t('month.overBudgetHint')}</p>
+        </div>
+      )}
+
       {/*
        * الإسقاط قبل التفصيل: "بقي معك 2,000" تُقرأ راحةً، و"بوتيرتك ستنتهي
        * بـ 300" تُقرأ تحذيراً — والثانية هي التي تغيّر ما سيفعله اليوم.
+       * والتحذير يصدق الآن: الإسقاط يمدّ الصرفَ وحده، ولا يتّهم «وتيرة
+       * صرفك» بعجزٍ سببُه دخلٌ لم يصل بعد. (ش4)
        */}
       <p
         className={`rounded-2xl px-4 py-3 text-sm font-bold ${
@@ -44,20 +58,24 @@ export function MonthPanel({ input }: { input: MonthPanelInput }) {
       </p>
 
       <div className="space-y-2 border-t border-border pt-3">
-        <Row
-          label={p.incomeIsActual ? t('panel.incomeActual') : t('panel.incomeExpected')}
-          amount={p.income}
-          tone="income"
-        />
-        {!p.incomeIsActual && (
-          <p className="text-xs text-text-muted">{t('panel.incomeNotLogged')}</p>
-        )}
-        {p.incomeIsActual && p.incomeGap !== 0 && (
-          <p className={`text-xs font-semibold ${p.incomeGap < 0 ? 'text-accent' : 'text-brand'}`}>
-            {p.incomeGap < 0
-              ? t('panel.incomeBelow', { amount: formatMoney(Math.abs(p.incomeGap)) })
-              : t('panel.incomeAbove', { amount: formatMoney(p.incomeGap) })}
-          </p>
+        {p.incomeBasis === 'expected' ? (
+          <>
+            <Row label={t('panel.incomeExpected')} amount={p.income} tone="income" />
+            {/* الواصل تقدّمٌ نحو الخطة — يُعرض ولا يقلب الحسبة. (ش3) */}
+            <p className="text-xs font-semibold text-text-muted">
+              {t('panel.incomeProgress', { amount: formatMoney(p.receivedIncome) })}
+            </p>
+            {p.incomeGap > 0 && (
+              <p className="text-xs font-semibold text-brand">
+                {t('panel.incomeAbove', { amount: formatMoney(p.incomeGap) })}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <Row label={t('panel.incomeReceived')} amount={p.income} tone="income" />
+            <p className="text-xs text-text-muted">{t('panel.incomeBasisReceived')}</p>
+          </>
         )}
       </div>
 

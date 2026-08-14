@@ -4,20 +4,20 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { summarizeMonth } from '@/lib/budget/calc'
+import { buildMonthPanel } from '@/lib/budget/month'
 import { listMonthDeposits, listObligations } from '@/features/obligations/api'
 import { listBills } from '@/features/bills/api'
 import { pendingThisMonth } from '@/lib/month/pending'
 import { viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
 import { PendingPanel } from './PendingPanel'
-import { listFixedCommitments, listIncomes } from '@/features/money/api'
+import { listIncomes } from '@/features/money/api'
 import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
 import { listAccounts } from '@/features/accounts/api'
 import { envelopesByAccount, runwayDays, summarizeAccounts } from '@/lib/accounts/calc'
 import { summarizeExpenses } from '@/lib/expenses/calc'
-import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
+import { summarizeMonthlyLoad } from '@/lib/commitments/calc'
 import { monthlyIncomeFrom } from '@/lib/budget/calc'
 import type { MonthPanelInput } from '@/lib/budget/month'
 import { MonthPanel } from './MonthPanel'
@@ -47,11 +47,10 @@ export function MonthScreen() {
     queryKey: ['month', monthKey()],
     queryFn: async () => {
       const month = monthKey()
-      const [obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts] =
+      const [obligations, incomes, details, expenses, entries, deposits, bills, accounts] =
         await Promise.all([
           listObligations(),
           listIncomes(),
-          listFixedCommitments(),
           listCommitmentDetails(),
           listExpenses(month),
           listIncomeEntries(month),
@@ -62,7 +61,7 @@ export function MonthScreen() {
           // الموثَّقة في mcp/data.ts.
           listAccounts(true),
         ])
-      return { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts }
+      return { month, obligations, incomes, details, expenses, entries, deposits, bills, accounts }
     },
   })
   const error = loadError ? failureText(loadError, t, t('money.loadFailed')) : null
@@ -75,8 +74,7 @@ export function MonthScreen() {
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
   const derived = useMemo(() => {
     if (!raw) return null
-    const { month, obligations, incomes, fixed, details, expenses, entries, deposits, bills, accounts } =
-      raw
+    const { month, obligations, incomes, details, expenses, entries, deposits, bills, accounts } = raw
 
     /*
      * «ضلّ عليك» — الشاشة تبدأ الكلام.
@@ -92,10 +90,20 @@ export function MonthScreen() {
       depositsByObligation.set(d.obligation_id, list)
     }
 
-    const receivedBySource = new Map<string, number>()
+    // بالمبلغ وبالعدد معاً: الاكتمال يُقاس بالمبلغ (قيدٌ بنصف الراتب نصفُ
+    // اكتمال)، والمتغيّر الذي لا مبلغ له يبقى على العدّ.
+    const receivedAmountBySource = new Map<string, number>()
+    const receivedCountBySource = new Map<string, number>()
     for (const entry of entries) {
       if (!entry.source_id) continue
-      receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
+      receivedAmountBySource.set(
+        entry.source_id,
+        (receivedAmountBySource.get(entry.source_id) ?? 0) + Number(entry.amount),
+      )
+      receivedCountBySource.set(
+        entry.source_id,
+        (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
+      )
     }
 
     const pending = pendingThisMonth({
@@ -119,7 +127,8 @@ export function MonthScreen() {
         amount: Number(i.amount),
         frequency: i.frequency,
         isVariable: Boolean(i.is_variable),
-        receivedCount: receivedBySource.get(i.id) ?? 0,
+        receivedAmount: receivedAmountBySource.get(i.id) ?? 0,
+        receivedCount: receivedCountBySource.get(i.id) ?? 0,
       })),
       bills: bills.map((row) => {
         const view = viewBillCommitment({
@@ -143,29 +152,6 @@ export function MonthScreen() {
 
     const obligationsTotal = obligations.reduce((s, o) => s + o.calc.monthlyInstallment, 0)
 
-    // التقدير يرى ما تراه اللوحة: بندٌ انتهى قسطه أو لم يبدأ بعد لا دفعة
-    // له هذا الشهر، فحسابه يجعل الرقمين يختلفان لغير السبب المقصود.
-    const dueThisMonth = fixed.filter((f) => {
-      const view = viewCommitment({
-        amount: Number(f.amount),
-        startsOn: f.starts_on,
-        endsOn: f.ends_on,
-        mySharePercent: 100,
-      })
-      return view.hasStarted && !view.isFinished
-    })
-
-    const summary = summarizeMonth({
-      incomes: incomes.map((i) => ({
-        amount: Number(i.amount),
-        frequency: i.frequency,
-        isVariable: Boolean(i.is_variable),
-      })),
-      fixedCommitments: dueThisMonth.map((f) => Number(f.amount)),
-      obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
-      monthlySavingsTarget: savingsTarget,
-    })
-
     /*
      * الحمل الشهري يأتي من commitment_details لا من fixed_commitments:
      * الأول يحمل حصّتي بالشيكل ويعرف أيّ بندٍ انتهى قسطه، والثاني يعطي
@@ -181,7 +167,7 @@ export function MonthScreen() {
     )
     const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
 
-    const panel: MonthPanelInput = {
+    const panelInput: MonthPanelInput = {
       expectedIncome: monthlyIncomeFrom(
         incomes.map((i) => ({
           amount: Number(i.amount),
@@ -198,6 +184,12 @@ export function MonthScreen() {
       daysElapsed: spending.daysElapsed,
       daysInMonth: spending.daysInMonth,
     }
+    /*
+     * نداءٌ واحد للمحرّك، وكلُّ رقمٍ على الشاشة منه (قاعدة CLAUDE.md
+     * الثامنة): بطاقة «لازم يطلع» واللوحة و«يومية الصرف» كلها من `panel`
+     * هذا — فيستحيل أن تتناقض بطاقتان كما كان. (تدقيق آب 2026: ش1، ش5)
+     */
+    const panel = buildMonthPanel(panelInput)
 
     /*
      * الصناديق بعلامة بنكها — التجميع من `envelopesByAccount` النقي، على ما
@@ -253,16 +245,17 @@ export function MonthScreen() {
 
     return {
       pending,
-      summary,
+      panelInput,
       panel,
-      hasIncome: incomes.length > 0,
+      // قيودٌ حرّة بلا مصادر دخلٌ أيضاً: من وصله مال لا تُخفى عنه اللوحة. (ش18)
+      hasIncome: incomes.length > 0 || entries.length > 0,
       funds,
       fundsAccounts,
       runway,
     }
   }, [raw, savingsTarget])
 
-  const summary = derived?.summary ?? null
+  const panelInput = derived?.panelInput ?? null
   const panel = derived?.panel ?? null
   const pending = derived?.pending ?? null
   const obligationRows = raw?.obligations ?? []
@@ -277,7 +270,7 @@ export function MonthScreen() {
     )
   }
 
-  if (error || !summary) {
+  if (error || !panel) {
     return (
       <p role="alert" className="m-5 rounded-2xl bg-danger-soft px-4 py-3 text-sm text-danger">
         {error}
@@ -293,11 +286,16 @@ export function MonthScreen() {
         <p className="text-sm text-text-muted">{t('month.screenSubtitle')}</p>
       </div>
 
-      {/* الرقم الذي يُقرأ في نصف ثانية */}
+      {/*
+       * الرقم الذي يُقرأ في نصف ثانية — من نفس المحرّك الذي يغذّي اللوحة،
+       * وبحصّتي من الفواتير لا بمبلغها الكامل. كانت هذه البطاقة من محرّكٍ
+       * ثانٍ (`summarizeMonth`) يحسب الفواتير كاملةً، فتقول 3,179 واللوحة
+       * تحتها 2,850 لنفس البنود. (ش5)
+       */}
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
         <p className="text-sm text-text-muted">{t('month.title')}</p>
         <p className="num mt-2 text-6xl font-bold leading-none text-brand">
-          {formatMoney(summary.mustLeaveAccount)}
+          {formatMoney(panel.committed)}
         </p>
       </section>
 
@@ -318,35 +316,15 @@ export function MonthScreen() {
       )}
 
       {/*
-       * اللوحة الموحّدة تسبق التفاصيل: هي جواب "كم بيدي" بعد كل شيء، بينما
-       * ما تحتها يجيب "ممّ يتكوّن ذلك".
+       * اللوحة الموحّدة — الجواب الوحيد على «كم بيدي».
+       *
+       * بطاقة «بيضل معك للصرف» التي كانت هنا تحتها حُذفت: كانت من محرّكٍ
+       * ثانٍ بفرضياتٍ أخرى (دخل متوقَّع × فواتير كاملة) فتقول «5,562+»
+       * واللوحة «−4,397» على الشاشة نفسها. صار الرقمان واحداً في اللوحة،
+       * والعالمان مصرَّحَين: الخطة أساساً والواصل تقدّماً. (ش1، ش2)
        */}
-      {panel && hasIncome && <MonthPanel input={panel} />}
-
-      {/* المتاح للصرف: الجواب على "هل أنا مرتاح فعلاً؟" */}
-      {hasIncome ? (
-        <section
-          className={`rounded-3xl border p-6 text-center ${
-            summary.isOverBudget ? 'border-danger/30 bg-danger-soft' : 'border-border bg-surface'
-          }`}
-        >
-          <p className={`text-sm ${summary.isOverBudget ? 'text-danger' : 'text-text-muted'}`}>
-            {t('month.availableLabel')}
-          </p>
-          <p
-            className={`num mt-2 text-5xl font-bold leading-none ${
-              summary.isOverBudget ? 'text-danger' : 'text-text'
-            }`}
-          >
-            {formatMoney(summary.availableToSpend)}
-          </p>
-          {summary.isOverBudget && (
-            <div className="mt-3 space-y-1">
-              <p className="text-sm font-bold text-danger">{t('month.overBudget')}</p>
-              <p className="text-[13px] text-text">{t('month.overBudgetHint')}</p>
-            </div>
-          )}
-        </section>
+      {hasIncome && panelInput ? (
+        <MonthPanel input={panelInput} panel={panel} />
       ) : (
         <section className="rounded-3xl border border-dashed border-border bg-surface p-6 text-center">
           <p className="text-[15px] text-text-muted">{t('month.noIncome')}</p>

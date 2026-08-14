@@ -23,6 +23,7 @@ const income = (over: Partial<PendingIncomeInput>): PendingIncomeInput => ({
   amount: 9000,
   frequency: 'monthly',
   isVariable: false,
+  receivedAmount: 0,
   receivedCount: 0,
   ...over,
 })
@@ -59,7 +60,7 @@ describe('ما زال عليك هذا الشهر', () => {
    * الحارس يصير **تعريفاً للقائمة** لا سؤالاً يُطرح بعد أن يتحرّك الإصبع —
    * فمن أودع ثم فتح التطبيق بعد ساعة لا يجد ما يضغطه مرّةً ثانية أصلاً.
    */
-  it('الصندوق الذي أُودع فيه هذا الشهر يسقط', () => {
+  it('الصندوق الذي استلم قسطه كاملاً يسقط', () => {
     const r = run({
       obligations: [
         obligation({ deposits: [{ id: 'd1', amount: 500, depositDate: '2026-08-03' }] }),
@@ -67,6 +68,32 @@ describe('ما زال عليك هذا الشهر', () => {
     })
     expect(r.items).toHaveLength(0)
     expect(r.isClear).toBe(true)
+  })
+
+  // إيداعُ شيكلٍ واحد كان يُسقط القسط كلَّه من القائمة. (تدقيق آب 2026: ش13)
+  it('الإيداع الجزئي يُبقي السطر بالباقي', () => {
+    const r = run({
+      obligations: [
+        obligation({ deposits: [{ id: 'd1', amount: 100, depositDate: '2026-08-03' }] }),
+      ],
+    })
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.amount).toBe(400)
+    expect(r.items[0]!.note).toEqual({ type: 'partialDeposit', deposited: 100, total: 500 })
+  })
+
+  // إيداع الشريك حصّتُه هو لا قسطي أنا. (ل1 — العطل الحرج في التدقيق)
+  it('إيداع الشريك لا يسدّ قسطي', () => {
+    const r = run({
+      obligations: [
+        obligation({
+          deposits: [{ id: 'd1', amount: 250, depositDate: '2026-08-05', partnerId: 'p1' }],
+        }),
+      ],
+    })
+    expect(r.items).toHaveLength(1)
+    expect(r.items[0]!.amount).toBe(500)
+    expect(r.items[0]!.note).toEqual({ type: 'installment' })
   })
 
   it('وإيداعُ الشهر الماضي لا يُسقطه', () => {
@@ -107,32 +134,58 @@ describe('ما زال عليك هذا الشهر', () => {
   })
 })
 
-describe('الدخل', () => {
-  it('المصدر الذي لم يصل يظهر بمبلغه', () => {
+describe('الدخل — قائمةٌ ثانية لا سطرٌ في «عليك»', () => {
+  // «ضلّ عليك» تعني ما يخرج منك، والدخل يدخل إليك. (ش6)
+  it('الدخل في incomeItems لا في items', () => {
     const r = run({ incomes: [income({})] })
-    expect(r.items[0]).toMatchObject({ kind: 'income', amount: 9000 })
+    expect(r.items).toHaveLength(0)
+    expect(r.incomeItems).toHaveLength(1)
+    expect(r.incomeItems[0]).toMatchObject({ kind: 'income', amount: 9000 })
+    expect(r.isClear).toBe(false)
   })
 
   // «قسطك الشهري» تخصّ الصندوق: الدخل يأتي إليك ولا تدفعه لنفسك.
   it('سطر الدخل لا يقول «قسطك»', () => {
-    expect(run({ incomes: [income({})] }).items[0]!.note).toEqual({ type: 'expected' })
+    expect(run({ incomes: [income({})] }).incomeItems[0]!.note).toEqual({ type: 'expected' })
   })
 
-  it('والذي وصل يسقط', () => {
-    expect(run({ incomes: [income({ receivedCount: 1 })] }).items).toHaveLength(0)
-  })
-
-  // الأسبوعي أربع دفعات في الشهر: من سجّل واحدة ما زال عليه ثلاث، والسطر
-  // يقول أين وصل بدل أن يظهر كأنه لم يبدأ.
-  it('الأسبوعي يبقى حتى تكتمل دفعاته ويقول أين وصل', () => {
-    const r = run({ incomes: [income({ frequency: 'weekly', receivedCount: 2 })] })
-    expect(r.items).toHaveLength(1)
-    expect(r.items[0]!.note).toEqual({ type: 'partial', done: 2, total: 4 })
-  })
-
-  it('ويسقط حين تكتمل', () => {
+  it('والذي وصل مبلغُه كاملاً يسقط', () => {
     expect(
-      run({ incomes: [income({ frequency: 'weekly', receivedCount: 4 })] }).items,
+      run({ incomes: [income({ receivedAmount: 9000, receivedCount: 1 })] }).incomeItems,
+    ).toHaveLength(0)
+  })
+
+  /*
+   * الاكتمال بالمبلغ لا بعدد القيود (ش12): قيدٌ واحد بنصف الراتب كان
+   * يُسقط السطر «اكتمل» واللوحة تعرض فجوة النصف — تناقضٌ على شاشة واحدة.
+   */
+  it('قيدٌ واحد بنصف الراتب نصفُ اكتمال لا اكتمال', () => {
+    const r = run({ incomes: [income({ receivedAmount: 4500, receivedCount: 1 })] })
+    expect(r.incomeItems).toHaveLength(1)
+    expect(r.incomeItems[0]!.amount).toBe(4500)
+    expect(r.incomeItems[0]!.note).toEqual({ type: 'partial', received: 4500, expected: 9000 })
+  })
+
+  /*
+   * الأسبوعي بمكافئه الحقيقي 52/12 لا بأربعة (ش8): أربع دفعات من 1,000
+   * كانت «تُكمل» المصدر هنا بينما اللوحة تعرض «أقل من المعتاد بـ333» —
+   * تناقضٌ دائمٌ كلَّ شهر.
+   */
+  it('الأسبوعي يُقاس على 4.333 فلا يناقض اللوحة', () => {
+    const r = run({
+      incomes: [income({ frequency: 'weekly', amount: 1000, receivedAmount: 4000, receivedCount: 4 })],
+    })
+    expect(r.incomeItems).toHaveLength(1)
+    expect(r.incomeItems[0]!.amount).toBe(333.33) // ‏4333.33 − 4000
+  })
+
+  it('ويسقط حين يصل مكافئه الشهري', () => {
+    expect(
+      run({
+        incomes: [
+          income({ frequency: 'weekly', amount: 1000, receivedAmount: 4333.33, receivedCount: 5 }),
+        ],
+      }).incomeItems,
     ).toHaveLength(0)
   })
 
@@ -140,13 +193,17 @@ describe('الدخل', () => {
    * الدخل المتغيّر يُذكَّر به بلا رقم.
    *
    * اختراع رقمٍ له هو بالضبط ما جعل «الدخل المتوقَّع» يكذب قبل أن يُضاف
-   * `is_variable` — فلا يُعاد هنا من باب القائمة.
+   * `is_variable` — فلا يُعاد هنا من باب القائمة. ويبقى على العدّ إذ لا
+   * مبلغ يُقاس عليه.
    */
-  it('المتغيّر بلا رقم', () => {
+  it('المتغيّر بلا رقم ويسقط بالعدّ', () => {
     const r = run({ incomes: [income({ isVariable: true, amount: 0 })] })
-    expect(r.items[0]!.amount).toBe(null)
-    expect(r.items[0]!.isCertain).toBe(false)
-    expect(r.items[0]!.note).toEqual({ type: 'variable' })
+    expect(r.incomeItems[0]!.amount).toBe(null)
+    expect(r.incomeItems[0]!.isCertain).toBe(false)
+    expect(r.incomeItems[0]!.note).toEqual({ type: 'variable' })
+    expect(
+      run({ incomes: [income({ isVariable: true, amount: 0, receivedCount: 1 })] }).incomeItems,
+    ).toHaveLength(0)
   })
 })
 
@@ -197,7 +254,7 @@ describe('الفواتير', () => {
 })
 
 describe('القائمة نفسها', () => {
-  it('الترتيب: ما فات، ثم فاتورة اليوم، ثم الصناديق، ثم الدخل', () => {
+  it('الترتيب: ما فات، ثم فاتورة اليوم، ثم الصناديق — والدخل في قائمته', () => {
     const r = run({
       obligations: [
         obligation({ id: 'late', name: 'متأخر', isOverdue: true }),
@@ -206,22 +263,30 @@ describe('القائمة نفسها', () => {
       bills: [bill({ id: 'today', dayOfMonth: 6 })],
       incomes: [income({})],
     })
-    expect(r.items.map((i) => i.id)).toEqual(['late', 'today', 'normal', 'i1'])
+    expect(r.items.map((i) => i.id)).toEqual(['late', 'today', 'normal'])
+    expect(r.incomeItems.map((i) => i.id)).toEqual(['i1'])
   })
 
-  it('يُقصّ عند الحدّ ويُقال كم بقي', () => {
+  // العنوان كان يعدّ المعروض لا الكلّ: «ضلّ عليك 6» والحقيقة 7. (ش7)
+  it('يُقصّ عند الحدّ ويُقال العدد الحقيقي', () => {
     const many = Array.from({ length: 9 }, (_, i) =>
       obligation({ id: `o${i}`, name: `صندوق ${i}` }),
     )
     const r = run({ obligations: many, limit: 6 })
     expect(r.items).toHaveLength(6)
     expect(r.hiddenCount).toBe(3)
+    expect(r.totalCount).toBe(9)
   })
 
   it('كل ما عليه تمّ — حالةٌ تُقال', () => {
     const r = run({})
     expect(r.isClear).toBe(true)
     expect(r.hiddenCount).toBe(0)
+    expect(r.totalCount).toBe(0)
+  })
+
+  it('دخلٌ منتظرٌ وحده يمنع «كله تمام»', () => {
+    expect(run({ incomes: [income({})] }).isClear).toBe(false)
   })
 
   // القاعدة الثانية بنيةً لا انضباطاً: لا سطر بلا معرّفٍ يُنفَّذ عليه، فيستحيل
@@ -232,7 +297,8 @@ describe('القائمة نفسها', () => {
       bills: [bill({})],
       incomes: [income({})],
     })
-    expect(r.items.every((i) => i.id.length > 0)).toBe(true)
-    expect(r.items).toHaveLength(3)
+    expect([...r.items, ...r.incomeItems].every((i) => i.id.length > 0)).toBe(true)
+    expect(r.items).toHaveLength(2)
+    expect(r.incomeItems).toHaveLength(1)
   })
 })

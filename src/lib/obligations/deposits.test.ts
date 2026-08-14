@@ -171,4 +171,35 @@ describe('حركات الصندوق', () => {
     expect(s.entries.find((e) => e.id === 'شريك')?.partnerId).toBe('p1')
     expect(s.entries.find((e) => e.id === 'أنا')?.partnerId).toBe(null)
   })
+
+  /*
+   * إيداع الشريك حصّتُه هو لا قسطي أنا. (تدقيق آب 2026: ل1)
+   *
+   * كان يدخل «أودعتَ هذا الشهر» فيُسقط قسطي من «ضلّ عليك» ويحذّرني من
+   * تكرارٍ لم أفعله — بينما `monthInstallments` تستثنيه. القاعدة واحدة الآن.
+   */
+  it('إيداع الشريك وحده لا يقول «أودعتَ هذا الشهر»', () => {
+    const s = summarizeDeposits(
+      [row({ id: 'شريك', amount: 250, depositDate: '2026-08-05', partnerId: 'p1' })],
+      { today: TODAY },
+    )
+    expect(s.alreadyDepositedThisMonth).toBe(false)
+    expect(s.thisMonthTotal).toBe(0)
+    expect(s.thisMonthCount).toBe(0)
+    // ويبقى في الحركات مرئياً — التصفية على العدّادات لا على التاريخ.
+    expect(s.entries).toHaveLength(1)
+  })
+
+  it('وإيداعي بجانب إيداع الشريك يُعدّ وحدي', () => {
+    const s = summarizeDeposits(
+      [
+        row({ id: 'أنا', amount: 250, depositDate: '2026-08-04', partnerId: null }),
+        row({ id: 'شريك', amount: 250, depositDate: '2026-08-05', partnerId: 'p1' }),
+      ],
+      { today: TODAY },
+    )
+    expect(s.thisMonthTotal).toBe(250)
+    expect(s.thisMonthCount).toBe(1)
+    expect(s.alreadyDepositedThisMonth).toBe(true)
+  })
 })
