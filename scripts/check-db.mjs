@@ -140,6 +140,11 @@ const COLUMNS = [
   ['obligation_payments', 'paid_from_account_id'],
   ['fixed_commitments', 'account_id'],
   ['expenses', 'account_id'],
+  // 0018 — ربط حساب البنك: أعمدةٌ على جداول قائمة أيضاً، ونقصُها يُسقط شاشة
+  // الحسابات كلّها لا بطاقة الربط وحدها (`select` على عمودٍ مفقود يردّ 42703).
+  ['accounts', 'bank_external_id'],
+  ['accounts', 'bank_provider_id'],
+  ['income_entries', 'account_id'],
 ]
 
 console.log('')
