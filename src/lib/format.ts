@@ -22,11 +22,14 @@ export function currencySymbol(currency = 'ILS'): string {
  * نستعمل en-US عمداً لا ar-EG: المستخدم يريد أرقاماً إنجليزية داخل واجهة عربية.
  */
 export function formatMoney(amount: number, currency = 'ILS', decimals = 0): string {
+  // التقريب قبل فحص الإشارة: ‏−0.4 بلا خانات كانت تخرج «₪ −0». (ل7)
+  const factor = 10 ** decimals
+  const rounded = Math.round(Math.abs(amount) * factor) / factor
   const value = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
-  }).format(Math.abs(amount))
-  const sign = amount < 0 ? '−' : ''
+  }).format(rounded)
+  const sign = amount < 0 && rounded > 0 ? '−' : ''
   return `${currencySymbol(currency)} ${sign}${value}`
 }
 

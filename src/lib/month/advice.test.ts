@@ -116,3 +116,39 @@ describe('adviseOnIncome', () => {
     ])
   })
 })
+
+/*
+ * الترتيب هو الرسالة والتغطية تحترمه (تدقيق آب 2026: ش9): سطرُ «سدّ العجز»
+ * فوق الأقساط يستهلك من القبضة أولاً، فقبضةُ 1,000 مع عجزِ 800 لا تغطّي
+ * أقساطاً بـ900 — وكان `covered` يتجاهل العجز فتناقض القائمةُ نفسها.
+ */
+describe('التغطية بعد العجز', () => {
+  it('العجز يستهلك القبضة قبل الأقساط', () => {
+    const items = adviseOnIncome(
+      base({
+        amount: 1000,
+        accounts: [account({ available: -800 })],
+        pendingInstallments: [{ name: 'تأمين', amount: 900 }],
+      }),
+    )
+    const funding = items.find((i) => i.kind === 'fund_installments')
+    expect(funding).toMatchObject({ covered: false, total: 900 })
+  })
+
+  it('وبلا عجزٍ تُقاس على القبضة كاملة', () => {
+    const items = adviseOnIncome(
+      base({ amount: 1000, pendingInstallments: [{ name: 'تأمين', amount: 900 }] }),
+    )
+    expect(items.find((i) => i.kind === 'fund_installments')).toMatchObject({ covered: true })
+  })
+})
+
+// عمرٌ مجهول يُقال مجهولاً — «0 يوم» عن رصيدٍ معلَّمٍ قديماً كذبة. (ش15)
+describe('الرصيد القديم بلا تاريخ', () => {
+  it('يمرّر null لا صفراً', () => {
+    const items = adviseOnIncome(
+      base({ accounts: [account({ balanceIsStale: true, daysSinceBalanceUpdate: null })] }),
+    )
+    expect(items.find((i) => i.kind === 'stale_balance')).toMatchObject({ days: null })
+  })
+})

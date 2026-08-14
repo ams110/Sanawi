@@ -110,3 +110,27 @@ describe('بناء التنبيهات', () => {
     expect(buildReminders([obligation], options)).toHaveLength(REMINDER_DAYS.length)
   })
 })
+
+/*
+ * تنبيهُ اليومِ نفسه بعد فوات ساعته لا يُجدوَل (تدقيق آب 2026: ل3):
+ * فرقُ الأيام التقويمية كان يمرّره فيطلقه Capacitor فوراً.
+ */
+describe('حافة الساعة', () => {
+  // الاستحقاق 2026-09-01، فتنبيه الـ30 يوماً يقع اليوم (2026-08-02) الساعة 9:00.
+  const dueSoon = {
+    id: 'ob-edge',
+    name: 'تأمين السيارة',
+    nextDueDate: '2026-09-01',
+    remainingAmount: 2000,
+  }
+
+  it('بعد التاسعة: تنبيه اليوم فات ولا يُجدوَل', () => {
+    const r = buildReminders([dueSoon], { ...options, today: new Date('2026-08-02T15:00:00') })
+    expect(r.some((x) => toDateKey(x.at) === '2026-08-02')).toBe(false)
+  })
+
+  it('وقبل التاسعة يُجدوَل عادياً', () => {
+    const r = buildReminders([dueSoon], { ...options, today: new Date('2026-08-02T08:00:00') })
+    expect(r.some((x) => toDateKey(x.at) === '2026-08-02')).toBe(true)
+  })
+})

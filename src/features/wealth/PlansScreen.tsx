@@ -30,7 +30,11 @@ export function PlansScreen() {
         annualSpending={sources.annualSpending}
         spendingIsProvisional={sources.spendingIsProvisional}
         defaultContribution={Number(profile?.monthly_savings_target ?? 0)}
-        defaultReturnPercent={net.assetsTotal > 0 ? net.weightedReturnPercent : 0}
+        // ‏null تعني «لا أصول أصلاً» فيُفترض عائدٌ بديل؛ وصاحبُ الأصول يُمرَّر
+        // عائدُه الحقيقي ولو صفراً — كاشٌ صِرف عائده صفرٌ فعلاً، واستبدالُه
+        // بسبعةٍ كان يجعل الشاشة تَعِد بحريةٍ يقول كلود عنها «لا تُبلَغ».
+        // نفس قاعدة mcp/data.ts حرفياً. (تدقيق آب 2026: ث1)
+        defaultReturnPercent={net.assetsTotal > 0 ? net.weightedReturnPercent : null}
         inflationPercent={Number(profile?.inflation_percent ?? 3)}
         withdrawalRatePercent={Number(profile?.withdrawal_rate_percent ?? 4)}
         onSettingsChange={saveProfilePatch}

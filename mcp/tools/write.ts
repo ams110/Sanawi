@@ -1970,7 +1970,9 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
               (item.covered ? ' — القبضة تغطّيها كلّها.' : ' — القبضة لا تغطّيها، فابدأ بالأهمّ.')
             )
           case 'stale_balance':
-            return `رصيد ${item.accountName} عمره ${item.days} يوماً — حدّثه ليصحّ كل ما يُبنى عليه.`
+            return item.days === null
+              ? `رصيد ${item.accountName} قديمٌ بلا تاريخ تحديث — حدّثه ليصحّ كل ما يُبنى عليه.`
+              : `رصيد ${item.accountName} عمره ${item.days} يوماً — حدّثه ليصحّ كل ما يُبنى عليه.`
           case 'projection_negative':
             return `بوتيرة الصرف الحالية ينتهي الشهر بعجز ${money(item.amount, currency)}.`
           case 'income_gap':

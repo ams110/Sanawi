@@ -6,7 +6,7 @@
  * ملف نقي — لا React ولا Capacitor.
  */
 
-import { differenceInCalendarDays, subDays } from 'date-fns'
+import { subDays } from 'date-fns'
 
 /** ثلاثة تنبيهات: واحد للتخطيط، وواحد للتحقق، وواحد أخير. */
 export const REMINDER_DAYS = [30, 14, 7] as const
@@ -82,9 +82,14 @@ export function buildReminders(
       const at = subDays(due, daysBefore)
       at.setHours(hour, 0, 0, 0)
 
-      // الماضي لا يُجدوَل: تنبيه في وقت فائت إما يُطلق فوراً أو يُتجاهل،
-      // وكلاهما إزعاج بلا فائدة.
-      if (differenceInCalendarDays(at, today) < 0) continue
+      /*
+       * الماضي لا يُجدوَل: تنبيه في وقت فائت إما يُطلق فوراً أو يُتجاهل،
+       * وكلاهما إزعاج بلا فائدة. والمقارنة بالطابع الكامل لا بالأيام
+       * التقويمية: فرقُ الأيام كان يمرّر تنبيهَ اليومِ نفسه بعد ساعته
+       * (جدولة الساعة 15:00 لتنبيه التاسعة صباحاً) فيطلقه Capacitor فوراً.
+       * (تدقيق آب 2026: ل3)
+       */
+      if (at.getTime() <= today.getTime()) continue
 
       const body =
         obligation.remainingAmount > 0

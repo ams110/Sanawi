@@ -30,8 +30,11 @@ export function FreedomPanel({
   /** خطّ الأساس من شهرٍ لم ينتهِ — يُقال للمستخدم لا يُبتلع. */
   spendingIsProvisional: boolean
   defaultContribution: number
-  /** العائد المرجّح على أصوله الفعلية — أصدق من رقمٍ نفترضه له. */
-  defaultReturnPercent: number
+  /**
+   * العائد المرجّح على أصوله الفعلية — أصدق من رقمٍ نفترضه له.
+   * ‏null حين لا أصول مسجَّلة أصلاً، فيُفترض عندها بديلٌ معقول.
+   */
+  defaultReturnPercent: number | null
   inflationPercent: number
   withdrawalRatePercent: number
   onSettingsChange: (patch: Partial<Profile>) => Promise<void>
@@ -40,12 +43,13 @@ export function FreedomPanel({
 
   const [contribution, setContribution] = useState(() => Math.round(defaultContribution))
   /*
-   * صفرٌ هنا يعني «لا أصول مسجّلة» لا «عائدي صفر» — المستدعي يمرّر الصفر في
-   * الحالة الأولى وحدها. أمّا صاحب الكاش فعائده صفرٌ حقيقيّ ويُمرَّر كما هو،
-   * ولا يُستبدَل بسبعةٍ تَعِده بنموٍّ لن يحدث.
+   * ‏null وحدها تعني «لا أصول مسجّلة» فيُفترض 7٪ كنقطة بداية. أمّا صاحب
+   * الكاش فعائده صفرٌ حقيقيّ ويُمرَّر كما هو، ولا يُستبدَل بسبعةٍ تَعِده
+   * بنموٍّ لن يحدث — كان الشرط `> 0` لا يفرّق بين الحالتين فتقول الشاشة
+   * «الحرية بعد 26 سنة» وكلود عن نفس البيانات «لا تُبلَغ». (ث1)
    */
   const [returnPercent, setReturnPercent] = useState(() =>
-    defaultReturnPercent > 0 ? Math.round(defaultReturnPercent * 10) / 10 : 7,
+    defaultReturnPercent === null ? 7 : Math.round(defaultReturnPercent * 10) / 10,
   )
 
   // القيمتان المحفوظتان تُعرضان محلياً وتُكتبان عند رفع الإصبع وحده.

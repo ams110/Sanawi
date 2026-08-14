@@ -1564,7 +1564,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         currency: z.string(),
         has_debts: z.boolean(),
         all_zero_interest: z.boolean(),
-        interest_saved: z.number(),
+        interest_saved: z.number().nullable(),
         months_saved: z.number().nullable(),
         avalanche: payoffPlanOut,
         snowball: payoffPlanOut,
@@ -1624,7 +1624,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         '',
         allZero
           ? 'كل الديون بفائدة صفر — الترتيب لا يوفّر مالاً، لكن كرة الثلج تُسقط أول دَينٍ أبكر.'
-          : comparison.interestSaved > 0
+          : comparison.interestSaved !== null && comparison.interestSaved > 0
             ? `**الأعلى فائدة أولاً يوفّر ${money(comparison.interestSaved, currency)}**${comparison.monthsSaved && comparison.monthsSaved > 0 ? ` ويختصر ${comparison.monthsSaved} شهراً` : ''}.`
             : 'الطريقتان متساويتان على هذه الديون.',
       ]

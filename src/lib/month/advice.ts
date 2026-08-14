@@ -54,8 +54,8 @@ export type IncomeAdviceItem =
       covered: boolean
       items: { name: string; amount: number }[]
     }
-  /** رصيدٌ عمره أكثر من أسبوعين — كل ما فوقه تخمين. */
-  | { kind: 'stale_balance'; accountName: string; days: number }
+  /** رصيدٌ عمره أكثر من أسبوعين — كل ما فوقه تخمين. `days` مجهولة حين لا تاريخ. */
+  | { kind: 'stale_balance'; accountName: string; days: number | null }
   /** بوتيرة الصرف الحالية ينتهي الشهر بعجزٍ بهذا المقدار. */
   | { kind: 'projection_negative'; amount: number }
   /** المتبقّي من الدخل المتوقَّع الذي لم يصل بعد. */
@@ -86,12 +86,19 @@ export function adviseOnIncome(input: IncomeAdviceInput): IncomeAdviceItem[] {
       amount: round2(row.amount),
     }))
     const total = round2(list.reduce((sum, row) => sum + row.amount, 0))
+    /*
+     * الترتيب هو الرسالة، والتغطية تحترمه: سطرُ «سدّ العجز» فوق هذا السطر
+     * يستهلك من القبضة أولاً، فما يُقاس عليه «هل تكفي؟» هو الباقي بعده —
+     * قبضةُ 1,000 مع عجزِ 800 لا تغطّي أقساطاً بـ900، وكان `covered`
+     * يتجاهل العجز فتناقض القائمةُ ترتيبَها المعلن. (تدقيق آب 2026: ش9)
+     */
+    const shortfallTotal = round2(
+      shortfalls.reduce((sum, account) => sum + Math.abs(account.available), 0),
+    )
     items.push({
       kind: 'fund_installments',
       total,
-      // التغطية على القبضة وحدها لا على الرصيد: السؤال «هل يكفي ما وصل الآن»،
-      // ورصيد الحساب له سطر العجز فوقه.
-      covered: input.amount >= total,
+      covered: round2(input.amount - shortfallTotal) >= total,
       items: list,
     })
   }
@@ -101,7 +108,8 @@ export function adviseOnIncome(input: IncomeAdviceInput): IncomeAdviceItem[] {
     items.push({
       kind: 'stale_balance',
       accountName: account.name,
-      days: account.daysSinceBalanceUpdate ?? 0,
+      // عمرٌ مجهول يُقال مجهولاً: «0 يوم» عن رصيدٍ معلَّمٍ قديماً كذبة. (ش15)
+      days: account.daysSinceBalanceUpdate,
     })
   }
 

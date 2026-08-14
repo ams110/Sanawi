@@ -234,3 +234,29 @@ describe('الحالات الحدّية', () => {
     expect(r.monthlyInstallment).toBe(334)
   })
 })
+
+/*
+ * حواف الساعة (تدقيق آب 2026: ل2): الموعد منتصفُ ليلٍ و`today` يحمل الساعة،
+ * فكانت المقارنة الخام تُعلن «فات موعده» صباحَ يوم الاستحقاق نفسه — بينما
+ * `commitments/due.ts` يصنّف اليوم نفسه «اليوم». كل اختبارات الملف كانت
+ * بمنتصف الليل فلم يظهر الفرق.
+ */
+describe('يوم الاستحقاق نفسه', () => {
+  const input = {
+    totalAmount: 1200,
+    myFundBalance: 0,
+    nextDueDate: '2026-08-14',
+    recurrenceMonths: 12,
+    cycleStartDate: '2026-08-01',
+  }
+
+  it('صباحُه ليس «فات موعده»', () => {
+    const r = calculateObligation({ ...input, today: new Date('2026-08-14T10:00:00') })
+    expect(r.isOverdue).toBe(false)
+  })
+
+  it('واليوم التالي فات فعلاً — بأي ساعة', () => {
+    const r = calculateObligation({ ...input, today: new Date('2026-08-15T08:00:00') })
+    expect(r.isOverdue).toBe(true)
+  })
+})

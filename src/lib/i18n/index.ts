@@ -36,6 +36,9 @@ function readStored(): Locale {
  * تثبيت dir في index.html وحده لا يكفي: تبديل اللغة يجب أن يقلب الصفحة.
  */
 export function applyDocumentLocale(locale: Locale): void {
+  // خارج المتصفح (اختبارات vitest بلا jsdom) لا صفحة تُقلب — والوحدة
+  // تُستورد من ملفات نقية مثل format.ts فلا يصحّ أن تنفجر عند التحميل.
+  if (typeof document === 'undefined') return
   const { dir } = LOCALES[locale]
   document.documentElement.lang = locale
   document.documentElement.dir = dir
