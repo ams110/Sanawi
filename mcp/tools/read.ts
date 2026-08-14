@@ -9,6 +9,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { computeGroupCost } from '../../src/lib/budget/groupCost.js'
 import { monthlyEquivalent, monthlyIncomeFrom, projectSavings } from '../../src/lib/budget/calc.js'
+import { summarizeBillRows } from '../../src/lib/commitments/bills.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { freedomSensitivity } from '../../src/lib/wealth/freedom.js'
 import { buildPayoffPlan, comparePayoff } from '../../src/lib/commitments/payoff.js'
@@ -634,6 +635,8 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           paid: z.number(),
           outstanding: z.number(),
           missing: z.number(),
+          /** المستحقّ فعلاً هذا الشهر ولم يُسجَّل — بدأت دفعاته ولم تنتهِ. */
+          payable: z.number(),
           budgeted: z.number(),
         }),
       },
@@ -663,13 +666,23 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         toBillRowOut(c, payments.get(c.id), averages.get(c.id)),
       )
 
-      const recorded = bills.reduce((sum, b) => sum + (b.actual ?? 0), 0)
-      const paid = bills.reduce((sum, b) => sum + (b.paid ? (b.actual ?? 0) : 0), 0)
+      /*
+       * الملخّص من المحرّك المشترك نفسه الذي تقرأ منه الشاشة (س9) — ومعه
+       * `payable`: كان «لم يُسجَّل» يعدّ بنداً لم تبدأ دفعاته أصلاً، فيذكّر
+       * كلود بمالٍ لا يجب أن يخرج هذا الشهر.
+       */
+      const engineSummary = summarizeBillRows(
+        fixedCommitments.map((c) => ({
+          budgetedAmount: Number(c.amount),
+          mySharePercent: Number(c.my_share_percent ?? 100),
+          startsOn: c.starts_on,
+          endsOn: c.ends_on,
+          recordedAmount: payments.has(c.id) ? Number(payments.get(c.id)!.amount) : null,
+          paidAt: payments.get(c.id)?.paid_at ?? null,
+        })),
+      )
       const summary = {
-        recorded: round2(recorded),
-        paid: round2(paid),
-        outstanding: round2(recorded - paid),
-        missing: bills.filter((b) => b.actual === null).length,
+        ...engineSummary,
         budgeted: round2(bills.reduce((sum, b) => sum + b.budgeted, 0)),
       }
 
@@ -697,7 +710,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         '',
         `مسجّل ${money(summary.recorded, currency)} · مدفوع ${money(summary.paid, currency)} · ` +
           `مستحق ${money(summary.outstanding, currency)}` +
-          (summary.missing > 0 ? ` · ${summary.missing} بند لم يُسجَّل` : ''),
+          (summary.payable > 0 ? ` · ${summary.payable} بند مستحق لم يُسجَّل` : ''),
       ].join('\n')
 
       return ok(text, structured)

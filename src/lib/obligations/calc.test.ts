@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateObligation, monthsUntil } from './calc'
+import { baselineInstallment, calculateObligation, monthsUntil } from './calc'
 
 const TODAY = new Date('2026-08-02T00:00:00')
 
@@ -258,5 +258,15 @@ describe('يوم الاستحقاق نفسه', () => {
   it('واليوم التالي فات فعلاً — بأي ساعة', () => {
     const r = calculateObligation({ ...input, today: new Date('2026-08-15T08:00:00') })
     expect(r.isOverdue).toBe(true)
+  })
+})
+
+// القسط المرجعي — كان منسوخاً في الشاشة وخادم MCP. (س10)
+describe('baselineInstallment', () => {
+  it('دورة كاملة وحصّة مقصوصة وتقريب لأعلى', () => {
+    expect(baselineInstallment(6000, 100, 12)).toBe(500)
+    expect(baselineInstallment(1000, 100, 12)).toBe(84) // ‏83.33 ← 84
+    expect(baselineInstallment(6000, 50, 12)).toBe(250)
+    expect(baselineInstallment(1000, 100, 0)).toBe(1000) // مرة واحدة
   })
 })

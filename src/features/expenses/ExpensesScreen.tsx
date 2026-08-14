@@ -345,6 +345,8 @@ function ExpenseRow({
             await updateExpense(expense.id, {
               amount: amount.value,
               categoryId,
+              // الاسم مع المعرّف — عقد الكتابة المزدوجة نفسه في addExpense. (س3)
+              categoryName: categories.find((c) => c.id === categoryId)?.name_ar ?? null,
               spentAt,
               isUnexpected,
             })

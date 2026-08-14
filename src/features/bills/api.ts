@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase'
+import { resolveBillPaidAt, summarizeBillRows, type BillsSummary } from '@/lib/commitments/bills'
 import type { BillAverage, BillPayment, FixedCommitment } from '@/lib/db/types'
 import { toDateKey, toMonthKey } from '@/lib/date'
-import { viewCommitment } from '@/lib/commitments/calc'
 
 /**
  * مفتاح الشهر: أول يوم فيه بصيغة ISO.
@@ -72,13 +72,26 @@ export async function saveBill(
   paid: boolean,
   methodId: string | null = null,
 ): Promise<void> {
+  /*
+   * الدمج مع الصفّ القائم لا استبداله: تصحيحُ مبلغ فاتورةٍ مدفوعة كان يعيد
+   * كتابة تاريخ دفعها إلى اليوم — العطب نفسه أُصلح في خادم MCP وبقي هنا
+   * (تدقيق آب 2026: س2). القرار في `resolveBillPaidAt` المشترك للسطحين.
+   */
+  const { data: current, error: readError } = await supabase
+    .from('bill_payments')
+    .select('paid_at')
+    .eq('commitment_id', commitmentId)
+    .eq('billing_month', month)
+    .maybeSingle()
+  if (readError) throw readError
+
   const { error } = await supabase.from('bill_payments').upsert(
     {
       user_id: userId,
       commitment_id: commitmentId,
       billing_month: month,
       amount,
-      paid_at: paid ? toDateKey() : null,
+      paid_at: resolveBillPaidAt(current?.paid_at as string | null, paid, toDateKey()),
       method_id: methodId,
     },
     { onConflict: 'commitment_id,billing_month' },
@@ -95,58 +108,19 @@ export async function deleteBill(commitmentId: string, month: string): Promise<v
   if (error) throw error
 }
 
-export interface BillsSummary {
-  /** مجموع ما سُجّل لهذا الشهر. */
-  recorded: number
-  /** مجموع ما دُفع فعلاً. */
-  paid: number
-  /** ما زال مستحقاً هذا الشهر. */
-  outstanding: number
-  /** عدد البنود التي لم تُسجَّل بعد. */
-  missing: number
-  /**
-   * عدد البنود المستحقّة فعلاً هذا الشهر: بدأت دفعاتها، ولم تنتهِ، ولم تُسجَّل.
-   *
-   * غير `missing` عمداً: ذاك يعدّ كل بندٍ بلا صفّ فاتورة — ومنه ما تبدأ دفعته
-   * بعد شهرين وما انتهى قسطه — فيقيس تقصيراً في الإدخال لا مالاً يجب أن يخرج.
-   */
-  payable: number
-}
+export type { BillsSummary } from '@/lib/commitments/bills'
 
+// الملخّص من المحرّك المشترك — نفس الدالة التي يقرأ منها كلود. (س9)
 export function summarizeBills(rows: BillRow[], today: Date = new Date()): BillsSummary {
-  let recorded = 0
-  let paid = 0
-  let missing = 0
-  let payable = 0
-
-  for (const row of rows) {
-    if (!row.payment) {
-      missing++
-      // الحكم من محرّك البنود نفسه لا من فحصٍ محلّي للتواريخ.
-      const view = viewCommitment(
-        {
-          amount: Number(row.commitment.amount),
-          startsOn: row.commitment.starts_on,
-          endsOn: row.commitment.ends_on,
-          mySharePercent: Number(row.commitment.my_share_percent ?? 100),
-        },
-        today,
-      )
-      if (view.hasStarted && !view.isFinished) payable++
-      continue
-    }
-    const amount = Number(row.payment.amount)
-    recorded += amount
-    if (row.payment.paid_at) paid += amount
-  }
-
-  return {
-    recorded: round2(recorded),
-    paid: round2(paid),
-    outstanding: round2(recorded - paid),
-    missing,
-    payable,
-  }
+  return summarizeBillRows(
+    rows.map((row) => ({
+      budgetedAmount: Number(row.commitment.amount),
+      mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+      startsOn: row.commitment.starts_on,
+      endsOn: row.commitment.ends_on,
+      recordedAmount: row.payment ? Number(row.payment.amount) : null,
+      paidAt: row.payment?.paid_at ?? null,
+    })),
+    today,
+  )
 }
-
-const round2 = (v: number): number => Math.round(v * 100) / 100

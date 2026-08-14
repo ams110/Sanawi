@@ -6,6 +6,7 @@ import { formatMoney } from '@/lib/format'
 import { computeGroupCost } from '@/lib/budget/groupCost'
 import { projectSavings } from '@/lib/budget/calc'
 import { listObligations } from '@/features/obligations/api'
+import { listCategoryExpenses } from '@/features/expenses/api'
 import { failureText } from '@/lib/i18n/failure'
 
 const CATEGORIES = ['car', 'health', 'events', 'home', 'lifestyle', 'other'] as const
@@ -29,6 +30,17 @@ export function InsightsScreen() {
   } = useQuery({ queryKey: ['obligations'], queryFn: listObligations })
   const error = loadError ? failureText(loadError, t, t('obligations.loadFailed')) : null
 
+  /*
+   * المصاريف الفعلية جزءٌ من «التكلفة الحقيقية» هنا كما عند كلود. (س4)
+   *
+   * كانت الشاشة تمرّر مصفوفةً فارغة فتُخرج تكلفة السيارة بلا بنزينها
+   * وأعطالها، بينما `sanawi_group_cost` يضمّها — رقمان لسؤالٍ واحد.
+   */
+  const { data: categoryExpenses = [] } = useQuery({
+    queryKey: ['category-expenses', category],
+    queryFn: () => listCategoryExpenses(category),
+  })
+
   const cost = useMemo(
     () =>
       computeGroupCost(
@@ -40,10 +52,14 @@ export function InsightsScreen() {
             mySharePercent: Number(i.obligation.my_share_percent),
             recurrenceMonths: i.obligation.recurrence_months,
           })),
-        [],
+        categoryExpenses.map((e) => ({
+          amount: Number(e.amount),
+          spentAt: e.spent_at,
+          category: e.category,
+        })),
         { expenseLabel: t('insights.expensesLabel') },
       ),
-    [items, category, t],
+    [items, category, categoryExpenses, t],
   )
 
   if (error) {

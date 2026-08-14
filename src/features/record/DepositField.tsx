@@ -106,7 +106,9 @@ export function DepositField({ item, onDone, partnerId = null, hint, autoFocus }
     const value = amount.value
 
     try {
-      await addDeposit(obligationId, user.id, value, partnerId)
+      // حساب الصندوق يُكتب مع الإيداع — كما يكتبه كلود، فلا يختلف السجلّ
+      // المالي باختلاف الباب. (تدقيق آب 2026: س8)
+      await addDeposit(obligationId, user.id, value, partnerId, item.obligation.account_id)
       void track(user.id, 'deposit_added', {
         obligation_id: obligationId,
         by_partner: partnerId !== null,

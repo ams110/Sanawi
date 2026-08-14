@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeGroupCost, yearlyCostOf } from './groupCost'
+import { computeGroupCost, yearlyCostOf , expenseMatchesCategory } from './groupCost'
 
 const TODAY = new Date('2026-08-02T00:00:00')
 const opts = { today: TODAY }
@@ -101,5 +101,14 @@ describe('تكلفة المجموعة', () => {
     expect(r.totalYearly).toBe(0)
     expect(r.totalMonthly).toBe(0)
     expect(r.lines).toEqual([])
+  })
+})
+
+// المطابقة بلا حساسية أحرف — `Car` لا يسقط من تكلفة `car`. (س4)
+describe('expenseMatchesCategory', () => {
+  it('يتجاهل الحالة والفراغات', () => {
+    expect(expenseMatchesCategory(' Car ', 'car')).toBe(true)
+    expect(expenseMatchesCategory('fuel', 'car')).toBe(false)
+    expect(expenseMatchesCategory(null, 'car')).toBe(false)
   })
 })

@@ -12,9 +12,12 @@ import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligati
 import {
   monthlyEquivalent,
   monthlyIncomeFrom,
+  sumReceived,
 } from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
-import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
+import { expenseMatchesCategory } from '../src/lib/budget/groupCost.js'
+import { essentialSpending } from '../src/lib/wealth/essentials.js'
+import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad, shareAmount } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import { pendingThisMonth, type PendingResult } from '../src/lib/month/pending.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
@@ -41,6 +44,7 @@ import type {
   ObligationBalance,
   ObligationGroup,
   Profile,
+  BillAverage,
 } from '../src/lib/db/types.js'
 import type { Connection } from './session.js'
 import { isoDate } from './format.js'
@@ -327,7 +331,7 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   // آخر الشهر يقعان في شهرين مختلفين، فتختلف أرقام اللوحة عن بعضها.
   const today = new Date()
 
-  const [obligations, money, profile, details, expenseRows, entries, deposits, bills] =
+  const [obligations, money, profile, details, expenseRows, entries, deposits, bills, averagesRes] =
     await Promise.all([
       loadObligations(connection),
       loadMoneyItems(connection),
@@ -337,7 +341,15 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
       loadIncomeEntries(connection, month),
       loadMonthDeposits(connection, month),
       loadBillPayments(connection, month),
+      // متوسّطات الفواتير لقائمة «ضلّ عليك» — الشاشة تمرّرها فيتطابق الاقتراح.
+      connection.db.from('bill_averages').select('*'),
     ])
+  if (averagesRes.error) throw averagesRes.error
+  const billAverages = new Map(
+    ((averagesRes.data ?? []) as BillAverage[]).map((a) => [a.commitment_id, a]),
+  )
+  // ‏day_of_month ليس في العرض commitment_details — من صفوف البنود نفسها.
+  const commitmentById = new Map(money.fixedCommitments.map((c) => [c.id, c]))
 
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
   const incomes = money.incomes.map((i) => ({
@@ -367,8 +379,7 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     monthStart,
   )
 
-  const receivedIncome =
-    Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
+  const receivedIncome = sumReceived(entries)
   const expectedIncome = monthlyIncomeFrom(incomes)
 
   // ما وصل لكل مصدر: المعرَّف بـ`source_id`، والحرّ باسمه كما كُتب.
@@ -476,14 +487,22 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
         },
         today,
       )
+      /*
+       * نفس مُدخَلات الشاشة حرفياً (تدقيق آب 2026: س1): كان يُمرَّر
+       * `average: 0` و`dayOfMonth: null` فتختلف المبالغ المقترحة والترتيب
+       * والملاحظات عمّا على الشاشة — رغم أن وصف الأداة يعِد «نفس القائمة».
+       */
       return {
         id: d.commitment_id,
         name: d.name,
         amount: view.myAmount,
-        average: 0,
+        average: shareAmount(
+          Number(billAverages.get(d.commitment_id)?.average_amount ?? 0),
+          Number(d.my_share_percent),
+        ),
         isDueThisMonth: view.hasStarted && !view.isFinished,
         isRecorded: recordedBills.has(d.commitment_id),
-        dayOfMonth: null,
+        dayOfMonth: commitmentById.get(d.commitment_id)?.day_of_month ?? null,
       }
     }),
   })
@@ -665,8 +684,7 @@ export async function loadExpensesFor(
    * الرقم أصغر مما هو — وهو الاتجاه الخطأ في تطبيق كل غرضه أن يُظهر التكلفة
    * على حقيقتها. الصفوف عشرات، والترشيح هنا أرخص من عمود مفهرس بحالة موحّدة.
    */
-  const needle = key.category.trim().toLowerCase()
-  return rows.filter((row) => (row.category ?? '').trim().toLowerCase() === needle)
+  return rows.filter((row) => expenseMatchesCategory(row.category, key.category))
 }
 
 /**
@@ -939,9 +957,13 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
     currentMonthProjection: month.expenses.projectedTotal,
   })
 
-  const monthlyEssentials =
-    Math.round((month.load.recurring + obligationInstallments + baseline.monthly) * 100) / 100
-  const annualSpending = Math.round(monthlyEssentials * 12 * 100) / 100
+  const essentials = essentialSpending({
+    recurringBills: month.load.recurring,
+    obligationInstallments,
+    baselineMonthly: baseline.monthly,
+  })
+  const monthlyEssentials = essentials.monthly
+  const annualSpending = essentials.annual
   const monthlyContribution = Number(profile?.monthly_savings_target ?? 0)
 
   const net = computeNetWorth({

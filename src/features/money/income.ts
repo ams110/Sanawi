@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase'
 import type { IncomeEntry } from '@/lib/db/types'
 import { toDateKey } from '@/lib/date'
+import { sumReceived } from '@/lib/budget/calc'
 
 /** حدود الشهر: أوّله وآخره بصيغة ISO. */
 export function monthBounds(key: string): { start: string; end: string } {
@@ -82,6 +83,7 @@ export async function deleteIncomeEntry(id: string): Promise<void> {
   if (error) throw error
 }
 
+// من القاعدة الواحدة في المحرّك — نفس الدالة عند كلود قارئاً وكاتباً. (س13)
 export function sumIncomeEntries(rows: readonly IncomeEntry[]): number {
-  return Math.round(rows.reduce((s, r) => s + Number(r.amount), 0) * 100) / 100
+  return sumReceived(rows)
 }

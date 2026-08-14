@@ -14,10 +14,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { planPayment } from '../../src/lib/obligations/payment.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
-import { monthlyEquivalent } from '../../src/lib/budget/calc.js'
+import { monthlyEquivalent, sumReceived } from '../../src/lib/budget/calc.js'
 import { viewAccount } from '../../src/lib/accounts/calc.js'
+import { baselineInstallment } from '../../src/lib/obligations/calc.js'
 import { summarizeDeposits } from '../../src/lib/obligations/deposits.js'
 import { adviseOnIncome, type IncomeAdviceItem } from '../../src/lib/month/advice.js'
+import { resolveBillPaidAt } from '../../src/lib/commitments/bills.js'
 import type {
   Account,
   AccountSettlement,
@@ -400,11 +402,12 @@ export function registerWriteTools(server: McpServer, connect: () => Promise<Con
       const groupId = input.group ? (await findGroup(connection, input.group)).id : null
       const accountId = input.account ? (await findAccount(connection, input.account)).id : null
 
-      const myTotal = (input.total_amount * input.my_share_percent) / 100
-      const baseline =
-        input.recurrence_months > 0
-          ? Math.ceil(myTotal / input.recurrence_months)
-          : Math.ceil(myTotal)
+      // من المحرّك المشترك — كان منسوخاً حرفياً هنا وفي الشاشة. (س10)
+      const baseline = baselineInstallment(
+        input.total_amount,
+        input.my_share_percent,
+        input.recurrence_months,
+      )
 
       const { data, error } = await connection.db
         .from('obligations')
@@ -1085,8 +1088,8 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           commitment_id: commitment.id,
           billing_month: key,
           amount: input.amount,
-          // تاريخ دفعٍ قائم يبقى كما هو: إعادة التسجيل تصحيح مبلغ لا دفعٌ ثانٍ.
-          paid_at: paid ? (existing?.paid_at ?? isoDate()) : null,
+          // القرار في المحرّك المشترك — نفس قاعدة الشاشة حرفياً. (س2)
+          paid_at: resolveBillPaidAt(existing?.paid_at, paid, isoDate()),
           note: input.note ?? existing?.note ?? null,
         },
         { onConflict: 'commitment_id,billing_month' },
@@ -1926,7 +1929,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
 
       const month = monthKey(receivedAt)
       const entries = await loadIncomeEntries(connection, month)
-      const total = Math.round(entries.reduce((sum, e) => sum + Number(e.amount), 0) * 100) / 100
+      const total = sumReceived(entries)
       const currency = connection.currency
 
       /*

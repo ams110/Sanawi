@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/Button'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { validateShares } from '@/lib/commitments/calc'
+import { shareAmount, validateShares } from '@/lib/commitments/calc'
 import type { CommitmentPartnerShare, ObligationPartner } from '@/lib/db/types'
 import { addPartner, replaceCommitmentShares } from './commitments'
 
@@ -52,7 +52,7 @@ export function SharesEditor({
 
   const active = Object.entries(draft).filter(([, p]) => p > 0)
   const check = validateShares(mine, active.map(([, p]) => p))
-  const myAmount = Math.round(((amount * mine) / 100) * 100) / 100
+  const myAmount = shareAmount(amount, mine)
 
   return (
     <div className="space-y-3 rounded-2xl bg-surface-muted p-3">

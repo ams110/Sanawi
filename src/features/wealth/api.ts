@@ -5,6 +5,7 @@ import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, shiftMonth, toCalcRows } from '@/features/expenses/api'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad, viewCommitment } from '@/lib/commitments/calc'
+import { essentialSpending } from '@/lib/wealth/essentials'
 import { spendingBaseline } from '@/lib/wealth/baseline'
 import type { CashAccountInput, DebtInput, RestrictedFundInput } from '@/lib/wealth/networth'
 import type { AssetInput } from '@/lib/wealth/networth'
@@ -216,7 +217,9 @@ export async function loadWealthSources(): Promise<WealthSources> {
     const balance = Number(item.balance?.my_fund_balance ?? 0)
     const accountId = item.obligation.account_id
     if (!accountId) {
-      if (balance > 0) unlinkedFunds.push({ name: item.obligation.name, balance })
+      // ‏`!== 0` لا `> 0`: الصندوق السالب الطليق يظهر عند كلود والحسابات،
+      // وإخفاؤه هنا وحده كان يجعل الشاشة تناقضهما. (س6)
+      if (balance !== 0) unlinkedFunds.push({ name: item.obligation.name, balance })
       continue
     }
     // الصندوق السالب لا ينقص التخصيص — الشرح في src/lib/accounts/calc.ts.
@@ -303,8 +306,12 @@ export async function loadWealthSources(): Promise<WealthSources> {
     currentMonthProjection: spending.projectedTotal,
   })
 
-  const monthlyEssentials =
-    Math.round((load.recurring + obligationInstallments + baseline.monthly) * 100) / 100
+  // من المحرّك المشترك — نفس التعريف الذي يقرأ منه كلود حرفياً. (س11)
+  const essentials = essentialSpending({
+    recurringBills: load.recurring,
+    obligationInstallments,
+    baselineMonthly: baseline.monthly,
+  })
 
   return {
     assets,
@@ -314,8 +321,8 @@ export async function loadWealthSources(): Promise<WealthSources> {
     debts,
     payoffDebts,
     snapshots,
-    monthlyEssentials,
+    monthlyEssentials: essentials.monthly,
     spendingIsProvisional: baseline.isProvisional,
-    annualSpending: Math.round(monthlyEssentials * 12 * 100) / 100,
+    annualSpending: essentials.annual,
   }
 }

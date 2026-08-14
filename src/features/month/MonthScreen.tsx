@@ -8,7 +8,7 @@ import { buildMonthPanel } from '@/lib/budget/month'
 import { listMonthDeposits, listObligations } from '@/features/obligations/api'
 import { listBills } from '@/features/bills/api'
 import { pendingThisMonth } from '@/lib/month/pending'
-import { viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
+import { shareAmount, viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
 import { PendingPanel } from './PendingPanel'
 import { listIncomes } from '@/features/money/api'
 import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
@@ -140,9 +140,13 @@ export function MonthScreen() {
         return {
           id: row.commitment.id,
           name: row.commitment.name,
-          // حصّتي لا المبلغ الكامل: من ينصّف الإنترنت لا يدفع كلّه.
+          // حصّتي لا المبلغ الكامل: من ينصّف الإنترنت لا يدفع كلّه —
+          // والمتوسّط كذلك، وإلا قفز السطر إلى الضعف بعد أول تسجيل. (ش11)
           amount: view.myAmount,
-          average: Number(row.average?.average_amount ?? 0),
+          average: shareAmount(
+            Number(row.average?.average_amount ?? 0),
+            Number(row.commitment.my_share_percent ?? 100),
+          ),
           isDueThisMonth: view.hasStarted && !view.isFinished,
           isRecorded: row.payment !== null,
           dayOfMonth: row.commitment.day_of_month,

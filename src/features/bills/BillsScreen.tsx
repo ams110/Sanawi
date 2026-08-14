@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { suggestedBill, viewCommitment } from '@/lib/commitments/calc'
 import { useAuth } from '@/features/auth/AuthProvider'
 import { formatDate, formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
@@ -513,8 +514,13 @@ function BillCard({
     setEditing(false)
   }
 
-  // المبلغ المقترح يتدرّج: الفاتورة المسجّلة، فمتوسّط السنة، فتقدير الميزانية.
-  const suggested = Number(row.payment?.amount ?? 0) || Math.round(average) || budgeted
+  // المبلغ المقترح من القاعدة الواحدة في المحرّك — بالمبلغ الكامل، لأن ما
+  // يُسجَّل هنا هو الفاتورة كما على ورقتها. (تدقيق آب 2026: س5)
+  const suggested = suggestedBill({
+    recordedAmount: row.payment?.amount == null ? null : Number(row.payment.amount),
+    averageAmount: average,
+    budgetedAmount: budgeted,
+  }).full
   const amount = useAmount(0, suggested ? String(suggested) : '')
   const [busy, setBusy] = useState(false)
 
@@ -792,7 +798,15 @@ function BillCard({
           {left > 0 && detail && (
             <span className="num text-xs text-text-muted">
               {t('bills.remainingForMe', {
-                amount: formatMoney(Number(detail.my_amount) * left),
+                // من المحرّك لا من ضربِ عمودَي عرض — نفس مصدر الثروة وكلود. (س16)
+                amount: formatMoney(
+                  viewCommitment({
+                    amount: budgeted,
+                    startsOn: row.commitment.starts_on,
+                    endsOn: row.commitment.ends_on,
+                    mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+                  }).remainingForMe ?? Number(detail.my_amount) * left,
+                ),
               })}
             </span>
           )}
