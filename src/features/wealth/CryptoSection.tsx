@@ -346,6 +346,15 @@ function WalletFields({
         {t('crypto.readOnlyWarning')}
       </p>
 
+      {/* اسم الصلاحية حرفياً: «للقراءة بس» لا تدلّ على أي مربّع يُؤشَّر. */}
+      {draft.exchange === 'pionex' && (
+        <p className="text-[11px] leading-relaxed text-text-muted">
+          {t('crypto.pionexHint')}
+          <br />
+          {t('crypto.pionexUs')}
+        </p>
+      )}
+
       <KeyInputs draft={draft} setDraft={setDraft} />
     </InlineEdit>
   )
