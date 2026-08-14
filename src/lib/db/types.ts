@@ -66,6 +66,10 @@ export type Account = {
   balance: number
   /** متى أُدخل الرصيد — رصيدٌ قديم يجعل «غير مخصّص» يكذب بثقة. */
   balance_updated_at: string
+  /** هل هذا الحساب هو صندوق الطوارئ — ورثها عن الأصل النقدي (هجرة 0019). */
+  is_emergency_fund: boolean
+  /** العائد السنوي على رصيده — وديعةٌ بفائدة تدخل المتوسط المرجّح. */
+  annual_return_percent: number
   /** فارغ = نشط. لا حذف: التحويلات تشير إليه. */
   archived_at: string | null
   created_at: string

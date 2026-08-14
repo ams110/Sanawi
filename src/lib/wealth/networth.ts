@@ -50,12 +50,22 @@ export interface DebtInput {
   paymentsLeft: number
 }
 
-/** حسابٌ بنكي — الرصيد الفعلي، وكم منه مخصَّصٌ لصناديق مربوطة به. */
+/**
+ * حسابٌ بنكي — الرصيد الفعلي، وكم منه مخصَّصٌ لصناديق مربوطة به.
+ *
+ * وهو **المكان الوحيد** للنقد منذ هجرة 0019: كان يشاركه `assets` من نوع
+ * cash/savings فيُعدّ المال مرّتين، فورث الحسابُ ما كان يميّز الأصل —
+ * علامةَ صندوق الطوارئ والعائد السنوي — وأُغلق الباب الآخر. (ث2)
+ */
 export interface CashAccountInput {
   name: string
   balance: number
   /** مجموع أرصدة الصناديق المربوطة بهذا الحساب. */
   reserved?: number
+  /** هل هذا الحساب هو صندوق الطوارئ — يُعلَّم ولا يُشتقّ. */
+  isEmergencyFund?: boolean
+  /** العائد على رصيده — وديعةٌ بفائدة تدخل المتوسط المرجّح. */
+  annualReturnPercent?: number
 }
 
 /**
@@ -269,6 +279,23 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
   const accountsTotal = accountsRaw.reduce((sum, a) => sum + finiteOr(a.balance, 0), 0)
   const accountsReserved = accountsRaw.reduce((sum, a) => sum + atLeastZero(a.reserved ?? 0), 0)
 
+  /*
+   * الحساب يدخل صندوق الطوارئ والعائد المرجّح — وريثاً للأصل النقدي.
+   *
+   * بعد هجرة 0019 صار النقد كلّه حسابات، فلو بقي الحسابان خارج هذين
+   * الرقمين لقرأ صاحبُ الوديعة «صندوق طوارئك صفر» وماله كلّه فيها،
+   * و«عائدك المرجّح صفر» ووديعتُه تربح 3٪.
+   *
+   * والمخصَّص لا يُطرح هنا: صندوق الالتزام مالٌ موجودٌ فعلاً يوم الحاجة —
+   * تخصيصُه نيّةُ صاحبه لا قيدٌ يمنعه. أمّا العائد فيُرجَّح بالرصيد كاملاً
+   * لأن الفائدة تُحسب عليه كاملاً لا على غير المخصَّص منه.
+   */
+  for (const account of accountsRaw) {
+    const balance = finiteOr(account.balance, 0)
+    if (account.isEmergencyFund) emergencyCurrent += atLeastZero(balance)
+    returnWeighted += balance * finiteOr(account.annualReturnPercent, 0)
+  }
+
   const accounts: AccountLine[] = accountsRaw
     .map((a) => {
       const balance = finiteOr(a.balance, 0)
@@ -325,6 +352,9 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
   )
   const mayDoubleCountCash = accountsRaw.length > 0 && cashAssetsTotal > 0
 
+  // مقام المتوسط المرجّح: ما يُتوقَّع له عائدٌ أصلاً.
+  const returnBase = assetsTotal + accountsTotal
+
   const ownedTotal = assetsTotal + accountsTotal + unlinkedRestrictedTotal
 
   /**
@@ -365,9 +395,13 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
       atLeastZero(input.emergencyMonths),
     ),
     staleAssets,
-    // العائد يُرجّح بالأصول وحدها: صناديق الالتزامات نقدٌ راكد لا عائد له،
-    // وإدخالها في المقام يخفض المتوسط بلا سبب.
-    weightedReturnPercent: assetsTotal > 0 ? round2(returnWeighted / assetsTotal) : 0,
+    /*
+     * العائد يُرجّح بالأصول والحسابات: صناديق الالتزامات وحدها تبقى خارج
+     * المقام — نقدٌ راكد لا عائد له، وإدخالها يخفض المتوسط بلا سبب.
+     * والحسابات دخلت المقام مع هجرة 0019 لأن النقد كلّه صار فيها.
+     */
+    weightedReturnPercent:
+      returnBase > 0 ? round2(returnWeighted / returnBase) : 0,
     isUnderwater: netWorth < 0,
   }
 }

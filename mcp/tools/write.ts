@@ -2317,12 +2317,14 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
 
 على أصلٍ موجود لا يُمَسّ إلا ما أُرسل: «الكاش صار 25 ألف» تحدّث المبلغ وحده
 وتُبقي نوعه وعلامة صندوق الطوارئ عليه. أمّا على أصلٍ جديد فللحقول الغائبة
-قيمٌ افتراضية: kind=cash و is_liquid=true والباقي صفر أو false.
+قيمٌ افتراضية: kind=investment و is_liquid=true والباقي صفر أو false.
 
 المدخلات:
   - name (string): اسم الأصل
   - amount (number): القيمة الحالية، صفر فأكثر
-  - kind: cash | savings | investment | property | receivable | other
+  - kind: investment | property | receivable | other
+    **لا cash ولا savings**: النقد يعيش في الحسابات منذ هجرة 0019، وتسجيله
+    هنا كان يعدّ المال مرّتين. من قال «عندي كاش» استعمل sanawi_save_account.
   - annual_return_percent (number): العائد السنوي المتوقّع
   - is_liquid (boolean): هل يُصرف هذا الأسبوع
   - is_emergency_fund (boolean): هل هو صندوق الطوارئ.
@@ -2339,10 +2341,15 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
          * لمبلغٍ محوًا صامتاً لكل ما عداه: «الكاش صار 25 ألف» كانت تُسقط عنه
          * علامة صندوق الطوارئ. الغياب يجب أن يبقى غياباً حتى يمكن التمييز.
          */
+        /*
+         * النقد والادخار خارج القائمة — لا في الشرح وحده بل في الشكل نفسه:
+         * وصفٌ يُقرأ ونداءٌ يُرفض خيرٌ من نداءٍ يمرّ ثم تردّه القاعدة برسالةٍ
+         * إنجليزية لا تقول ما يُفعل. (هجرة 0019، تدقيق آب 2026: ث2)
+         */
         kind: z
-          .enum(['cash', 'savings', 'investment', 'property', 'receivable', 'other'])
+          .enum(['investment', 'property', 'receivable', 'other'])
           .optional()
-          .describe('نوع الأصل — افتراضياً cash للأصل الجديد'),
+          .describe('نوع الأصل — النقد والادخار في sanawi_save_account لا هنا'),
         annual_return_percent: z.number().min(-100).max(100).optional(),
         is_liquid: z.boolean().optional(),
         is_emergency_fund: z.boolean().optional(),
@@ -2421,7 +2428,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
             .insert({
               user_id: connection.userId,
               name,
-              kind: input.kind ?? 'cash',
+              kind: input.kind ?? 'investment',
               amount: input.amount,
               annual_return_percent: input.annual_return_percent ?? 0,
               is_liquid: isLiquid,
@@ -2486,6 +2493,12 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
   - name (string): اسم الحساب كما يسمّيه المستخدم («حساب الالتزامات»، «لئومي»)
   - balance (number): الرصيد الفعلي كما في كشف البنك — قد يكون سالباً (مكشوف)
   - kind ('checking' | 'savings'): افتراضياً checking للحساب الجديد
+  - is_emergency_fund (boolean): هل هذا الحساب هو صندوق الطوارئ
+  - annual_return_percent (number): العائد على رصيده — وديعةٌ بفائدة تدخل المتوسط المرجّح
+
+**النقد كلّه هنا لا في الأصول**: منذ هجرة 0019 لا يُسجَّل أصلٌ من نوع
+cash/savings — كان تسجيله في المكانين يعدّ المال مرّتين. من قال «عندي 20 ألف
+كاش» أنشئ له حساباً بهذه الأداة لا أصلاً.
 
 المخرجات: الحساب بعد الحفظ ومعه reserved و available، وهل أُنشئ أم حُدِّث.`,
       inputSchema: {
@@ -2500,6 +2513,8 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           .enum(['checking', 'savings'])
           .optional()
           .describe('نوع الحساب — افتراضياً checking للحساب الجديد'),
+        is_emergency_fund: z.boolean().optional().describe('هل هذا الحساب صندوق الطوارئ'),
+        annual_return_percent: z.number().min(-100).max(100).optional(),
       },
       outputSchema: {
         currency: z.string(),
@@ -2535,6 +2550,12 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
             .update({
               balance: input.balance,
               ...(input.kind !== undefined ? { kind: input.kind } : {}),
+              ...(input.is_emergency_fund !== undefined
+                ? { is_emergency_fund: input.is_emergency_fund }
+                : {}),
+              ...(input.annual_return_percent !== undefined
+                ? { annual_return_percent: input.annual_return_percent }
+                : {}),
             })
             .eq('id', current.id)
             .select()
@@ -2546,6 +2567,8 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
               name,
               kind: input.kind ?? 'checking',
               balance: input.balance,
+              is_emergency_fund: input.is_emergency_fund ?? false,
+              annual_return_percent: input.annual_return_percent ?? 0,
               archived_at: null,
             })
             .select()

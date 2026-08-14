@@ -92,6 +92,35 @@ export function AccountsSection({ picture, userId, onChanged }: Props) {
                 <span className="num text-text-muted">{formatMoney(account.reserved)}</span>
               </div>
 
+              {/*
+                * علامة صندوق الطوارئ على الحساب — ورثها عن الأصل النقدي.
+                *
+                * بعد دمج 0019 صار النقد كلّه حسابات، فلو بقيت العلامة في
+                * الأصول وحدها لما استطاع أحدٌ أن يقول «هذا صندوق طوارئي».
+                * وهي تُعلَّم ولا تُشتقّ: وديعتان بالمبلغ نفسه إحداهما للطوارئ.
+                */}
+              <label className="flex items-center gap-2 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={account.isEmergencyFund}
+                  disabled={busy}
+                  onChange={(e) =>
+                    run(
+                      () =>
+                        saveAccount(userId, {
+                          id: account.id!,
+                          name: account.name,
+                          balance: account.balance,
+                          isEmergencyFund: e.target.checked,
+                        }),
+                      t('accounts.saveFailed'),
+                    )
+                  }
+                  className="size-4 accent-brand"
+                />
+                <span className="text-text-muted">{t('accounts.emergencyFund')}</span>
+              </label>
+
               <div className="flex items-baseline justify-between gap-3 text-[13px]">
                 <span className={account.shortfall ? 'font-semibold text-danger' : 'text-text'}>
                   {t('wealth.available')}

@@ -35,13 +35,25 @@ export async function listAccounts(includeArchived = false): Promise<Account[]> 
  */
 export async function saveAccount(
   userId: string,
-  input: { id?: string; name: string; balance: number; kind?: AccountKind },
+  input: {
+    id?: string
+    name: string
+    balance: number
+    kind?: AccountKind
+    /** ورثهما الحساب عن الأصل النقدي بعد الدمج (هجرة 0019). */
+    isEmergencyFund?: boolean
+    annualReturnPercent?: number
+  },
 ): Promise<Account> {
   const name = input.name.trim()
 
   if (input.id) {
     const patch: Partial<Account> = { name, balance: input.balance }
     if (input.kind !== undefined) patch.kind = input.kind
+    if (input.isEmergencyFund !== undefined) patch.is_emergency_fund = input.isEmergencyFund
+    if (input.annualReturnPercent !== undefined) {
+      patch.annual_return_percent = input.annualReturnPercent
+    }
     const { data, error } = await supabase
       .from('accounts')
       .update(patch)
@@ -59,6 +71,8 @@ export async function saveAccount(
       name,
       kind: input.kind ?? 'checking',
       balance: input.balance,
+      is_emergency_fund: input.isEmergencyFund ?? false,
+      annual_return_percent: input.annualReturnPercent ?? 0,
       archived_at: null,
     })
     .select()
@@ -210,6 +224,8 @@ export async function loadAccountsPicture(): Promise<AccountsPicture> {
     kind: account.kind,
     balance: Number(account.balance),
     balanceUpdatedAt: account.balance_updated_at,
+    isEmergencyFund: Boolean(account.is_emergency_fund),
+    annualReturnPercent: Number(account.annual_return_percent ?? 0),
     envelopes: envelopes.get(account.id) ?? [],
   }))
 

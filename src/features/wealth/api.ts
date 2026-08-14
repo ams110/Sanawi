@@ -233,6 +233,9 @@ export async function loadWealthSources(): Promise<WealthSources> {
     name: row.name,
     balance: Number(row.balance),
     reserved: reserved.get(row.id) ?? 0,
+    // ورثهما الحساب عن الأصل النقدي: صندوق الطوارئ والعائد. (هجرة 0019)
+    isEmergencyFund: Boolean(row.is_emergency_fund),
+    annualReturnPercent: Number(row.annual_return_percent ?? 0),
   }))
 
   const restrictedFunds: RestrictedFundInput[] = obligations.map((o) => ({
