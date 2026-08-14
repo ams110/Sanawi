@@ -1929,3 +1929,15 @@ as $$
       and c.user_id = (select auth.uid())
   );
 $$;
+
+/* ── 4. الحجب عن الزائر ───────────────────────────────────────── */
+
+-- `security definer` تعني أن الدالّة تعمل بصلاحية مالكها، فبقاؤها مفتوحةً
+-- لدور `anon` يجعلها مساراً قابلاً للنداء بلا جلسة عبر `/rest/v1/rpc/…`.
+-- الحارس داخلها يردّ (`auth.uid() is null`) — لكن الطبقتين خيرٌ من واحدة،
+-- وهو نفس ما فُعل بدوالّ Financy في 0017، وفحصُ Supabase الأمني يطلبه.
+revoke all on function public.save_crypto_credentials(uuid, text, text, text) from public, anon;
+grant execute on function public.save_crypto_credentials(uuid, text, text, text) to authenticated;
+
+revoke all on function public.crypto_wallet_has_credentials(uuid) from public, anon;
+grant execute on function public.crypto_wallet_has_credentials(uuid) to authenticated;
