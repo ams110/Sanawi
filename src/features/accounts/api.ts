@@ -1,7 +1,19 @@
 import { supabase } from '@/lib/supabase'
 import { toDateKey } from '@/lib/date'
-import type { Account, AccountKind, AccountSettlement, AccountTransfer } from '@/lib/db/types'
+import type {
+  Account,
+  AccountKind,
+  AccountSettlement,
+  AccountTransfer,
+  BankInboxRow,
+} from '@/lib/db/types'
 import { summarizeAccounts, type AccountInput, type AccountsSummary } from '@/lib/accounts/calc'
+import {
+  movementsSinceBalance,
+  type BankMovement,
+  type MovementsSince,
+} from '@/lib/bank/link'
+import { listBankMovementsSince } from '@/features/bank/financy'
 import { listObligations, type ObligationWithCalc } from '@/features/obligations/api'
 
 /**
@@ -78,6 +90,30 @@ export async function archiveAccount(id: string): Promise<void> {
     .from('accounts')
     .update({ archived_at: new Date().toISOString() })
     .eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * ربط حساب سنوي بحسابٍ عند البنك — أو فكّه.
+ *
+ * به تعرف حركةُ الوارد حسابَها، فتُسجَّل بـ`account_id` بدل أن تُسجَّل يتيمةً،
+ * ويصير سؤال «كم وصل بعد لقطة رصيدي؟» قابلاً للجواب. والفهرس الفريد في 0018
+ * يمنع ربط حساب بنكٍ واحد بحسابين — فالخطأ يرتدّ من القاعدة لا يمرّ صامتاً.
+ */
+export async function linkBankAccount(
+  accountId: string,
+  link: { providerId: string | null; externalId: string | null },
+): Promise<void> {
+  const externalId = link.externalId?.trim() || null
+  const { error } = await supabase
+    .from('accounts')
+    .update({
+      bank_external_id: externalId,
+      // المعرّف الفارغ يمسح المزوّد معه: مزوّدٌ بلا حساب ليس ربطاً ناقصاً
+      // بل بقيّةُ ربطٍ مفكوك، ويطابق `sameBankAccount` عليها لا يقع أصلاً.
+      bank_provider_id: externalId ? (link.providerId?.trim() || null) : null,
+    })
+    .eq('id', accountId)
   if (error) throw error
 }
 
@@ -183,6 +219,14 @@ export interface AccountsPicture {
   unlinked: ObligationWithCalc[]
   settlements: AccountSettlement[]
   obligations: ObligationWithCalc[]
+  /**
+   * ما تحرّك في البنك بعد لقطة رصيد كل حساب مربوط — بمعرّف الحساب.
+   *
+   * يُحسب هنا لا في المكوّن ليبقى «كم وصل بعد لقطتي؟» جواباً واحداً لكل
+   * سطحٍ يسأله (قاعدة 1)، وهو من **عالم الواقع** كالرصيد نفسه فيجوز جمعه
+   * عليه — وهذا بالضبط ما تفعله البطاقة.
+   */
+  bankSince: Record<string, MovementsSince>
 }
 
 /** الحسابات ومظاريفها — بنفس المحرّك الذي يقوله كلود. */
@@ -226,5 +270,54 @@ export async function loadAccountsPicture(): Promise<AccountsPicture> {
     unlinked,
     settlements,
     obligations,
+    bankSince: await bankSinceByAccount(accounts),
   }
+}
+
+/**
+ * صافي ما وصل من البنك بعد لقطة رصيد كل حساب مربوط.
+ *
+ * سحبةٌ واحدة لكل الحسابات من أقدم لقطةٍ بينها، ثم يقسّمها المحرّك على
+ * أصحابها: نداءٌ لكل حساب يضاعف الطلبات بلا فائدة، والحركات كلّها في جدولٍ
+ * واحدٍ مفهرسٍ على `tx_date`.
+ *
+ * وفشلُها لا يُسقط شاشة الحسابات: من لم يربط بنكه أصلاً — وهو الحال الغالب —
+ * لا يعنيه هذا الرقم، ومن ربطه يفقد بطاقةً واحدة لا الأرصدة كلها.
+ */
+async function bankSinceByAccount(
+  accounts: readonly Account[],
+): Promise<Record<string, MovementsSince>> {
+  const linked = accounts.filter((account) => Boolean(account.bank_external_id))
+  if (linked.length === 0) return {}
+
+  const sinceKeys = linked
+    .map((account) => toDateKey(new Date(account.balance_updated_at)))
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+  if (sinceKeys.length === 0) return {}
+  const earliest = sinceKeys.reduce((min, key) => (key < min ? key : min))
+
+  let movements: BankInboxRow[]
+  try {
+    movements = await listBankMovementsSince(earliest)
+  } catch {
+    return {}
+  }
+
+  const inputs: BankMovement[] = movements.map((row) => ({
+    providerId: row.provider_id,
+    externalId: row.account_external_id,
+    amount: Number(row.amount),
+    direction: row.direction,
+    txDate: row.tx_date,
+  }))
+
+  const out: Record<string, MovementsSince> = {}
+  for (const account of linked) {
+    out[account.id] = movementsSinceBalance(
+      inputs,
+      { providerId: account.bank_provider_id, externalId: account.bank_external_id },
+      { balanceUpdatedAt: account.balance_updated_at },
+    )
+  }
+  return out
 }

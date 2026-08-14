@@ -29,10 +29,16 @@ import {
 import { spendingBaseline } from '../src/lib/wealth/baseline.js'
 import { projectFreedom, type FreedomInput, type FreedomResult } from '../src/lib/wealth/freedom.js'
 import { debtBalanceFrom, type PayoffDebt } from '../src/lib/commitments/payoff.js'
+import {
+  movementsSinceBalance,
+  type BankMovement,
+  type MovementsSince,
+} from '../src/lib/bank/link.js'
 import type {
   Account,
   AccountSettlement,
   Asset,
+  BankInboxRow,
   CommitmentDetail,
   Expense,
   FixedCommitment,
@@ -724,6 +730,51 @@ export async function loadAccounts(
   return (data ?? []) as Account[]
 }
 
+/**
+ * صافي ما وصل من البنك بعد لقطة رصيد كل حساب مربوط.
+ *
+ * نسخةُ الخادم من نفس الدالّة في `src/features/accounts/api.ts`، وكلتاهما
+ * تستهلكان المحرّك الواحد `movementsSinceBalance` ولا تحسبان شيئاً بأنفسهما
+ * (قاعدة 1) — فلا تنحرف الشاشة عن كلود ولو بشِقّ أغورة.
+ *
+ * والحركات تُقرأ **بكل حالاتها**: المتجاهَلة خرجت من الحساب كما خرجت
+ * المسجَّلة، وترشيحُها بالمعلّق يصغّر الرقم كلّما قرّر صاحبه أكثر.
+ */
+async function loadBankSince(
+  { db }: Connection,
+  accounts: readonly Account[],
+): Promise<Record<string, MovementsSince>> {
+  const linked = accounts.filter((account) => Boolean(account.bank_external_id))
+  if (linked.length === 0) return {}
+
+  const sinceKeys = linked
+    .map((account) => isoDate(new Date(account.balance_updated_at)))
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+  if (sinceKeys.length === 0) return {}
+  const earliest = sinceKeys.reduce((min, key) => (key < min ? key : min))
+
+  const { data, error } = await db.from('bank_inbox').select('*').gte('tx_date', earliest)
+  if (error) throw error
+
+  const movements: BankMovement[] = ((data ?? []) as BankInboxRow[]).map((row) => ({
+    providerId: row.provider_id,
+    externalId: row.account_external_id,
+    amount: Number(row.amount),
+    direction: row.direction,
+    txDate: row.tx_date,
+  }))
+
+  const out: Record<string, MovementsSince> = {}
+  for (const account of linked) {
+    out[account.id] = movementsSinceBalance(
+      movements,
+      { providerId: account.bank_provider_id, externalId: account.bank_external_id },
+      { balanceUpdatedAt: account.balance_updated_at },
+    )
+  }
+  return out
+}
+
 /** حسابٌ بمعرّفه أو باسمه — بنفس منطق الالتزامات ولنفس السبب. */
 export async function findAccount(
   connection: Connection,
@@ -762,6 +813,14 @@ export interface AccountsPicture {
   unlinked: { name: string; balance: number }[]
   unlinkedTotal: number
   settlements: OpenSettlement[]
+  /**
+   * ما تحرّك في البنك بعد لقطة رصيد كل حساب مربوط — بمعرّف الحساب.
+   *
+   * بنفس محرّك الشاشة (`movementsSinceBalance`) وعلى نفس النداء: قاعدة 8 —
+   * سطحان يعرضان مشتقّاً من نفس البيانات لا يحسبانه مرّتين. وبدونه يقول كلود
+   * «رصيدك من ١٢ يوم، حدّثه» بينما الشاشة تعرف بكم يُحدَّث بالضبط.
+   */
+  bankSince: Record<string, MovementsSince>
 }
 
 /**
@@ -814,6 +873,7 @@ export async function loadAccountsPicture(connection: Connection): Promise<Accou
   return {
     summary,
     accounts: summary.accounts,
+    bankSince: await loadBankSince(connection, accounts),
     unlinked,
     unlinkedTotal: Math.round(unlinked.reduce((sum, u) => sum + u.balance, 0) * 100) / 100,
     settlements: settlements.map((row) => ({

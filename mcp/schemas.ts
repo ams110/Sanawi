@@ -17,6 +17,7 @@ import type {
   PartnerSettlement,
 } from '../src/lib/db/types.js'
 import type { AccountView } from '../src/lib/accounts/calc.js'
+import type { MovementsSince } from '../src/lib/bank/link.js'
 import type { CalendarMonth } from '../src/lib/obligations/calendar.js'
 import type { PayoffPlan } from '../src/lib/commitments/payoff.js'
 import { viewCommitment } from '../src/lib/commitments/calc.js'
@@ -118,6 +119,24 @@ export const accountOut = {
   days_since_balance_update: z.number().nullable(),
   /** مضى على الرصيد أكثر من أسبوعين — الرقم مبنيّ على مُدخَلٍ قديم. */
   balance_is_stale: z.boolean(),
+  /**
+   * ما تحرّك في البنك بعد لقطة الرصيد — للحساب المربوط بـFinancy وحده.
+   *
+   * ‏`null` = حسابٌ غير مربوط بالبنك، لا «ما تحرّك شيء». والفرق يقلب النصيحة:
+   * الأول يُطلب منه تحديث الرصيد يدوياً، والثاني رصيده مضبوط.
+   */
+  bank_since: z
+    .object({
+      count: z.number(),
+      inflow: z.number(),
+      outflow: z.number(),
+      /** الداخل ناقص الخارج — يُضاف إلى `balance` ليطابق البنك. */
+      net: z.number(),
+      since: z.string().nullable(),
+      /** الرصيد بعد إضافة الصافي — الرقم الذي يُقترح على صاحبه. */
+      suggested_balance: z.number(),
+    })
+    .nullable(),
   envelopes: z.array(
     z.object({
       name: z.string(),
@@ -128,7 +147,11 @@ export const accountOut = {
   ),
 }
 
-export function toAccountOut(view: AccountView): z.infer<z.ZodObject<typeof accountOut>> {
+export function toAccountOut(
+  view: AccountView,
+  /** ما وصل بعد لقطة الرصيد — يُمرَّر للمربوط بالبنك، ويُترك للباقي. */
+  since?: MovementsSince,
+): z.infer<z.ZodObject<typeof accountOut>> {
   return {
     id: view.id,
     name: view.name,
@@ -140,6 +163,16 @@ export function toAccountOut(view: AccountView): z.infer<z.ZodObject<typeof acco
     balance_updated_at: view.balanceUpdatedAt,
     days_since_balance_update: view.daysSinceBalanceUpdate,
     balance_is_stale: view.balanceIsStale,
+    bank_since: since
+      ? {
+          count: since.count,
+          inflow: since.inflow,
+          outflow: since.outflow,
+          net: since.net,
+          since: since.sinceKey,
+          suggested_balance: Math.round((view.balance + since.net) * 100) / 100,
+        }
+      : null,
     envelopes: view.envelopes.map((envelope) => ({
       name: envelope.name,
       balance: envelope.balance,

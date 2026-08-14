@@ -106,6 +106,27 @@ export async function listInbox(limit = 60): Promise<BankInboxRow[]> {
 }
 
 /**
+ * حركات الحساب منذ يومٍ معلوم — **بكل حالاتها**، لا المعلّق وحده.
+ *
+ * الفرق عن `listInbox` ليس تقنياً بل فرقُ عالَمين (قاعدة 2): الوارد صندوق
+ * قراراتٍ في دفترنا فيُرشَّح بالمعلّق، وهذه تجيب سؤالاً عن **البنك**: كم
+ * تحرّك حسابك منذ لقطتك؟ والحركة التي تجاهلتها خرجت من الحساب كما خرجت
+ * التي سجّلتها — «تجاهلتها» قرارُ دفترٍ لا إلغاءٌ لسحبٍ وقع.
+ *
+ * وترشيحُها بالمعلّق كان سيجعل الرقم يصغر كلّما قرّر صاحبه أكثر، حتى يصير
+ * صفراً وحسابُه متحرّك.
+ */
+export async function listBankMovementsSince(sinceKey: string): Promise<BankInboxRow[]> {
+  const { data, error } = await supabase
+    .from('bank_inbox')
+    .select('*')
+    .gte('tx_date', sinceKey)
+    .order('tx_date', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as BankInboxRow[]
+}
+
+/**
  * تعليم القرار. الحركة لا تُحذف أبداً: «تجاهلتها» تاريخٌ أيضاً، ومن غيّر
  * رأيه يجدها لا يعيد سحبها.
  */

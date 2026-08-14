@@ -1198,6 +1198,14 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 وانتبه لحقلين آخرين:
   - balance_is_stale: مضى على الرصيد أكثر من أسبوعين. الرصيد يُدخَل يدوياً، فالقديم منه يجعل كل ما تحته تخميناً — اطلب تحديثه.
   - unlinked: صناديق بلا حساب. مالها خارج هذه اللوحة كلّها، واقتراح ربطها يصحّح الأرقام.
+  - bank_since: للحساب المربوط بالبنك (Financy) وحده — كم حركةً وصلت **بعد** لقطة رصيده وبأيّ صافٍ.
+    هنا لا تكتفِ بـ«حدّث رصيدك»: قل الرقم. «وصل 4 حركات صافيها ‎−620، يعني رصيدك صار 3,380»
+    واعرض تحديثه بـsanawi_save_account على suggested_balance. وقيمته الفارغة (null) تعني حساباً
+    غير مربوط بالبنك لا حساباً ساكناً — لا تقل عنه «ما تحرّك شي».
+
+**ولا يُخصم شيء تلقائياً.** حركات البنك لا تُنقص الرصيد المخزَّن: الرصيد لقطةٌ من الكشف
+والحركة الأقدم منها داخلةٌ فيها أصلاً، فخصمُها يخصمها مرّتين. bank_since يقيس الفارق فقط،
+والتحديث يبقى قرار صاحبه.
 
 والتسويات المعلّقة (settlements) دفعاتٌ خرجت من حسابٍ غير حساب صندوقها: كلٌّ منها
 تحويلٌ لم يقع بعد، ويُغلقها sanawi_transfer_between_accounts.
@@ -1233,7 +1241,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 
       const structured = {
         currency,
-        accounts: picture.accounts.map(toAccountOut),
+        accounts: picture.accounts.map((view) =>
+          toAccountOut(view, view.id ? picture.bankSince[view.id] : undefined),
+        ),
         balance_total: summary.balanceTotal,
         reserved_total: summary.reservedTotal,
         available_total: summary.availableTotal,

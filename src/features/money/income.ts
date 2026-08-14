@@ -49,6 +49,11 @@ export async function addIncomeEntry(
     sourceId: string | null
     name: string | null
     receivedAt: string
+    /**
+     * الحساب الذي دخلته القبضة — **لا يزيد رصيده**، نفس قاعدة المصروف:
+     * اللقطة من كشف البنك تحوي القبضة أصلاً، وزيادتها هنا تعدّها مرّتين.
+     */
+    accountId?: string | null
     note?: string | null
   },
 ): Promise<void> {
@@ -58,6 +63,7 @@ export async function addIncomeEntry(
     source_id: input.sourceId,
     name: input.name,
     received_at: input.receivedAt,
+    account_id: input.accountId ?? null,
     note: input.note ?? null,
   })
   if (error) throw error

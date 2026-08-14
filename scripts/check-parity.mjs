@@ -127,6 +127,39 @@ function seed(db, userId) {
     is_unexpected: false, amount: 155, spent_at: iso(today), note: 'بنزين',
     method_id: null, account_id: null, created_at: new Date().toISOString(),
   })
+  /*
+   * الحساب المربوط بالبنك — الرقم الذي وُلد مع ربط الحسابات.
+   *
+   * لقطة الرصيد قبل خمسة أيام بساعةٍ نهارية (قاعدة 7)، وثلاث حركات تطأ
+   * المواضع الثلاثة التي يخطئ الحدس فيها:
+   *   · صرفة 620 بعد اللقطة، معلّقة  ← تدخل
+   *   · قبضة 200 بعد اللقطة، متجاهَلة ← تدخل أيضاً: «تجاهلتها» قرارُ دفترٍ
+   *     لا إلغاءٌ لسحبٍ وقع في البنك
+   *   · صرفة 900 قبل اللقطة          ← لا تدخل، فهي داخلةٌ في الرصيد أصلاً
+   * فالصافي ‎−420 والمقترَح 4,580.
+   */
+  const snapshot = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 5, 13, 40)
+  db.accounts.push({
+    id: 'a1', user_id: userId, name: 'لئومي', kind: 'checking',
+    balance: 5000, balance_updated_at: snapshot.toISOString(),
+    bank_provider_id: 'leumi', bank_external_id: 'IL-9911',
+    archived_at: null, created_at: new Date().toISOString(),
+  })
+  const inboxRow = (id, amount, direction, dayOffset, status) => ({
+    id, user_id: userId, tx_sk: `sk-${id}`,
+    provider_id: 'leumi', account_external_id: 'IL-9911',
+    name: `حركة ${id}`, amount, direction,
+    tx_date: iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOffset)),
+    category_main: null, category_sub: null,
+    installment_number: null, installment_total: null,
+    status, recorded_kind: null, created_at: new Date().toISOString(),
+  })
+  db.bank_inbox.push(
+    inboxRow('bx1', 620, 'out', 2, 'pending'),
+    inboxRow('bx2', 200, 'in', 1, 'dismissed'),
+    inboxRow('bx3', 900, 'out', 9, 'recorded'),
+  )
+
   void monthKey
 }
 
@@ -265,6 +298,33 @@ try {
   step('فاتورة الكهرباء بمتوسّطها المنصَّف 180', bill?.amount === 180, `كلود ${bill?.amount}`)
   const salary = overview.pending_income.find((p) => p.name === 'راتب')
   step('الراتب المنتظر 8,300 = ‏9,000 − 700', salary?.amount === 8300, `كلود ${salary?.amount}`)
+
+  /*
+   * 5. الرصيد المقترَح بعد حركات البنك — الشاشة وكلود على نفس النداء.
+   *
+   * هذا الرقم يُعرض في مكانين ويُشتقّ من نفس البيانات (قاعدة 8): زرّ «خلّي
+   * الرصيد …» في شاشة الحسابات، وحقل bank_since.suggested_balance عند كلود.
+   * ولولا هذا التأكيد لانحرف أحدهما صامتاً أوّل ما يتغيّر تعريف «بعد اللقطة».
+   */
+  const accountsOut = await call('sanawi_list_accounts')
+  const claudeAccount = accountsOut.accounts.find((a) => a.name === 'لئومي')
+  const claudeSuggested = claudeAccount?.bank_since?.suggested_balance ?? null
+
+  await page.goto('http://localhost:5198/wealth/accounts', { waitUntil: 'networkidle' })
+  await page.waitForTimeout(1500)
+  const applyButton = page.getByRole('button', { name: /خلّي الرصيد/ }).first()
+  const screenSuggested = parseMoney(await applyButton.innerText().catch(() => ''))
+
+  step(
+    'الرصيد المقترَح بعد حركات البنك = suggested_balance عند كلود',
+    screenSuggested !== null && screenSuggested === claudeSuggested,
+    `الشاشة ${screenSuggested} · كلود ${claudeSuggested}`,
+  )
+  step(
+    'والصافي ‎−420: المتجاهَلة محسوبة وما قبل اللقطة مستثناة',
+    claudeAccount?.bank_since?.net === -420 && claudeAccount?.bank_since?.count === 2,
+    `كلود صافي ${claudeAccount?.bank_since?.net} من ${claudeAccount?.bank_since?.count} حركة`,
+  )
 } finally {
   await browser.close()
   vite.kill()
