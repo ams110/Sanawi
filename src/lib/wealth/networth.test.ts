@@ -512,3 +512,51 @@ describe('الحسابات — المال يعيش في مكان', () => {
     expect(r.hasUnlinkedFunds).toBe(false)
   })
 })
+
+/*
+ * العدّ المزدوج المحتمَل يُعلَن ولا يُستنتج (تدقيق آب 2026: ث2).
+ *
+ * `accounts` و`assets` من نوع نقد/ادخار جدولان لشيءٍ واحد غالباً، والدمج
+ * قرارٌ مؤجَّل — فالعلَم هنا كي تقوله الشاشة وكلود بنفس القاعدة لا بقاعدتين.
+ */
+describe('تحذير العدّ المزدوج', () => {
+  it('حسابٌ وأصلٌ نقديّ معاً: العلَم مرفوع ومعه المبلغ', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [{ name: 'لئومي', balance: 10000 }],
+        assets: [asset({ name: 'نقد', kind: 'cash', amount: 10000 })],
+      }),
+    )
+    expect(r.mayDoubleCountCash).toBe(true)
+    expect(r.cashAssetsTotal).toBe(10000)
+    // والرقم يبقى كما هو — التحذير لا يغيّر الحساب، القرار للمستخدم.
+    expect(r.netWorth).toBe(20000)
+  })
+
+  it('والادخار مثل النقد', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [{ name: 'لئومي', balance: 100 }],
+        assets: [asset({ name: 'وديعة', kind: 'savings', amount: 4000 })],
+      }),
+    )
+    expect(r.mayDoubleCountCash).toBe(true)
+    expect(r.cashAssetsTotal).toBe(4000)
+  })
+
+  it('أصولٌ غير نقدية لا ترفعه — الشقة ليست رصيد بنك', () => {
+    const r = computeNetWorth(
+      input({
+        accounts: [{ name: 'لئومي', balance: 10000 }],
+        assets: [asset({ name: 'الشقة', kind: 'property', amount: 500000, isLiquid: false })],
+      }),
+    )
+    expect(r.mayDoubleCountCash).toBe(false)
+    expect(r.cashAssetsTotal).toBe(0)
+  })
+
+  it('ولا يُرفع بلا حسابات مسجّلة أصلاً', () => {
+    const r = computeNetWorth(input({ assets: [asset({ kind: 'cash', amount: 10000 })] }))
+    expect(r.mayDoubleCountCash).toBe(false)
+  })
+})

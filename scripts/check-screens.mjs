@@ -860,7 +860,14 @@ try {
       obligation_id: o.id,
       partner_id: null,
       account_id: null,
-      amount: 100,
+      /*
+       * مبلغٌ يغطّي أيّ قسط — لا 100.
+       *
+       * الإيداع الجزئي صار يُبقي السطر بالباقي («حطّيت 100 من 500») بدل أن
+       * يُسقط القسط كلَّه (تدقيق آب 2026: ش13)، فمئةٌ على قسطٍ بخمسمئة لا
+       * تُفرغ القائمة — وهذا الفحص يريد الحالة الخالية لا الجزئية.
+       */
+      amount: 100_000,
       deposit_date: todayKey,
       note: null,
       created_at: new Date().toISOString(),

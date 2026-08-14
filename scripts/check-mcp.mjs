@@ -537,22 +537,35 @@ if (!(emptyNet?.restricted_total > 0)) {
   fail('صناديق الالتزامات لم تُحتسب ملكاً')
 }
 
-const cash = await call('sanawi_save_asset', {
+/*
+ * النقد يعيش في الحسابات لا في الأصول (هجرة 0019، تدقيق آب 2026: ث2).
+ *
+ * كان مكانان لمالٍ واحد فيُعدّ مرّتين. الشكل نفسه يرفض النوع الآن، وعلامةُ
+ * صندوق الطوارئ والعائد ورثهما الحساب — فيُفحص عليه هو.
+ */
+await expectError(
+  'sanawi_save_asset',
+  { name: 'كاش بالبنك', amount: 20000, kind: 'cash' },
+  'Invalid option',
+)
+
+const cashAccount = await call('sanawi_save_account', {
   name: 'كاش بالبنك',
-  amount: 20000,
-  kind: 'cash',
+  balance: 20000,
   is_emergency_fund: true,
 })
-expect('الأصل أُنشئ', cash?.created, true)
-expect('ومعلَّم صندوقَ طوارئ', cash?.asset.is_emergency_fund, true)
+expect('الحساب أُنشئ', cashAccount?.created, true)
 
-// الاسم نفسه يحدّث ولا يكرّر — وإلا صار كل «الكاش صار كذا» أصلاً جديداً.
-const cashAgain = await call('sanawi_save_asset', { name: 'كاش بالبنك', amount: 25000 })
+// الاسم نفسه يحدّث ولا يكرّر — وإلا صار كل «الكاش صار كذا» حساباً جديداً.
+const cashAgain = await call('sanawi_save_account', { name: 'كاش بالبنك', balance: 25000 })
 expect('الاسم نفسه يحدّث لا ينشئ', cashAgain?.created, false)
-expect('والقيمة الجديدة محفوظة', cashAgain?.asset.amount, 25000)
-expect('ولم يتكرّر الصف', fake.db.assets.length, 1)
-// تحديث المبلغ وحده لا يمحو ما لم يُرسَل — وإلا سقطت علامة صندوق الطوارئ صامتةً.
-expect('والعلامة نجت من التحديث', cashAgain?.asset.is_emergency_fund, true)
+expect('والقيمة الجديدة محفوظة', cashAgain?.account.balance, 25000)
+// تحديث الرصيد وحده لا يمحو ما لم يُرسَل — وإلا سقطت علامة صندوق الطوارئ صامتةً.
+expect(
+  'والعلامة نجت من التحديث',
+  fake.db.accounts.find((a) => a.name === 'كاش بالبنك')?.is_emergency_fund,
+  true,
+)
 
 // صندوق طوارئ غير سائل تناقض: العلامة تُهمَل ولا تُحفظ.
 const flat = await call('sanawi_save_asset', {
@@ -565,9 +578,14 @@ const flat = await call('sanawi_save_asset', {
 expect('صندوق طوارئ غير سائل لا يُقبل', flat?.asset.is_emergency_fund, false)
 
 const net = await call('sanawi_net_worth')
-expect('مجموع الأصول', net?.assets_total, 425000)
+expect('مجموع الأصول بلا النقد', net?.assets_total, 400000)
+expect('ورصيد الحساب مفصولٌ عنها', net?.accounts_total, 25000)
+// السائل = رصيد الحساب وحده؛ العقار غير سائل.
 expect('السائل يستثني العقار', net?.liquid_total, 25000)
-expect('صندوق الطوارئ هو السائل المُعلَّم', net?.emergency_fund.current, 25000)
+// صندوق الطوارئ صار حساباً معلَّماً — ورث العلامة عن الأصل النقدي.
+expect('صندوق الطوارئ هو الحساب المُعلَّم', net?.emergency_fund.current, 25000)
+// ولا عدّ مزدوج: ما عاد ممكناً تسجيل النقد في المكانين.
+expect('لا احتمال عدّ مزدوج', net?.may_double_count_cash, false)
 if (!(net?.net_worth > 425000)) {
   fail('صافي الثروة لا يضمّ صناديق الالتزامات')
 }

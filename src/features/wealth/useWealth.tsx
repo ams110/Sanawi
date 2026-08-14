@@ -8,6 +8,7 @@ import { computeNetWorth, type NetWorthResult } from '@/lib/wealth/networth'
 import { updateProfile } from '@/features/profile/api'
 import type { Profile } from '@/lib/db/types'
 import { loadWealthSources, toAssetInputs } from './api'
+import { useCryptoSync, useCryptoWallets } from './useCryptoSync'
 
 /**
  * مصادر الثروة وحسبتها — خطّاف واحد لصفحات المحور.
@@ -28,6 +29,14 @@ export function useWealth() {
     isPending: loading,
     error: loadError,
   } = useQuery({ queryKey: ['wealth'], queryFn: loadWealthSources })
+
+  /*
+   * محافظ الكريبتو تُحدَّث عند فتح المحور — هنا لا في صفحة الأصول وحدها:
+   * صافي الثروة في «النظرة» يقرأ الأصل نفسه، ولو نُوديت هناك فقط لعرضت
+   * النظرةُ رقم أمس لمن لم يفتح الأصول.
+   */
+  const wallets = useCryptoWallets()
+  const crypto = useCryptoSync((wallets.data?.length ?? 0) > 0)
 
   /** خطأ كتابةٍ محلي — الجلب له خطؤه من الاستعلام نفسه. */
   const [actionError, setActionError] = useState<string | null>(null)
@@ -77,7 +86,19 @@ export function useWealth() {
     })
   }, [sources, emergencyMonths])
 
-  return { user, profile, sources, net, loading, error, emergencyMonths, load, saveProfilePatch }
+  return {
+    user,
+    profile,
+    sources,
+    net,
+    loading,
+    error,
+    emergencyMonths,
+    load,
+    saveProfilePatch,
+    crypto,
+    wallets: wallets.data ?? [],
+  }
 }
 
 /** هيكل التحميل الموحّد لصفحات المحور. */

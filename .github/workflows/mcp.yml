@@ -91,6 +91,9 @@ jobs:
 
           [functions.sanawi-mcp]
           verify_jwt = false
+
+          [functions.crypto-sync]
+          verify_jwt = true
           TOML
 
       # الأسرار تُضبط من هنا لا من لوحة Supabase: كتابةُ كلمة سرّ في متصفّح
@@ -122,6 +125,18 @@ jobs:
           supabase functions deploy sanawi-mcp \
             --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
             --no-verify-jwt
+
+      # ‏crypto-sync عكسها: المستخدم نفسه ينادي بجلسته، فبوّابة JWT تبقى — وهي
+      # الطبقة التي تمنع نداءً بلا جلسةٍ من الوصول إلى مفاتيح منصّات التداول.
+      #
+      # وتُنشر هنا لا في تدفّقٍ ثالث: `build:edge` أعلاه يولّد `lib/` لكلتيهما،
+      # فنشرُها في مكانين يعني توليدين ينحرفان.
+      - name: نشر دالّة مزامنة الكريبتو
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase functions deploy crypto-sync \
+            --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
 
       - name: الرابط
         run: |

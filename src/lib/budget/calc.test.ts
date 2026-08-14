@@ -57,12 +57,13 @@ describe('تحويل الدخل إلى شهري', () => {
 
 describe('محاكي الادخار', () => {
   it('يحسب القيمة المستقبلية بعائد 7%', () => {
-    // 1,000 شهرياً لعشر سنوات بعائد 7% ≈ 173,085
+    // 1,000 شهرياً لعشر سنوات بعائد 7% فعليّ ≈ 171,052.
+    // (كانت 173,085 حين كان المعدّل r/12 — أي 7.23٪ فعلياً. ث3)
     const r = projectSavings(1000, 10, 7)
-    expect(r.futureValue).toBeGreaterThan(172000)
-    expect(r.futureValue).toBeLessThan(174000)
+    expect(r.futureValue).toBeGreaterThan(170000)
+    expect(r.futureValue).toBeLessThan(172000)
     expect(r.totalDeposited).toBe(120000)
-    expect(r.growth).toBe(r.futureValue - 120000)
+    expect(r.growth).toBeCloseTo(r.futureValue - 120000, 2)
   })
 
   it('يحسب الدخل السلبي بقاعدة 4%', () => {
@@ -85,19 +86,19 @@ describe('محاكي الادخار — الرصيد الابتدائي', () => 
   it('يبدأ مما معك اليوم لا من صفر', () => {
     const fromZero = projectSavings(1000, 10, 7)
     const withBalance = projectSavings(1000, 10, 7, { initialBalance: 50000 })
-    // 50,000 وحدها تصير 100,483.07 بعد عشر سنوات بعائد 7٪.
-    expect(withBalance.futureValue - fromZero.futureValue).toBeCloseTo(100483.07, 1)
+    // 50,000 وحدها تصير 98,357.57 بعد عشر سنوات بعائد 7٪ فعليّ.
+    expect(withBalance.futureValue - fromZero.futureValue).toBeCloseTo(98357.57, 1)
   })
 
   it('يعدّ الرصيد الابتدائي من جيبك فلا يحسبه نمواً', () => {
     const r = projectSavings(1000, 10, 7, { initialBalance: 50000 })
     expect(r.totalDeposited).toBe(170000)
-    expect(r.growth).toBe(r.futureValue - 170000)
+    expect(r.growth).toBeCloseTo(r.futureValue - 170000, 2)
   })
 
   it('ينمّي رصيداً قائماً بلا أي دفعة شهرية', () => {
     const r = projectSavings(0, 10, 7, { initialBalance: 100000 })
-    expect(r.futureValue).toBeCloseTo(200966.14, 1)
+    expect(r.futureValue).toBeCloseTo(196715.14, 1)
     expect(r.totalDeposited).toBe(100000)
   })
 
@@ -112,10 +113,10 @@ describe('محاكي الادخار — الرصيد الابتدائي', () => 
 describe('محاكي الادخار — القيمة بقوة شراء اليوم', () => {
   it('يخصم التضخّم عن الرقم الاسمي', () => {
     const r = projectSavings(2000, 20, 7, { inflationPercent: 3 })
-    expect(r.futureValue).toBeCloseTo(1041853.32, 1)
-    // ‏1.03^20 = 1.806 — أي أن المليون الاسمي يساوي 577 ألفاً بقيمة اليوم.
-    expect(r.realFutureValue).toBeCloseTo(576848.92, 1)
-    expect(r.realMonthlyPassiveIncome).toBeCloseTo(1922.83, 1)
+    expect(r.futureValue).toBeCloseTo(1015072.75, 1)
+    // ‏1.03^20 = 1.806 — أي أن المليون الاسمي يساوي 562 ألفاً بقيمة اليوم.
+    expect(r.realFutureValue).toBeCloseTo(562021.17, 1)
+    expect(r.realMonthlyPassiveIncome).toBeCloseTo(1873.4, 1)
   })
 
   it('يترك القيمة الحقيقية مساوية للاسمية حين لا يُطلب تضخّم', () => {
@@ -132,31 +133,45 @@ describe('محاكي الادخار — القيمة بقوة شراء اليو�
 
   it('يغيّر معدّل السحب الدخلَ السلبي وحده', () => {
     const r = projectSavings(1000, 10, 7, { withdrawalRatePercent: 3.5 })
-    expect(r.futureValue).toBeCloseTo(173084.81, 1)
+    expect(r.futureValue).toBeCloseTo(171051.73, 1)
     expect(r.monthlyPassiveIncome).toBeCloseTo((r.futureValue * 0.035) / 12, 2)
   })
 })
 
-describe('محاكي الادخار — توافق النداء القديم', () => {
+describe('محاكي الادخار — العائد الفعليّ مثبَّتاً', () => {
   /**
-   * النداء بثلاث وسائط يجب أن يرجع أرقامه القديمة بالحرف: الشاشة وخادم MCP
-   * يستدعيانه هكذا، وأي انزياح هنا يغيّر ما يراه المستخدم بلا أن يطلبه.
+   * الأرقام مثبَّتة بالحرف كي لا تنزاح ثانيةً بلا طلب.
+   *
+   * انزاحت مرّةً واحدة بقرارٍ صريح من صاحب التطبيق (تدقيق آب 2026: ث3):
+   * صار المعدّل الشهري جذراً هندسياً لا `r/12`، فـ7٪ تعني 7٪ فعلية لا
+   * 7.23٪ — وهو نفس ما يفهمه `wealth/freedom.ts`، فالشاشتان تتفقان.
+   * وما دون ذلك، أي تغيّر هنا يغيّر ما يراه المستخدم بلا أن يطلبه.
    */
-  it('يرجع أرقام ما قبل التعديل حرفياً', () => {
+  it('يرجع أرقام العائد الفعليّ حرفياً', () => {
     expect(projectSavings(2000, 20, 7)).toEqual({
-      futureValue: 1041853.32,
+      futureValue: 1015072.75,
       totalDeposited: 480000,
-      growth: 561853.32,
-      monthlyPassiveIncome: 3472.84,
-      realFutureValue: 1041853.32,
-      realMonthlyPassiveIncome: 3472.84,
+      growth: 535072.75,
+      monthlyPassiveIncome: 3383.58,
+      realFutureValue: 1015072.75,
+      realMonthlyPassiveIncome: 3383.58,
     })
   })
 
   it('يبقي السحب الافتراضي 4٪ على حاله بالضبط', () => {
     const r = projectSavings(1000, 10, 7)
-    expect(r.futureValue).toBe(173084.81)
-    expect(r.monthlyPassiveIncome).toBe(576.95)
+    expect(r.futureValue).toBe(171051.73)
+    expect(r.monthlyPassiveIncome).toBe(570.17)
+  })
+
+  /*
+   * الاتفاق نفسه يُفحص صراحةً لا يُستنتج (قاعدة CLAUDE.md الثامنة):
+   * محرّكان يقرآن «7٪» ويجب أن يعنيا الشيء نفسه.
+   */
+  it('يفهم 7٪ كما يفهمها محرّك الحرية بالضبط', () => {
+    // نموّ سنةٍ واحدة على رصيدٍ قائم بلا إيداعات = العائد المعلَن نفسه.
+    const r = projectSavings(0, 1, 7, { initialBalance: 100000 })
+    expect(r.futureValue).toBeCloseTo(107000, 0)
   })
 })
 
@@ -216,14 +231,14 @@ describe('محاكي الادخار — المدخلات الفاسدة', () => 
 
   it('يقصّ الرصيد الابتدائي السالب فلا يخصمه من النتيجة', () => {
     const r = projectSavings(1000, 10, 7, { initialBalance: -50000 })
-    expect(r.futureValue).toBe(173084.81)
+    expect(r.futureValue).toBe(171051.73)
     expect(r.totalDeposited).toBe(120000)
   })
 
   it('يقبل سنواتٍ كسرية', () => {
     const r = projectSavings(1000, 0.5, 7)
     expect(r.totalDeposited).toBe(6000)
-    expect(r.futureValue).toBeCloseTo(6088.18, 1)
+    expect(r.futureValue).toBeCloseTo(6085.45, 1)
   })
 })
 

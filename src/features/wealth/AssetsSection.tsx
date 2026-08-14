@@ -8,14 +8,14 @@ import { useAmount } from '@/features/record/amount'
 import type { Asset, AssetKind } from '@/lib/db/types'
 import { addAsset, archiveAsset, updateAsset } from './api'
 
-const KINDS: readonly AssetKind[] = [
-  'cash',
-  'savings',
-  'investment',
-  'property',
-  'receivable',
-  'other',
-]
+/*
+ * النقد والادخار خرجا من هنا — يعيشان في الحسابات (هجرة 0019).
+ *
+ * كان تسجيلهما هنا وفي `accounts` بابين لمالٍ واحد، فمن سجّل رصيده في
+ * الاثنين رأى ضعف ثروته. القائمة تُعرّف ما يُقبل، والقاعدة تحرسه بقيد —
+ * فلا يعود الباب من شاشةٍ أخرى. (تدقيق آب 2026: ث2)
+ */
+const KINDS: readonly AssetKind[] = ['investment', 'property', 'receivable', 'other']
 
 const KIND_ICON: Record<AssetKind, string> = {
   cash: '💵',
@@ -152,7 +152,7 @@ interface Draft {
 
 const EMPTY: Draft = {
   name: '',
-  kind: 'cash',
+  kind: 'investment',
   amount: '',
   annualReturnPercent: '0',
   isLiquid: true,

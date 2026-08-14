@@ -20,4 +20,6 @@ android/app/src/main/assets/public
 
 # دالّة Supabase مولَّدة من mcp/ عند النشر — ليست مصدراً
 supabase/functions/sanawi-mcp/
+# و`crypto-sync/lib` نسخةٌ مولَّدة من src/lib — المصدر هناك لا هنا
+supabase/functions/crypto-sync/lib/
 supabase/config.toml

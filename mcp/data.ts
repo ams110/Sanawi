@@ -864,6 +864,8 @@ export async function loadAccountsPicture(connection: Connection): Promise<Accou
       kind: account.kind,
       balance: Number(account.balance),
       balanceUpdatedAt: account.balance_updated_at,
+      isEmergencyFund: Boolean(account.is_emergency_fund),
+      annualReturnPercent: Number(account.annual_return_percent ?? 0),
       envelopes: envelopes.get(account.id) ?? [],
     })),
   )
@@ -1047,6 +1049,9 @@ export async function loadWealth(connection: Connection): Promise<WealthPicture>
       name: a.name,
       balance: a.balance,
       reserved: a.reserved,
+      // نفس مدخلات الشاشة حرفياً — ورثهما الحساب بعد الدمج. (هجرة 0019)
+      isEmergencyFund: a.isEmergencyFund,
+      annualReturnPercent: a.annualReturnPercent,
     })),
     restrictedFunds: month.obligations.map((o) => ({
       amount: Number(o.balance?.my_fund_balance ?? 0),

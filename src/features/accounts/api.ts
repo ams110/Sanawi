@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { nextBalance, settlementsClosedBy } from '@/lib/accounts/transfer'
 import { toDateKey } from '@/lib/date'
 import type {
   Account,
@@ -46,13 +47,25 @@ export async function listAccounts(includeArchived = false): Promise<Account[]> 
  */
 export async function saveAccount(
   userId: string,
-  input: { id?: string; name: string; balance: number; kind?: AccountKind },
+  input: {
+    id?: string
+    name: string
+    balance: number
+    kind?: AccountKind
+    /** ورثهما الحساب عن الأصل النقدي بعد الدمج (هجرة 0019). */
+    isEmergencyFund?: boolean
+    annualReturnPercent?: number
+  },
 ): Promise<Account> {
   const name = input.name.trim()
 
   if (input.id) {
     const patch: Partial<Account> = { name, balance: input.balance }
     if (input.kind !== undefined) patch.kind = input.kind
+    if (input.isEmergencyFund !== undefined) patch.is_emergency_fund = input.isEmergencyFund
+    if (input.annualReturnPercent !== undefined) {
+      patch.annual_return_percent = input.annualReturnPercent
+    }
     const { data, error } = await supabase
       .from('accounts')
       .update(patch)
@@ -70,6 +83,8 @@ export async function saveAccount(
       name,
       kind: input.kind ?? 'checking',
       balance: input.balance,
+      is_emergency_fund: input.isEmergencyFund ?? false,
+      annual_return_percent: input.annualReturnPercent ?? 0,
       archived_at: null,
     })
     .select()
@@ -97,7 +112,7 @@ export async function archiveAccount(id: string): Promise<void> {
  * ربط حساب سنوي بحسابٍ عند البنك — أو فكّه.
  *
  * به تعرف حركةُ الوارد حسابَها، فتُسجَّل بـ`account_id` بدل أن تُسجَّل يتيمةً،
- * ويصير سؤال «كم وصل بعد لقطة رصيدي؟» قابلاً للجواب. والفهرس الفريد في 0018
+ * ويصير سؤال «كم وصل بعد لقطة رصيدي؟» قابلاً للجواب. والفهرس الفريد في 0021
  * يمنع ربط حساب بنكٍ واحد بحسابين — فالخطأ يرتدّ من القاعدة لا يمرّ صامتاً.
  */
 export async function linkBankAccount(
@@ -132,7 +147,7 @@ export async function moveBalance(accountId: string, delta: number): Promise<num
     .single()
   if (readError) throw readError
 
-  const next = Math.round((Number(current.balance) + delta) * 100) / 100
+  const next = nextBalance(current.balance, delta)
   const { error } = await supabase.from('accounts').update({ balance: next }).eq('id', accountId)
   if (error) throw error
   return next
@@ -177,26 +192,18 @@ export async function transferBetweenAccounts(
   const fromBalance = await moveBalance(input.fromAccountId, -input.amount)
   const toBalance = await moveBalance(input.toAccountId, input.amount)
 
-  /*
-   * الإغلاق كاملٌ لا جزئي، والأقدم أولاً.
-   *
-   * تسويةٌ نصف مسدّدة رقمٌ لا يعرف صاحبه ماذا يفعل به، وتحويلٌ أصغر منها
-   * يبقيها كما هي حتى يكتمل.
-   */
-  const open = (await listOpenSettlements()).filter(
-    (row) =>
-      row.debtor_account_id === input.fromAccountId &&
-      row.creditor_account_id === input.toAccountId,
-  )
-
-  let budget = input.amount
-  const closed: AccountSettlement[] = []
-  for (const row of open) {
-    const amount = Number(row.amount)
-    if (amount > budget) continue
-    budget = Math.round((budget - amount) * 100) / 100
-    closed.push(row)
-  }
+  // أيُّها يُغلق قرارٌ في المحرّك المشترك — نفس قاعدة كلود حرفياً. (س12)
+  const open = await listOpenSettlements()
+  const closed = settlementsClosedBy(
+    open.map((row) => ({
+      row,
+      id: row.id,
+      amount: row.amount,
+      debtorAccountId: row.debtor_account_id,
+      creditorAccountId: row.creditor_account_id,
+    })),
+    input,
+  ).map((picked) => picked.row)
 
   if (closed.length > 0) {
     const { error: closeError } = await supabase
@@ -261,6 +268,8 @@ export async function loadAccountsPicture(): Promise<AccountsPicture> {
     kind: account.kind,
     balance: Number(account.balance),
     balanceUpdatedAt: account.balance_updated_at,
+    isEmergencyFund: Boolean(account.is_emergency_fund),
+    annualReturnPercent: Number(account.annual_return_percent ?? 0),
     envelopes: envelopes.get(account.id) ?? [],
   }))
 
