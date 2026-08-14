@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { formatMoney } from '@/lib/format'
+import { formatDate, formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { Button } from '@/components/ui/Button'
 import { useAmount } from '@/features/record/amount'
@@ -117,7 +117,9 @@ export function AccountsSection({ picture, userId, onChanged }: Props) {
                     <div className="space-y-2 rounded-xl bg-accent-soft px-3 py-2">
                       <p className="text-[12px] font-semibold leading-relaxed text-text">
                         {t('accounts.bankSince', {
-                          date: since.sinceKey ?? '',
+                          // ‏`formatDate` لا المفتاح خاماً: «2026-08-09» داخل
+                          // جملةٍ عربية يقلبه ترتيب الاتجاهين فيُقرأ «09-08-2026».
+                          date: since.sinceKey ? formatDate(since.sinceKey) : '',
                           count: since.count,
                           net: formatMoney(since.net),
                         })}
