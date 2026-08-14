@@ -66,6 +66,10 @@ export type Account = {
   balance: number
   /** متى أُدخل الرصيد — رصيدٌ قديم يجعل «غير مخصّص» يكذب بثقة. */
   balance_updated_at: string
+  /** هل هذا الحساب هو صندوق الطوارئ — ورثها عن الأصل النقدي (هجرة 0019). */
+  is_emergency_fund: boolean
+  /** العائد السنوي على رصيده — وديعةٌ بفائدة تدخل المتوسط المرجّح. */
+  annual_return_percent: number
   /** فارغ = نشط. لا حذف: التحويلات تشير إليه. */
   archived_at: string | null
   created_at: string
@@ -105,6 +109,8 @@ export type NetWorthSnapshot = {
   /** أول يوم في الشهر — مفتاح الشهر لا تاريخ اللقطة. */
   snapshot_month: string
   assets_total: number
+  /** أرصدة الحسابات وقت اللقطة — رابع المكوّنات، وبدونه لا تجتمع على صافيها. */
+  accounts_total: number
   restricted_total: number
   debts_total: number
   net_worth: number
@@ -376,6 +382,28 @@ export type BankInboxRow = {
   created_at: string
 }
 
+/**
+ * محفظة عملات رقمية — وصلةٌ إلى منصّة، لا نوعُ ثروةٍ جديد.
+ *
+ * المحفظة تغذّي `asset_id` بقيمتها الحقيقية، فصافي الثروة ورقم الحرية
+ * يقرآن أصلاً عادياً بلا سطرٍ جديد فيهما. والمفاتيح ليست هنا: جدولٌ أعمى
+ * منفصل (`crypto_credentials`) لا يُقرأ من الواجهة بحال.
+ */
+export type CryptoExchange = 'binance' | 'bybit' | 'okx' | 'kraken' | 'coinbase' | 'pionex'
+
+export type CryptoWalletRow = {
+  id: string
+  user_id: string
+  exchange: CryptoExchange
+  label: string
+  asset_id: string | null
+  /** آخر مزامنة ناجحة — والفشل لا يمحوها: القيمة السابقة تبقى معروضة. */
+  last_synced_at: string | null
+  last_error: string | null
+  is_active: boolean
+  created_at: string
+}
+
 /** مشهد محسوب — لا يُكتب فيه. */
 export type PartnerSettlement = {
   obligation_id: string
@@ -430,6 +458,7 @@ export type Database = {
       account_transfers: Table<AccountTransfer>
       account_settlements: Table<AccountSettlement>
       bank_inbox: Table<BankInboxRow>
+      crypto_wallets: Table<CryptoWalletRow>
     }
     Views: {
       obligation_balances: View<ObligationBalance>

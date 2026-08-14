@@ -38,6 +38,9 @@ export interface AccountInput {
   balance: number
   /** متى أُدخل الرصيد — به يُكشف الرصيد الذي صار قديماً. */
   balanceUpdatedAt?: Date | string | null
+  /** ورثهما الحساب عن الأصل النقدي بعد الدمج (هجرة 0019). */
+  isEmergencyFund?: boolean
+  annualReturnPercent?: number
   envelopes?: readonly EnvelopeInput[]
 }
 
@@ -65,6 +68,9 @@ export interface AccountView {
   /** كم يوماً مضى على إدخال الرصيد، أو null إن كان التاريخ مجهولاً. */
   daysSinceBalanceUpdate: number | null
   balanceIsStale: boolean
+  /** هل هو صندوق الطوارئ، وكم عائده — يمرّان إلى محرّك الثروة. */
+  isEmergencyFund: boolean
+  annualReturnPercent: number
 }
 
 export interface AccountsSummary {
@@ -168,6 +174,11 @@ export function viewAccount(input: AccountInput, options: AccountsOptions = {}):
     daysSinceBalanceUpdate: days,
     // تاريخٌ غائب ليس قِدَماً بل جهل — نفس قاعدة `staleAssets` في networth.ts.
     balanceIsStale: days !== null && days > staleAfterDays,
+    // يمرّان كما وصلا إلى محرّك الثروة: صندوق الطوارئ يُعلَّم ولا يُشتقّ.
+    isEmergencyFund: Boolean(input.isEmergencyFund),
+    annualReturnPercent: Number.isFinite(Number(input.annualReturnPercent))
+      ? Number(input.annualReturnPercent)
+      : 0,
   }
 }
 

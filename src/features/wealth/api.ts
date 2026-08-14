@@ -124,6 +124,8 @@ export async function saveSnapshot(
   userId: string,
   totals: {
     assetsTotal: number
+    /** أرصدة الحسابات — رابع المكوّنات، وبدونه لا تجتمع اللقطة على صافيها. */
+    accountsTotal: number
     restrictedTotal: number
     debtsTotal: number
     netWorth: number
@@ -135,6 +137,7 @@ export async function saveSnapshot(
       user_id: userId,
       snapshot_month: month,
       assets_total: totals.assetsTotal,
+      accounts_total: totals.accountsTotal,
       restricted_total: totals.restrictedTotal,
       debts_total: totals.debtsTotal,
       net_worth: totals.netWorth,
@@ -230,6 +233,9 @@ export async function loadWealthSources(): Promise<WealthSources> {
     name: row.name,
     balance: Number(row.balance),
     reserved: reserved.get(row.id) ?? 0,
+    // ورثهما الحساب عن الأصل النقدي: صندوق الطوارئ والعائد. (هجرة 0019)
+    isEmergencyFund: Boolean(row.is_emergency_fund),
+    annualReturnPercent: Number(row.annual_return_percent ?? 0),
   }))
 
   const restrictedFunds: RestrictedFundInput[] = obligations.map((o) => ({

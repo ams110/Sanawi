@@ -1648,3 +1648,296 @@ drop policy if exists "bank_inbox_update_own" on public.bank_inbox;
 create policy "bank_inbox_update_own" on public.bank_inbox
   for update using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
+
+-- ─────────────────────────────────────────────
+-- 0018_snapshot_accounts_total.sql
+-- ─────────────────────────────────────────────
+-- لقطة صافي الثروة تجمع على صافيها.
+--
+-- كانت اللقطة تحفظ `assets_total` و`restricted_total` و`debts_total` و
+-- `net_worth`، وصافي الثروة يُحسب من **أربعة** مكوّنات لا ثلاثة: الأصول
+-- وأرصدة الحسابات والصناديق غير المربوطة ناقص الديون. فأرصدة الحسابات —
+-- وهي مصدر النقد الوحيد — لم تكن تُخزَّن أصلاً.
+--
+-- والأثر كامنٌ اليوم لأن الخط البياني يرسم `net_worth` وحده، لكنه لغمٌ لأي
+-- قراءةٍ مستقبلية للمكوّنات: من جمعها وجدها لا تساوي الصافي المحفوظ بجانبها.
+-- (تدقيق آب 2026: ث4)
+--
+-- الافتراضي صفر: اللقطات القديمة لا تعرف رصيد حساباتها يومَها، وصفرٌ فيها
+-- يقول «غير مسجَّل» — وهو أصدق من رقمٍ يُشتقّ اليوم لماضٍ لم يُقَس.
+
+alter table public.net_worth_snapshots
+  add column if not exists accounts_total numeric(14, 2) not null default 0;
+
+comment on column public.net_worth_snapshots.accounts_total is
+  'مجموع أرصدة الحسابات وقت اللقطة — رابع مكوّنات الصافي، وبدونه لا تجتمع';
+
+-- ─────────────────────────────────────────────
+-- 0019_merge_cash_assets_into_accounts.sql
+-- ─────────────────────────────────────────────
+-- دمج أصول النقد والادخار في الحسابات — نهاية العدّ المزدوج من جذره.
+--
+-- كان في التطبيق مكانان لتسجيل المال نفسه: `accounts` (رصيد البنك) و
+-- `assets` من نوع cash/savings. وصافي الثروة يجمع الاثنين، فمن سجّل رصيده
+-- في المكانين رأى ضعف ثروته — دَينٌ موثَّق في README منذ 0016 وموصوف في
+-- تدقيق آب 2026 (ث2)، وقرّر صاحب التطبيق دمجه لا التعايش معه.
+--
+-- **الاتجاه: الأصل النقدي يصير حساباً، لا العكس.** الحسابات هي الطرف الغنيّ:
+-- الصناديق مظاريف فوقها، والتحويلات والتسويات ودفعات الالتزامات كلها تشير
+-- إليها بمفاتيح أجنبية. ونقل تلك الآلة كلها إلى `assets` هجرةٌ خطرة بلا
+-- مقابل، بينما «أصلٌ نقديّ» ورقةٌ بلا مفاتيح تشير إليها — فينتقل هو.
+-- وهذا يوافق ما يقوله README أصلاً: **المال يعيش في الحسابات.**
+
+/* ── 1. الحساب يرث ما كان يميّز الأصل ──────────────────────── */
+
+-- صندوق الطوارئ يُعلَّم ولا يُشتقّ (نفس تعليل 0014): وديعتان بالمبلغ نفسه
+-- إحداهما للطوارئ والأخرى لسفرة الصيف، ولا يفرّق بينهما إلا صاحبهما.
+-- وبلا هذا العمود كانت وديعةُ الطوارئ تفقد علامتها بمجرّد أن تصير حساباً.
+alter table public.accounts
+  add column if not exists is_emergency_fund boolean not null default false;
+
+-- والعائد كذلك: حساب ادخارٍ بفائدة 3٪ يدخل المتوسط المرجّح، وإسقاطه يجعل
+-- «عائدك المرجّح» يقرأ صفراً لمن كل ماله في وديعةٍ مربحة.
+alter table public.accounts
+  add column if not exists annual_return_percent numeric(5, 2) not null default 0
+    check (annual_return_percent >= -100 and annual_return_percent <= 100);
+
+comment on column public.accounts.is_emergency_fund is
+  'هل هذا الحساب هو صندوق الطوارئ — يُعلَّم ولا يُشتقّ من نوعه';
+comment on column public.accounts.annual_return_percent is
+  'العائد السنوي على رصيد هذا الحساب — يدخل المتوسط المرجّح';
+
+/* ── 2. ترحيل الصفوف القائمة ───────────────────────────────── */
+
+-- الاسم مفتاح المطابقة في أدوات كلود، وعليه فهرسٌ فريد للحسابات النشطة —
+-- فأصلٌ اسمه اسمُ حسابٍ قائم يُلحق به «(أصل)» بدل أن تنفجر الهجرة كلها.
+-- والمبلغ لا يُجمع على الحساب الموجود: قد يكونان مالين مختلفين، والدمج
+-- الصامت يخترع رقماً لم يقله أحد.
+insert into public.accounts (
+  user_id, name, kind, balance, is_emergency_fund, annual_return_percent, created_at
+)
+select
+  a.user_id,
+  case
+    when exists (
+      select 1 from public.accounts c
+      where c.user_id = a.user_id and c.name = a.name and c.archived_at is null
+    ) then a.name || ' (أصل)'
+    else a.name
+  end,
+  case when a.kind = 'savings' then 'savings' else 'checking' end,
+  a.amount,
+  a.is_emergency_fund,
+  a.annual_return_percent,
+  a.created_at
+from public.assets a
+where a.kind in ('cash', 'savings')
+  and a.is_active
+  -- الهجرة تُعاد تشغيلها بلا ضرر: صفٌّ رُحِّل مرّة لا يُرحَّل ثانيةً.
+  and not exists (
+    select 1 from public.accounts c
+    where c.user_id = a.user_id
+      and c.name in (a.name, a.name || ' (أصل)')
+      and c.balance = a.amount
+  );
+
+-- الأصل المُرحَّل يُؤرشف ولا يُحذف: تاريخُ ما سجّله صاحبه لا يُمحى، وحذفُه
+-- يجعل الهجرة بلا رجعة إن تبيّن خطأ.
+update public.assets
+set is_active = false,
+    note = coalesce(note || ' · ', '') || 'رُحِّل إلى الحسابات (هجرة 0019)'
+where kind in ('cash', 'savings') and is_active;
+
+/* ── 3. الباب يُغلق: لا أصل نقديّ جديد ─────────────────────── */
+
+-- القيد هو الفرق بين «أصلحنا البيانات» و«أصلحنا المشكلة»: بلا هذا السطر
+-- يعود العدّ المزدوج مع أول أصلٍ يسجّله صاحبه غداً. والقديم المؤرشف يبقى
+-- مقروءاً — القيد على النشط وحده.
+alter table public.assets
+  drop constraint if exists assets_kind_check;
+
+alter table public.assets
+  add constraint assets_kind_check check (
+    kind in ('cash', 'savings', 'investment', 'property', 'receivable', 'other')
+  );
+
+alter table public.assets
+  drop constraint if exists assets_no_active_cash_check;
+
+alter table public.assets
+  add constraint assets_no_active_cash_check check (
+    not (is_active and kind in ('cash', 'savings'))
+  );
+
+comment on constraint assets_no_active_cash_check on public.assets is
+  'النقد والادخار يعيشان في accounts — مكانان لمالٍ واحد يعنيان عدّاً مزدوجاً';
+
+-- ─────────────────────────────────────────────
+-- 0020_crypto_wallets.sql
+-- ─────────────────────────────────────────────
+-- محافظ العملات الرقمية — قيمةٌ حقيقية بدل رقمٍ يُدخَل بالإصبع.
+--
+-- القرار سبقه قرارٌ مثله في 0017 (وارد البنك): «لا ربط API» كان محسوماً حتى
+-- طلبه صاحب التطبيق صراحةً. والفرق هنا أن الكريبتو **لا تُدخَل يدوياً أصلاً
+-- بصدق**: قيمتها تتحرّك كل دقيقة، فالرقم الذي يُكتب بالإصبع يكذب بعد ساعة.
+--
+-- والفلسفة لم تتغيّر: **لا شيء يُسجَّل من تلقائه، ولا مفتاحَ يُقرأ من الواجهة.**
+-- المحفظة تصير `asset` عادياً من نوع investment، والمزامنة تحدّث `amount` و
+-- `updated_at` عليه — فصافي الثروة ورقم الحرية وحارس «قيمة قديمة» تعمل كما
+-- هي بلا سطرٍ واحد جديد فيها.
+
+/* ── 1. المحفظة: صفٌّ يقرؤه صاحبه ────────────────────────────── */
+
+-- منفصلٌ عن الأصل عمداً: الأصل رقمٌ يُعرض، وهذا وصلةٌ لها حالةُ مزامنة
+-- ورسالةُ فشلٍ أخيرة — وخلطهما يجعل عطلَ شبكةٍ يبدو تغيّراً في الثروة.
+create table if not exists public.crypto_wallets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+
+  -- المنصّة تحدّد المُحوِّل (adapter) في دالّة الحافة: لكلٍّ توقيعُها ومساراتها.
+  exchange text not null check (
+    exchange in ('binance', 'bybit', 'okx', 'kraken', 'coinbase', 'pionex')
+  ),
+
+  -- اسمٌ يقرؤه صاحبه: «بايننس الأساسي» — فمن له حسابان يميّزهما.
+  label text not null,
+
+  -- الأصل الذي تُكتب فيه القيمة. الحذف يُفرغ الوصلة ولا يمحو المحفظة:
+  -- المفاتيح تبقى صالحة، ويُربط أصلٌ جديد بضغطة.
+  asset_id uuid references public.assets (id) on delete set null,
+
+  -- آخر مزامنة ناجحة ورسالة آخر فشل — الحالة تُعرَض ولا تُخمَّن.
+  -- والفشل لا يمحو القيمة السابقة: رقمٌ عمره ساعة خيرٌ من صفرٍ كاذب.
+  last_synced_at timestamptz,
+  last_error text,
+
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.crypto_wallets is
+  'محافظ العملات الرقمية — الوصلة وحالتها؛ المفاتيح في جدولٍ أعمى منفصل';
+comment on column public.crypto_wallets.asset_id is
+  'الأصل الذي تُكتب فيه القيمة — المحفظة تغذّي أصلاً عادياً لا نوعاً جديداً';
+
+alter table public.crypto_wallets enable row level security;
+
+drop policy if exists "crypto_wallets_own" on public.crypto_wallets;
+create policy "crypto_wallets_own" on public.crypto_wallets
+  for all using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+create index if not exists crypto_wallets_user_idx
+  on public.crypto_wallets (user_id, is_active);
+
+-- الاسم مفتاح المطابقة عند كلود، وتكراره يجعل الاختيار قرعةً.
+create unique index if not exists crypto_wallets_user_label_idx
+  on public.crypto_wallets (user_id, label)
+  where is_active;
+
+/* ── 2. المفاتيح: جدولٌ أعمى ─────────────────────────────────── */
+
+-- نفس نمط `financy_credentials` حرفاً بحرف، ولسببٍ أثقل: مفتاح منصّة تداول
+-- مسروقٌ قد يعني محفظةً مسروقة. فالجدول:
+--   • RLS مفعّل **بلا أي سياسة** — لا صفَّ يخرج عبر PostgREST لأي دور،
+--     ولا لصاحبه: تسريب جلسته لا يسرّب مفتاح منصّته.
+--   • الكتابة عبر الدالّة أدناه وحدها، والقراءة لدالّة الحافة بمفتاح الخدمة.
+--
+-- **والمفتاح يجب أن يكون للقراءة فقط.** التطبيق لا يتداول ولا يسحب، ومفتاحٌ
+-- بصلاحية سحبٍ يضع محفظةً كاملة خلف خطأٍ برمجيّ واحد. هذا مكتوبٌ في الواجهة
+-- وفي هذا التعليق لأن قارئه بعد سنة لن يعرف السبب.
+create table if not exists public.crypto_credentials (
+  wallet_id uuid primary key references public.crypto_wallets (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  api_key text not null,
+  api_secret text not null,
+  -- OKX وحدها تطلب ثالثاً؛ فارغٌ لغيرها.
+  passphrase text,
+  updated_at timestamptz not null default now()
+);
+
+comment on table public.crypto_credentials is
+  'مفاتيح منصّات التداول — جدول أعمى: RLS بلا سياسات، والمفتاح للقراءة فقط';
+
+alter table public.crypto_credentials enable row level security;
+
+/* ── 3. الكتابة بلا قراءة ────────────────────────────────────── */
+
+-- من يملك المفاتيح يستطيع استبدالها ومسحها، ولا يستطيع هو ولا غيره
+-- استرجاعها من الواجهة — نفس عقد `save_financy_credentials`.
+create or replace function public.save_crypto_credentials(
+  p_wallet_id uuid,
+  p_api_key text,
+  p_api_secret text,
+  p_passphrase text default null
+) returns void
+language plpgsql
+security definer
+-- مسارُ البحث مثبَّت: دالّةٌ بمسارٍ متغيّر تُنفَّذ بما يجده المستدعي.
+set search_path = ''
+as $$
+begin
+  if (select auth.uid()) is null then
+    raise exception 'not authenticated';
+  end if;
+
+  -- الملكية تُتحقَّق هنا لا في الواجهة: الدالّة تعمل بصلاحية مالكها، فبلا
+  -- هذا الشرط يكتب أيُّ مستخدمٍ مفاتيحه على محفظة غيره.
+  if not exists (
+    select 1 from public.crypto_wallets w
+    where w.id = p_wallet_id and w.user_id = (select auth.uid())
+  ) then
+    raise exception 'wallet not found';
+  end if;
+
+  if length(trim(p_api_key)) = 0 or length(trim(p_api_secret)) = 0 then
+    raise exception 'empty credentials';
+  end if;
+
+  insert into public.crypto_credentials (wallet_id, user_id, api_key, api_secret, passphrase, updated_at)
+  values (
+    p_wallet_id,
+    (select auth.uid()),
+    trim(p_api_key),
+    trim(p_api_secret),
+    nullif(trim(coalesce(p_passphrase, '')), ''),
+    now()
+  )
+  on conflict (wallet_id) do update
+    set api_key = excluded.api_key,
+        api_secret = excluded.api_secret,
+        passphrase = excluded.passphrase,
+        updated_at = now();
+end;
+$$;
+
+comment on function public.save_crypto_credentials is
+  'كتابة مفاتيح منصّة بلا إمكان قراءتها — تسريب الجلسة لا يسرّب المفتاح';
+
+-- هل للمحفظة مفاتيح؟ سؤالٌ تحتاجه الواجهة («اربطها» أم «بدّل المفاتيح»)
+-- ولا يجوز أن يُجاب بقراءة الصفّ. الجواب boolean لا أكثر.
+create or replace function public.crypto_wallet_has_credentials(p_wallet_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = ''
+stable
+as $$
+  select exists (
+    select 1 from public.crypto_credentials c
+    where c.wallet_id = p_wallet_id
+      and c.user_id = (select auth.uid())
+  );
+$$;
+
+/* ── 4. الحجب عن الزائر ───────────────────────────────────────── */
+
+-- `security definer` تعني أن الدالّة تعمل بصلاحية مالكها، فبقاؤها مفتوحةً
+-- لدور `anon` يجعلها مساراً قابلاً للنداء بلا جلسة عبر `/rest/v1/rpc/…`.
+-- الحارس داخلها يردّ (`auth.uid() is null`) — لكن الطبقتين خيرٌ من واحدة،
+-- وهو نفس ما فُعل بدوالّ Financy في 0017، وفحصُ Supabase الأمني يطلبه.
+revoke all on function public.save_crypto_credentials(uuid, text, text, text) from public, anon;
+grant execute on function public.save_crypto_credentials(uuid, text, text, text) to authenticated;
+
+revoke all on function public.crypto_wallet_has_credentials(uuid) from public, anon;
+grant execute on function public.crypto_wallet_has_credentials(uuid) to authenticated;

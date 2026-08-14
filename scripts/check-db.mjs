@@ -140,6 +140,8 @@ const COLUMNS = [
   ['obligation_payments', 'paid_from_account_id'],
   ['fixed_commitments', 'account_id'],
   ['expenses', 'account_id'],
+  // 0018 — رابع مكوّنات الصافي: بدونه لا تجتمع اللقطة على صافيها.
+  ['net_worth_snapshots', 'accounts_total'],
 ]
 
 console.log('')
