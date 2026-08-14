@@ -65,6 +65,7 @@ const LIB_FILES = [
   'src/lib/budget/calc.ts',
   'src/lib/budget/month.ts',
   'src/lib/commitments/calc.ts',
+  'src/lib/commitments/bills.ts',
   'src/lib/commitments/payoff.ts',
   'src/lib/expenses/calc.ts',
   'src/lib/budget/groupCost.ts',
@@ -72,6 +73,7 @@ const LIB_FILES = [
   'src/lib/wealth/networth.ts',
   'src/lib/wealth/freedom.ts',
   'src/lib/wealth/baseline.ts',
+  'src/lib/wealth/essentials.ts',
 ]
 
 const HEADER = `// مولَّد من mcp/ و src/lib/ بـ scripts/build-edge.mjs — لا تعدّله هنا.\n`
