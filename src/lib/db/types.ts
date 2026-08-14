@@ -70,6 +70,10 @@ export type Account = {
   is_emergency_fund: boolean
   /** العائد السنوي على رصيده — وديعةٌ بفائدة تدخل المتوسط المرجّح. */
   annual_return_percent: number
+  /** مزوّد حساب البنك عند Financy — يرافق المعرّف لأنه وحده ليس فريداً. */
+  bank_provider_id: string | null
+  /** معرّف الحساب عند Financy — به تعرف حركة الوارد حسابها. فارغ = غير مربوط. */
+  bank_external_id: string | null
   /** فارغ = نشط. لا حذف: التحويلات تشير إليه. */
   archived_at: string | null
   created_at: string
@@ -290,6 +294,8 @@ export type IncomeEntry = {
   name: string | null
   amount: number
   received_at: string
+  /** الحساب الذي دخلته القبضة — فارغ يعني قبضةً لا يُعرف حسابها. */
+  account_id: string | null
   note: string | null
   created_at: string
 }

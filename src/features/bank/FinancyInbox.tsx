@@ -13,6 +13,13 @@ import {
   listObligations,
   type ObligationWithCalc,
 } from '@/features/obligations/api'
+import { linkBankAccount, listAccounts } from '@/features/accounts/api'
+import {
+  resolveAccountId,
+  unlinkedBankAccounts,
+  type LinkedAccount,
+} from '@/lib/bank/link'
+import type { Account } from '@/lib/db/types'
 import {
   clearFinancyCredentials,
   financyStatus,
@@ -70,6 +77,37 @@ export function FinancyInbox() {
     queryFn: () => listInbox(),
     enabled: connected,
   })
+
+  /*
+   * الحسابات — بها تعرف كل حركةٍ حسابها.
+   *
+   * فشلها لا يُسقط الوارد: حركةٌ تُسجَّل بلا حساب أفضل من واردٍ لا يفتح.
+   */
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts-link'],
+    queryFn: () => listAccounts().catch(() => [] as Account[]),
+    enabled: connected,
+  })
+
+  const linkedAccounts = useMemo<LinkedAccount[]>(
+    () =>
+      accounts.map((a) => ({
+        id: a.id,
+        providerId: a.bank_provider_id,
+        externalId: a.bank_external_id,
+      })),
+    [accounts],
+  )
+
+  /* حسابات بنكٍ ظهرت في الوارد بلا حسابٍ يقابلها — تحذيرٌ ومعه زرُّه. */
+  const needLink = useMemo(
+    () =>
+      unlinkedBankAccounts(
+        inbox.map((r) => ({ providerId: r.provider_id, externalId: r.account_external_id })),
+        linkedAccounts,
+      ),
+    [inbox, linkedAccounts],
+  )
 
   /* الصناديق للقبضات الداخلة — فشلها لا يُسقط الوارد، فقط يخفي خيار الصندوق. */
   const { data: funds = [] } = useQuery({
@@ -259,17 +297,69 @@ export function FinancyInbox() {
         </p>
       )}
 
+      {/*
+       * حسابُ بنكٍ بلا حسابٍ في سنوي — تحذيرٌ ومعه زرُّه.
+       *
+       * بلا الربط تُسجَّل حركاته يتيمةً ويبقى رصيده يُدخَل تخميناً. ونفس
+       * قاعدة «الصندوق غير المربوط» في شاشة الحسابات: لا تحذير بلا فعلٍ
+       * يُطفئه — والقائمة تختفي وحدها حين يُربط آخرها.
+       */}
+      {needLink.length > 0 && accounts.length > 0 && (
+        <div className="space-y-2 rounded-2xl border border-warning/30 bg-warning-soft p-4">
+          <p className="text-[13px] font-semibold text-warning">{t('bank.linkTitle')}</p>
+          {needLink.map((link) => (
+            <div key={`${link.providerId ?? ''}|${link.externalId}`} className="flex items-center gap-2">
+              <span className="num min-w-0 flex-1 truncate text-[13px] text-text" dir="ltr">
+                {link.providerId ? `${link.providerId} · ` : ''}
+                {link.externalId}
+              </span>
+              <select
+                defaultValue=""
+                aria-label={t('bank.linkTo', { name: link.externalId ?? '' })}
+                onChange={(ev) => {
+                  if (!ev.target.value) return
+                  void (async () => {
+                    setError(null)
+                    try {
+                      await linkBankAccount(ev.target.value, link)
+                      await client.invalidateQueries()
+                    } catch (err) {
+                      setError(failureText(err, t, t('bank.linkFailed')))
+                    }
+                  })()
+                }}
+                className="rounded-xl border border-border bg-surface px-2 py-1.5 text-xs font-semibold text-text"
+              >
+                <option value="">{t('bank.linkPick')}</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
       {inbox.length === 0 ? (
         <p className="rounded-2xl bg-surface-muted px-4 py-3 text-center text-[13px] text-text-muted">
           {t('bank.financyEmpty')}
         </p>
       ) : (
         <ul className="space-y-2">
-          {inbox.map((row) => (
+          {inbox.map((row) => {
+            const accountId = resolveAccountId(
+              { providerId: row.provider_id, externalId: row.account_external_id },
+              linkedAccounts,
+            )
+            return (
             <InboxCard
               key={row.id}
               row={row}
               funds={funds}
+              accountId={accountId}
+              accountName={accounts.find((a) => a.id === accountId)?.name ?? null}
               userId={user?.id ?? null}
               alreadyRecorded={
                 existingKeys?.has(
@@ -281,7 +371,8 @@ export function FinancyInbox() {
               }}
               onError={setError}
             />
-          ))}
+            )
+          })}
         </ul>
       )}
 
@@ -308,6 +399,8 @@ export function FinancyInbox() {
 function InboxCard({
   row,
   funds,
+  accountId,
+  accountName,
   userId,
   alreadyRecorded,
   onDone,
@@ -315,6 +408,9 @@ function InboxCard({
 }: {
   row: BankInboxRow
   funds: ObligationWithCalc[]
+  /** حساب سنوي الذي تخصّه هذه الحركة — `null` لحساب بنكٍ لم يُربط بعد. */
+  accountId: string | null
+  accountName: string | null
   userId: string | null
   alreadyRecorded: boolean
   onDone: () => Promise<void>
@@ -338,6 +434,16 @@ function InboxCard({
     }
   }
 
+  /*
+   * الحساب يمرّ في المسارات الثلاثة.
+   *
+   * كانت الحركة تُسجَّل يتيمةً — `null` في كل مسار — رغم أن الوارد يعرف
+   * حسابها منذ 0017 (`account_external_id`). و«من أين خرج» أرخص معلومةٍ
+   * هنا وأغلاها في `sanawi_group_cost` وشاشة الحسابات.
+   *
+   * ولا يُنقص الرصيد: هذه الحركة داخلةٌ في لقطة كشف البنك أصلاً. تحديث
+   * الرصيد سؤالٌ مستقلّ تجيبه بطاقة «وصلك بعد لقطتك» في شاشة الحسابات.
+   */
   const record = () =>
     run(async () => {
       if (!userId) return
@@ -347,13 +453,14 @@ function InboxCard({
           categoryId: null,
           spentAt: row.tx_date,
           isUnexpected: false,
+          accountId,
           note: row.name,
         })
         await setInboxStatus(row.id, 'recorded', 'expense')
         return
       }
       if (fundId) {
-        await addDeposit(fundId, userId, Number(row.amount), null, null, row.tx_date, row.name)
+        await addDeposit(fundId, userId, Number(row.amount), null, accountId, row.tx_date, row.name)
         await setInboxStatus(row.id, 'recorded', 'deposit')
         return
       }
@@ -362,6 +469,7 @@ function InboxCard({
         sourceId: null,
         name: row.name,
         receivedAt: row.tx_date,
+        accountId,
       })
       await setInboxStatus(row.id, 'recorded', 'income')
     })
@@ -377,6 +485,12 @@ function InboxCard({
           </span>
           <span className="num block text-xs text-text-muted">
             {formatDate(row.tx_date)}
+            {/* الحساب على البطاقة: صاحب حسابين يقرأ «من أيّ حساب» قبل أن يقرّر. */}
+            {accountName && (
+              <span className="ms-1.5 rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-text-muted">
+                🏦 {accountName}
+              </span>
+            )}
             {category && (
               <span className="ms-1.5 rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-text-muted">
                 {category}

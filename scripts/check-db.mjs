@@ -142,6 +142,11 @@ const COLUMNS = [
   ['expenses', 'account_id'],
   // 0018 — رابع مكوّنات الصافي: بدونه لا تجتمع اللقطة على صافيها.
   ['net_worth_snapshots', 'accounts_total'],
+  // 0021 — ربط حساب البنك: أعمدةٌ على جداول قائمة أيضاً، ونقصُها يُسقط شاشة
+  // الحسابات كلّها لا بطاقة الربط وحدها (`select` على عمودٍ مفقود يردّ 42703).
+  ['accounts', 'bank_external_id'],
+  ['accounts', 'bank_provider_id'],
+  ['income_entries', 'account_id'],
 ]
 
 console.log('')

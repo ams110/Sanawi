@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { formatMoney } from '@/lib/format'
+import { formatDate, formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { Button } from '@/components/ui/Button'
 import { useAmount } from '@/features/record/amount'
 import { linkObligationAccount } from '@/features/obligations/api'
 import {
   archiveAccount,
+  linkBankAccount,
   saveAccount,
   transferBetweenAccounts,
   type AccountsPicture,
@@ -36,7 +37,7 @@ export function AccountsSection({ picture, userId, onChanged }: Props) {
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
 
-  const { summary, accounts, unlinked, settlements } = picture
+  const { summary, accounts, unlinked, settlements, bankSince } = picture
 
   const run = async (action: () => Promise<unknown>, contextKey: string) => {
     setBusy(true)
@@ -130,12 +131,86 @@ export function AccountsSection({ picture, userId, onChanged }: Props) {
                 </span>
               </div>
 
-              {/* الرصيد يُدخَل يدوياً، فقِدَمُه يُقال لا يُبتلع. */}
-              {account.balanceIsStale && (
-                <p className="rounded-xl bg-accent-soft px-3 py-2 text-[12px] font-semibold text-text">
-                  {t('accounts.stale', { days: account.daysSinceBalanceUpdate ?? 0 })}
-                </p>
-              )}
+              {/*
+               * الرصيد يُدخَل يدوياً، فقِدَمُه يُقال لا يُبتلع.
+               *
+               * وللحساب المربوط بالبنك جوابٌ أدقّ من عدد الأيام — كم حركةً
+               * وصلت وبأيّ صافٍ — فيحلّ محلّه: «من ١٢ يوم» تحذيرٌ يُقرأ ولا
+               * يُفعل به شيء، و«وصل ٤ حركات صافيها ‎−٦٢٠» فعلٌ بضغطة.
+               */}
+              {(() => {
+                const since = account.id ? bankSince[account.id] : undefined
+                if (since && since.count > 0) {
+                  const next = Math.round((account.balance + since.net) * 100) / 100
+                  return (
+                    <div className="space-y-2 rounded-xl bg-accent-soft px-3 py-2">
+                      <p className="text-[12px] font-semibold leading-relaxed text-text">
+                        {t('accounts.bankSince', {
+                          // ‏`formatDate` لا المفتاح خاماً: «2026-08-09» داخل
+                          // جملةٍ عربية يقلبه ترتيب الاتجاهين فيُقرأ «09-08-2026».
+                          date: since.sinceKey ? formatDate(since.sinceKey) : '',
+                          count: since.count,
+                          net: formatMoney(since.net),
+                        })}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              saveAccount(userId, {
+                                id: account.id!,
+                                name: account.name,
+                                balance: next,
+                              }),
+                            t('accounts.saveFailed'),
+                          )
+                        }
+                        className="num w-full rounded-lg bg-surface px-3 py-2 text-xs font-bold text-brand disabled:opacity-50"
+                      >
+                        {t('accounts.bankApply', { balance: formatMoney(next) })}
+                      </button>
+                    </div>
+                  )
+                }
+                return (
+                  account.balanceIsStale && (
+                    <p className="rounded-xl bg-accent-soft px-3 py-2 text-[12px] font-semibold text-text">
+                      {t('accounts.stale', { days: account.daysSinceBalanceUpdate ?? 0 })}
+                    </p>
+                  )
+                )
+              })()}
+
+              {/*
+               * الربط ظاهرٌ ومعه فكُّه: ربطٌ لا يُرى لا يُصحَّح، ومن ربط
+               * الحساب الغلط يبقى يقرأ حركات غيره على رصيده.
+               */}
+              {(() => {
+                const raw = accounts.find((a) => a.id === account.id)
+                if (!raw?.bank_external_id) return null
+                return (
+                  <div className="flex items-center gap-2">
+                    <span className="num min-w-0 flex-1 truncate text-[11px] text-text-muted" dir="ltr">
+                      {t('accounts.bankLinked', { name: raw.bank_external_id })}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(
+                          () => linkBankAccount(raw.id, { providerId: null, externalId: null }),
+                          t('accounts.linkFailed'),
+                        )
+                      }
+                      className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold text-text-muted disabled:opacity-50"
+                    >
+                      {t('accounts.bankUnlink')}
+                    </button>
+                  </div>
+                )
+              })()}
 
               <AccountRow
                 account={account}

@@ -39,7 +39,8 @@
     "src/lib/budget/month.ts",
     "src/lib/commitments/calc.ts",
     "src/lib/expenses/calc.ts",
-    "src/lib/budget/groupCost.ts"
+    "src/lib/budget/groupCost.ts",
+    "src/lib/bank/link.ts"
   ],
   "exclude": ["mcp/dist"]
 }

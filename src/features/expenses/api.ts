@@ -78,6 +78,15 @@ export async function addExpense(
     categoryName?: string | null
     spentAt: string
     isUnexpected: boolean
+    /**
+     * الحساب الذي خرج منه المصروف — **لا يُنقص رصيده**.
+     *
+     * الرصيد لقطةٌ من كشف البنك، والمصروف داخلٌ فيها أصلاً؛ خصمُه هنا يخصمه
+     * مرّتين. نفس نصّ عقد `sanawi_add_expense` عند كلود حرفاً بحرف — وكان
+     * الحقل غائباً هنا وحده، فتكتب الشاشة أنقص ممّا يكتبه كلود على الجدول
+     * نفسه.
+     */
+    accountId?: string | null
     note?: string | null
   },
 ): Promise<void> {
@@ -96,6 +105,7 @@ export async function addExpense(
     category: input.categoryName ?? null,
     spent_at: input.spentAt,
     is_unexpected: input.isUnexpected,
+    account_id: input.accountId ?? null,
     note: input.note ?? null,
   })
   if (error) throw error
