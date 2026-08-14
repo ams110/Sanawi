@@ -19,6 +19,12 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const out = join(root, 'supabase/functions/sanawi-mcp')
+/**
+ * ‏`crypto-sync` مكتوبةٌ بيدٍ ومحفوظة في git — الذي يُولَّد منها مجلد `lib/`
+ * وحده: محرّكاتها تعيش في `src/lib` كغيرها (قاعدة «سؤال واحد = محرّك واحد»)،
+ * ونسخُها اليدوي تحتها كان سيصنع نسختين تنحرفان بعد أول تعديل.
+ */
+const cryptoOut = join(root, 'supabase/functions/crypto-sync')
 
 /** النسخ تُثبَّت هنا لا تُترك مفتوحة: نشرٌ يجلب نسخةً جديدة صامتاً ليس نشراً. */
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -77,6 +83,14 @@ const LIB_FILES = [
   'src/lib/wealth/essentials.ts',
 ]
 
+/** محرّكات `crypto-sync` — نفس القاعدة: تُذكر هنا وإلا كُسر النشر وحده. */
+const CRYPTO_LIB_FILES = [
+  'src/lib/wealth/crypto.ts',
+  'src/lib/crypto/exchanges.ts',
+  'src/lib/crypto/sign.ts',
+  'src/lib/crypto/prices.ts',
+]
+
 const HEADER = `// مولَّد من mcp/ و src/lib/ بـ scripts/build-edge.mjs — لا تعدّله هنا.\n`
 
 /**
@@ -117,13 +131,20 @@ for (const file of SERVER_FILES) {
   writeFileSync(target, HEADER + rewrite(readFileSync(join(root, file), 'utf8'), depth))
 }
 
-for (const file of LIB_FILES) {
-  const relative = file.replace(/^src\/lib\//, '')
-  const target = join(out, 'lib', relative)
-  const depth = relative.split('/').length - 1
-  mkdirSync(dirname(target), { recursive: true })
-  writeFileSync(target, HEADER + rewrite(readFileSync(join(root, file), 'utf8'), depth))
+function emitLib(target, files) {
+  for (const file of files) {
+    const relative = file.replace(/^src\/lib\//, '')
+    const path = join(target, 'lib', relative)
+    const depth = relative.split('/').length - 1
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, HEADER + rewrite(readFileSync(join(root, file), 'utf8'), depth))
+  }
 }
+
+emitLib(out, LIB_FILES)
+
+rmSync(join(cryptoOut, 'lib'), { recursive: true, force: true })
+emitLib(cryptoOut, CRYPTO_LIB_FILES)
 
 writeFileSync(
   join(out, 'index.ts'),
@@ -162,7 +183,7 @@ const walk = (dir) =>
 
 let broken = 0
 let checked = 0
-for (const file of walk(out)) {
+for (const file of [...walk(out), ...walk(cryptoOut)]) {
   if (!file.endsWith('.ts')) continue
   for (const [, spec] of readFileSync(file, 'utf8').matchAll(/from '([^']+)'/g)) {
     if (!spec.startsWith('.')) continue
@@ -182,5 +203,6 @@ if (broken > 0) {
 }
 
 console.log(`جاهزة: supabase/functions/sanawi-mcp (${SERVER_FILES.length + LIB_FILES.length + 1} ملفاً)`)
+console.log(`جاهزة: supabase/functions/crypto-sync/lib (${CRYPTO_LIB_FILES.length} ملفاً)`)
 console.log(`${checked} مساراً نسبياً، كلها تُحلّ.`)
 for (const [name, ver] of Object.entries(NPM)) console.log(`  npm:${name}@${ver}`)

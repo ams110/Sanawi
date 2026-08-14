@@ -382,6 +382,28 @@ export type BankInboxRow = {
   created_at: string
 }
 
+/**
+ * محفظة عملات رقمية — وصلةٌ إلى منصّة، لا نوعُ ثروةٍ جديد.
+ *
+ * المحفظة تغذّي `asset_id` بقيمتها الحقيقية، فصافي الثروة ورقم الحرية
+ * يقرآن أصلاً عادياً بلا سطرٍ جديد فيهما. والمفاتيح ليست هنا: جدولٌ أعمى
+ * منفصل (`crypto_credentials`) لا يُقرأ من الواجهة بحال.
+ */
+export type CryptoExchange = 'binance' | 'bybit' | 'okx' | 'kraken' | 'coinbase' | 'pionex'
+
+export type CryptoWalletRow = {
+  id: string
+  user_id: string
+  exchange: CryptoExchange
+  label: string
+  asset_id: string | null
+  /** آخر مزامنة ناجحة — والفشل لا يمحوها: القيمة السابقة تبقى معروضة. */
+  last_synced_at: string | null
+  last_error: string | null
+  is_active: boolean
+  created_at: string
+}
+
 /** مشهد محسوب — لا يُكتب فيه. */
 export type PartnerSettlement = {
   obligation_id: string
@@ -436,6 +458,7 @@ export type Database = {
       account_transfers: Table<AccountTransfer>
       account_settlements: Table<AccountSettlement>
       bank_inbox: Table<BankInboxRow>
+      crypto_wallets: Table<CryptoWalletRow>
     }
     Views: {
       obligation_balances: View<ObligationBalance>
