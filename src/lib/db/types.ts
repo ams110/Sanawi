@@ -105,6 +105,8 @@ export type NetWorthSnapshot = {
   /** أول يوم في الشهر — مفتاح الشهر لا تاريخ اللقطة. */
   snapshot_month: string
   assets_total: number
+  /** أرصدة الحسابات وقت اللقطة — رابع المكوّنات، وبدونه لا تجتمع على صافيها. */
+  accounts_total: number
   restricted_total: number
   debts_total: number
   net_worth: number

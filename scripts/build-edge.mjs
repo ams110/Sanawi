@@ -70,6 +70,7 @@ const LIB_FILES = [
   'src/lib/expenses/calc.ts',
   'src/lib/budget/groupCost.ts',
   'src/lib/accounts/calc.ts',
+  'src/lib/accounts/transfer.ts',
   'src/lib/wealth/networth.ts',
   'src/lib/wealth/freedom.ts',
   'src/lib/wealth/baseline.ts',

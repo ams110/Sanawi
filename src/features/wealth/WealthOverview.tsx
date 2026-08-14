@@ -62,6 +62,19 @@ export function WealthOverview() {
             {t('wealth.underwater')}
           </p>
         )}
+
+        {/*
+          * العدّ المزدوج يُقال على الشاشة لا يُدفن في README.
+          *
+          * `accounts` و`assets` من نوع نقد/ادخار جدولان لشيءٍ واحد غالباً،
+          * ودمجُهما قرارٌ مؤجَّل — لكن من يقرأ ضعفَ ثروته لا يستحقّ أن يُترك
+          * بلا كلمة. (تدقيق آب 2026: ث2، وقاعدة CLAUDE.md التاسعة)
+          */}
+        {net.mayDoubleCountCash && (
+          <p className="mt-3 rounded-2xl bg-accent-soft px-4 py-3 text-[13px] font-semibold text-accent">
+            {t('wealth.doubleCountWarning', { amount: formatMoney(net.cashAssetsTotal) })}
+          </p>
+        )}
       </section>
 
       {/* من أين جاء الرقم: الأصول المسجّلة، والصناديق، والديون. */}
@@ -128,6 +141,7 @@ export function WealthOverview() {
             ? async () => {
                 await saveSnapshot(user.id, {
                   assetsTotal: net.assetsTotal,
+                  accountsTotal: net.accountsTotal,
                   restrictedTotal: net.restrictedTotal,
                   debtsTotal: net.debtsTotal,
                   netWorth: net.netWorth,

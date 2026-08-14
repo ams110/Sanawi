@@ -145,6 +145,15 @@ export interface NetWorthResult {
    */
   unlinkedRestrictedTotal: number
   hasUnlinkedFunds: boolean
+  /** مجموع الأصول من نوع نقد/ادخار — المرشَّحة للتكرار مع أرصدة الحسابات. */
+  cashAssetsTotal: number
+  /**
+   * حسابٌ مسجَّل وأصلٌ نقديّ معاً: الرقم قد يعدّ نفس المال مرّتين.
+   *
+   * دَينٌ تقنيّ معلَن (تدقيق آب 2026: ث2) — يُقال للمستخدم ولا يُدفن في
+   * README، لأن الرقم الذي يقرؤه قد يكون ضعف الحقيقة.
+   */
+  mayDoubleCountCash: boolean
   /** كل ما أملك: الأصول المسجّلة + أرصدة الحسابات + الصناديق غير المربوطة. */
   ownedTotal: number
   debtsTotal: number
@@ -300,6 +309,22 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
     0,
   )
 
+  /*
+   * العدّ المزدوج المحتمَل: حسابٌ مسجَّل وأصلٌ نقديّ معاً.
+   *
+   * `accounts` و`assets` من نوع cash/savings يمثّلان الشيء نفسه غالباً —
+   * من سجّل رصيده البنكي حساباً **وأصلاً** يُحتسب مرّتين فيخرج بضعف ثروته.
+   * الدمج قرارٌ مؤجَّل (تدقيق آب 2026: ث2)، وإلى حينه يُخرَج العلَم هنا لا
+   * في شاشةٍ واحدة: المستخدم الذي تكذب عليه أرقامه يستحقّ تحذيراً على
+   * الشاشة **وعند كلود** — قاعدة CLAUDE.md التاسعة.
+   */
+  const cashAssetsTotal = round2(
+    input.assets
+      .filter((a) => a.kind === 'cash' || a.kind === 'savings')
+      .reduce((sum, a) => sum + atLeastZero(a.amount), 0),
+  )
+  const mayDoubleCountCash = accountsRaw.length > 0 && cashAssetsTotal > 0
+
   const ownedTotal = assetsTotal + accountsTotal + unlinkedRestrictedTotal
 
   /**
@@ -327,6 +352,8 @@ export function computeNetWorth(input: NetWorthInput): NetWorthResult {
     accounts,
     unlinkedRestrictedTotal: round2(unlinkedRestrictedTotal),
     hasUnlinkedFunds: unlinkedRestrictedTotal > 0,
+    cashAssetsTotal,
+    mayDoubleCountCash,
     ownedTotal: round2(ownedTotal),
     debtsTotal: round2(debtsTotal),
     // لا يُقصّ عند الصفر: صافي ثروةٍ سالب حقيقةٌ جاء التطبيق ليريها.

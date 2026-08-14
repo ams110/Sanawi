@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { nextBalance, settlementsClosedBy } from '@/lib/accounts/transfer'
 import { toDateKey } from '@/lib/date'
 import type { Account, AccountKind, AccountSettlement, AccountTransfer } from '@/lib/db/types'
 import { summarizeAccounts, type AccountInput, type AccountsSummary } from '@/lib/accounts/calc'
@@ -96,7 +97,7 @@ export async function moveBalance(accountId: string, delta: number): Promise<num
     .single()
   if (readError) throw readError
 
-  const next = Math.round((Number(current.balance) + delta) * 100) / 100
+  const next = nextBalance(current.balance, delta)
   const { error } = await supabase.from('accounts').update({ balance: next }).eq('id', accountId)
   if (error) throw error
   return next
@@ -141,26 +142,18 @@ export async function transferBetweenAccounts(
   const fromBalance = await moveBalance(input.fromAccountId, -input.amount)
   const toBalance = await moveBalance(input.toAccountId, input.amount)
 
-  /*
-   * الإغلاق كاملٌ لا جزئي، والأقدم أولاً.
-   *
-   * تسويةٌ نصف مسدّدة رقمٌ لا يعرف صاحبه ماذا يفعل به، وتحويلٌ أصغر منها
-   * يبقيها كما هي حتى يكتمل.
-   */
-  const open = (await listOpenSettlements()).filter(
-    (row) =>
-      row.debtor_account_id === input.fromAccountId &&
-      row.creditor_account_id === input.toAccountId,
-  )
-
-  let budget = input.amount
-  const closed: AccountSettlement[] = []
-  for (const row of open) {
-    const amount = Number(row.amount)
-    if (amount > budget) continue
-    budget = Math.round((budget - amount) * 100) / 100
-    closed.push(row)
-  }
+  // أيُّها يُغلق قرارٌ في المحرّك المشترك — نفس قاعدة كلود حرفياً. (س12)
+  const open = await listOpenSettlements()
+  const closed = settlementsClosedBy(
+    open.map((row) => ({
+      row,
+      id: row.id,
+      amount: row.amount,
+      debtorAccountId: row.debtor_account_id,
+      creditorAccountId: row.creditor_account_id,
+    })),
+    input,
+  ).map((picked) => picked.row)
 
   if (closed.length > 0) {
     const { error: closeError } = await supabase

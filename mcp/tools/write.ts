@@ -20,6 +20,7 @@ import { baselineInstallment } from '../../src/lib/obligations/calc.js'
 import { summarizeDeposits } from '../../src/lib/obligations/deposits.js'
 import { adviseOnIncome, type IncomeAdviceItem } from '../../src/lib/month/advice.js'
 import { resolveBillPaidAt } from '../../src/lib/commitments/bills.js'
+import { nextBalance, settlementsClosedBy } from '../../src/lib/accounts/transfer.js'
 import type {
   Account,
   AccountSettlement,
@@ -297,7 +298,7 @@ async function moveBalance(
     .single()
   if (readError) throw readError
 
-  const next = Math.round((Number(current.balance) + delta) * 100) / 100
+  const next = nextBalance(current.balance, delta)
   const { error } = await connection.db
     .from('accounts')
     .update({ balance: next })
@@ -320,21 +321,17 @@ async function closeSettlements(
   connection: Connection,
   transfer: { fromAccountId: string; toAccountId: string; amount: number; transferId: string },
 ): Promise<AccountSettlement[]> {
-  const open = (await loadOpenSettlements(connection)).filter(
-    (row) =>
-      row.debtor_account_id === transfer.fromAccountId &&
-      row.creditor_account_id === transfer.toAccountId,
-  )
-
-  let budget = transfer.amount
-  const closed: AccountSettlement[] = []
-
-  for (const row of open) {
-    const amount = Number(row.amount)
-    if (amount > budget) continue
-    budget = Math.round((budget - amount) * 100) / 100
-    closed.push(row)
-  }
+  // القرار من المحرّك المشترك — نفس قاعدة الشاشة حرفياً. (س12)
+  const closed = settlementsClosedBy(
+    (await loadOpenSettlements(connection)).map((row) => ({
+      row,
+      id: row.id,
+      amount: row.amount,
+      debtorAccountId: row.debtor_account_id,
+      creditorAccountId: row.creditor_account_id,
+    })),
+    transfer,
+  ).map((picked) => picked.row)
 
   if (closed.length > 0) {
     const { error } = await connection.db

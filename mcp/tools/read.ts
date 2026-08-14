@@ -1314,6 +1314,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   - ويبقى استثناءٌ واحد: صندوقٌ **غير مربوط** بحساب. التطبيق لا يعرف أين ماله،
     فيُحتسب ملكاً كما كان قبل الحسابات — و has_unlinked_funds يقول ذلك صراحةً.
     حين تراها صحيحة، اقترح ربط الصناديق ليصحّ الرقم.
+  - **دَينٌ تقنيّ معلَن**: الحسابات والأصول من نوع cash/savings تمثّل الشيء نفسه
+    غالباً، ولا شيء يمنع تسجيل الرصيد مرّتين. حين تكون may_double_count_cash
+    صحيحة قُلها صراحةً: الرقم قد يعدّ نفس المال مرّتين، والفرق cash_assets_total.
   - ما تبقّى من التزامٍ ولم يُموَّل ليس ديناً: هو مصروفٌ قادم لا اقتراض.
   - الأقساط التي لها تاريخ نهاية ديونٌ؛ الفواتير الدائمة مصروفٌ لا دين.
 
@@ -1342,6 +1345,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         ),
         unlinked_restricted_total: z.number(),
         has_unlinked_funds: z.boolean(),
+        cash_assets_total: z.number(),
+        /** حسابٌ وأصلٌ نقديّ معاً — الرقم قد يعدّ نفس المال مرّتين. */
+        may_double_count_cash: z.boolean(),
         debts_total: z.number(),
         is_underwater: z.boolean(),
         weighted_return_percent: z.number(),
@@ -1377,6 +1383,8 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         accounts: net.accounts,
         unlinked_restricted_total: net.unlinkedRestrictedTotal,
         has_unlinked_funds: net.hasUnlinkedFunds,
+        cash_assets_total: net.cashAssetsTotal,
+        may_double_count_cash: net.mayDoubleCountCash,
         debts_total: net.debtsTotal,
         is_underwater: net.isUnderwater,
         weighted_return_percent: net.weightedReturnPercent,
@@ -1432,6 +1440,15 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           ? `\n⚠️ ${money(net.unlinkedRestrictedTotal, currency)} في صناديق غير مربوطة بحساب — ` +
             'حُسبت ملكاً على أنها موجودة في مكانٍ ما. اربطها بحساباتها ليصحّ الرقم ' +
             '(sanawi_update_obligation مع account).'
+          : null,
+        /*
+         * العدّ المزدوج يُقال لا يُدفن (تدقيق آب 2026: ث2، وقاعدة CLAUDE.md
+         * التاسعة): الدمج قرارٌ مؤجَّل، والمستخدم الذي تكذب عليه أرقامه يستحقّ
+         * أن يعرف — على الشاشة وهنا بنفس الصياغة.
+         */
+        net.mayDoubleCountCash
+          ? `\n⚠️ عندك حسابات مسجّلة و${money(net.cashAssetsTotal, currency)} أصولاً من نوع نقد/ادخار — ` +
+            'إن كان الاثنان نفس المال فهو محسوبٌ مرّتين. احذف أحدهما ليصحّ الرقم.'
           : null,
         '',
         `### صندوق الطوارئ`,

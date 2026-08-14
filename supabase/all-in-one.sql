@@ -1648,3 +1648,26 @@ drop policy if exists "bank_inbox_update_own" on public.bank_inbox;
 create policy "bank_inbox_update_own" on public.bank_inbox
   for update using ((select auth.uid()) = user_id)
   with check ((select auth.uid()) = user_id);
+
+-- ─────────────────────────────────────────────
+-- 0018_snapshot_accounts_total.sql
+-- ─────────────────────────────────────────────
+-- لقطة صافي الثروة تجمع على صافيها.
+--
+-- كانت اللقطة تحفظ `assets_total` و`restricted_total` و`debts_total` و
+-- `net_worth`، وصافي الثروة يُحسب من **أربعة** مكوّنات لا ثلاثة: الأصول
+-- وأرصدة الحسابات والصناديق غير المربوطة ناقص الديون. فأرصدة الحسابات —
+-- وهي مصدر النقد الوحيد — لم تكن تُخزَّن أصلاً.
+--
+-- والأثر كامنٌ اليوم لأن الخط البياني يرسم `net_worth` وحده، لكنه لغمٌ لأي
+-- قراءةٍ مستقبلية للمكوّنات: من جمعها وجدها لا تساوي الصافي المحفوظ بجانبها.
+-- (تدقيق آب 2026: ث4)
+--
+-- الافتراضي صفر: اللقطات القديمة لا تعرف رصيد حساباتها يومَها، وصفرٌ فيها
+-- يقول «غير مسجَّل» — وهو أصدق من رقمٍ يُشتقّ اليوم لماضٍ لم يُقَس.
+
+alter table public.net_worth_snapshots
+  add column if not exists accounts_total numeric(14, 2) not null default 0;
+
+comment on column public.net_worth_snapshots.accounts_total is
+  'مجموع أرصدة الحسابات وقت اللقطة — رابع مكوّنات الصافي، وبدونه لا تجتمع';
