@@ -88,3 +88,56 @@ describe('توقيع الطلب', () => {
     expect(a.url).not.toBe(b.url)
   })
 })
+
+/*
+ * مثال بيونكس الرسمي — أقوى حارسٍ في هذا الملف.
+ *
+ * الاختبارات فوقه تثبّت ما **نظنّه** صحيحاً؛ وهذا يثبّت ما **نشرته المنصّة
+ * نفسها**: سرّها وطابعها ونصّها وتوقيعها الناتج، منقولةً حرفياً من صفحة
+ * Authentication في توثيقها. مطابقتُه تعني أن سلسلة التوقيع كلها — استيراد
+ * المفتاح، وترتيب البايتات، والترميز — تطابق ما ينتظره خادمهم فعلاً، لا ما
+ * فهمناه من قراءة نصّ.
+ *
+ * وفيه درسٌ لولا المثال ما عُرف: المثال المنشور **يلحق الجسم بنصّ التوقيع**
+ * حتى في مثال GET. فعقدُنا صار صريحاً: `payload` هو ما يُوقَّع حرفياً — من
+ * يبني طلباً بجسمٍ يلحقه هناك، ولا يفترض أن التوقيع يجمعه عنه.
+ *
+ * المصدر: https://pionex-doc.gitbook.io/apidocs/restful/general/authentication
+ */
+describe('مثال بيونكس المنشور', () => {
+  const PIONEX_DOC = {
+    secret: 'NFqv4MB3hB0SOiEsJNDP9e0jDdKPWbDqS_Z1dbU4',
+    payload:
+      'GET/api/v1/trade/allOrders?limit=1&symbol=BTC_USDT&timestamp=1655896754515{"symbol": "BTC_USDT"}',
+    signature: 'ec83d21e1237cbe7e0172f79c0e3a4741c86f6b201ba762f21149bf195519be1',
+  }
+
+  it('توقيعنا يطابق توقيعهم بايتاً ببايت', async () => {
+    const prepared = await signRequest(
+      {
+        method: 'GET',
+        url: 'https://api.pionex.com/api/v1/trade/allOrders?limit=1&symbol=BTC_USDT&timestamp=1655896754515',
+        payload: PIONEX_DOC.payload,
+        algorithm: 'SHA-256',
+        encoding: 'hex',
+        headers: { 'PIONEX-KEY': 'KEY' },
+        signatureHeader: 'PIONEX-SIGNATURE',
+        secretIsBase64: false,
+      },
+      PIONEX_DOC.secret,
+    )
+
+    expect(prepared.headers['PIONEX-SIGNATURE']).toBe(PIONEX_DOC.signature)
+  })
+
+  /*
+   * والمسار الذي نستعمله فعلاً يُبنى بالقاعدة نفسها: METHOD ثم المسار ثم
+   * الـquery مرتَّباً تصاعدياً بمفاتيحه — و`timestamp` وحده هنا فلا ترتيب
+   * يُختبر، لكن الشكل هو الشكل.
+   */
+  it('وطلب الأرصدة يُبنى بالقاعدة نفسها', () => {
+    const request = buildBalanceRequest('pionex', creds, clock)
+    expect(request.payload).toBe(`GET/api/v1/wallet/balancesFull?timestamp=${AT}`)
+    expect(request.body).toBeUndefined()
+  })
+})
