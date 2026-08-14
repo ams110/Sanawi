@@ -8,7 +8,7 @@ import { projectCashFlow, type ForecastResult } from '@/lib/budget/forecast'
 import { duesInMonth } from '@/lib/obligations/calendar'
 import { summarizeDeposits } from '@/lib/obligations/deposits'
 import { summarizeExpenses } from '@/lib/expenses/calc'
-import { viewCommitment } from '@/lib/commitments/calc'
+import { viewCommitment, suggestedBill } from '@/lib/commitments/calc'
 import { loadAccountsPicture } from '@/features/accounts/api'
 import { listMonthDeposits, listObligations } from '@/features/obligations/api'
 import { listBills } from '@/features/bills/api'
@@ -61,15 +61,16 @@ export function ForecastScreen() {
           mySharePercent: Number(row.commitment.my_share_percent ?? 100),
         })
         if (!view.hasStarted || view.isFinished) return []
-        const share = view.myAmount / Number(row.commitment.amount)
-        const suggested =
-          Number(row.payment?.amount ?? 0) ||
-          Number(row.average?.average_amount ?? 0) ||
-          Number(row.commitment.amount)
+        // حصّتي من المقترح — من القاعدة الواحدة نفسها في كل السطوح. (س5)
         return [
           {
             name: row.commitment.name,
-            amount: suggested * share,
+            amount: suggestedBill({
+              recordedAmount: row.payment?.amount == null ? null : Number(row.payment.amount),
+              averageAmount: Number(row.average?.average_amount ?? 0),
+              budgetedAmount: Number(row.commitment.amount),
+              mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+            }).mine,
             dayOfMonth: row.commitment.day_of_month,
           },
         ]

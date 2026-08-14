@@ -45,6 +45,16 @@ const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0)
 export const finite = (n: number | undefined, fallback: number): number =>
   typeof n === 'number' && Number.isFinite(n) ? n : fallback
 
+/**
+ * مجموع قبضاتٍ وصلت — القاعدة الواحدة.
+ *
+ * كانت الصيغة ثلاث نسخ (الشاشة وقارئ MCP وكاتبه — تدقيق آب 2026: س13)؛
+ * PostgREST يعيد الأرقام نصوصاً فالتحويل جزءٌ من التعريف لا تفصيل عميل.
+ */
+export function sumReceived(rows: readonly { amount: number | string }[]): number {
+  return round2(rows.reduce((sum, row) => sum + Number(row.amount), 0))
+}
+
 /** الدخل الشهري المتوقَّع: المصادر النشطة التي لها تقدير موثوق. */
 export function monthlyIncomeFrom(incomes: IncomeInput[]): number {
   return round2(

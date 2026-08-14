@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { validateShares as validateSharesTotal } from '@/lib/commitments/calc'
 import type { ObligationPartner, PartnerSettlement } from '@/lib/db/types'
 
 /** حصة شريك كما تتعامل معها الواجهة قبل الحفظ. */
@@ -156,9 +157,10 @@ export function validateShares(
     return mySharePercent === 100 ? null : { code: 'mustBe100' }
   }
 
-  const total = active.reduce((sum, p) => sum + p.sharePercent, mySharePercent)
-  if (Math.abs(total - 100) > 0.01) {
-    return { code: 'sumMismatch', percent: Math.round(total) }
+  // قاعدة المجموع من المحرّك المشترك — سماحية الأغورة نفسها في كل السطوح. (س14)
+  const check = validateSharesTotal(mySharePercent, active.map((p) => p.sharePercent))
+  if (!check.isValid) {
+    return { code: 'sumMismatch', percent: Math.round(check.total) }
   }
   return null
 }

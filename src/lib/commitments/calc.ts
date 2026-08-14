@@ -74,14 +74,43 @@ export function hasStarted(startsOn: string | null | undefined, today: Date = ne
   return startOfMonth(today) >= monthOf(startsOn)
 }
 
+/**
+ * حصّتي من مبلغٍ كامل — القاعدة الواحدة في التطبيق كلّه.
+ *
+ * القصّ 0–100 ثم التقريب لخانتين. كل صيغة `(amount × share) / 100` مضمّنة
+ * في شاشةٍ كانت نسخةً ستنحرف يوماً (تدقيق آب 2026: س15) — فالصيغة تعيش هنا
+ * وحدها وتُستورد.
+ */
+export function shareAmount(fullAmount: number, mySharePercent: number): number {
+  const share = Math.min(100, Math.max(0, mySharePercent))
+  return round2((fullAmount * share) / 100)
+}
+
+/**
+ * «المبلغ المقترح» لفاتورة الشهر — قاعدةٌ واحدة معلَنة. (س5)
+ *
+ * كانت له ثلاث صيغ: الشاشة تقترح المتوسّط الكامل، والتوقّع النقدي حصّةً
+ * من تدرّجٍ آخر، وكلود ثالثةً — فاتورة منصَّفة 200 متوسّطها 260 كانت
+ * تظهر 260 و130 و100 في ثلاث سطوح. التدرّج: المسجَّل، فالمتوسّط، فالمقدَّر
+ * — كلها بالمبلغ الكامل، و`mine` حصّتي منه.
+ */
+export function suggestedBill(input: {
+  recordedAmount?: number | null
+  averageAmount?: number | null
+  budgetedAmount: number
+  mySharePercent?: number
+}): { full: number; mine: number } {
+  const full = round2(
+    Number(input.recordedAmount ?? 0) || Number(input.averageAmount ?? 0) || input.budgetedAmount,
+  )
+  return { full, mine: shareAmount(full, input.mySharePercent ?? 100) }
+}
+
 export function viewCommitment(
   input: CommitmentInput,
   today: Date = new Date(),
 ): CommitmentView {
-  // نفس قصّ `obligations/calc.ts` حرفياً: حصةٌ فوق 100 كانت تُخرج حصةَ
-  // شركاء سالبةً تدخل الجموع والتسويات. (تدقيق آب 2026: ل5)
-  const share = Math.min(100, Math.max(0, input.mySharePercent))
-  const myAmount = round2((input.amount * share) / 100)
+  const myAmount = shareAmount(input.amount, input.mySharePercent)
   const partnersAmount = round2(input.amount - myAmount)
   const started = hasStarted(input.startsOn, today)
 
@@ -167,5 +196,10 @@ export function validateShares(
   partnerPercents: readonly number[],
 ): { isValid: boolean; total: number; gap: number } {
   const total = round2(mySharePercent + partnerPercents.reduce((s, p) => s + p, 0))
-  return { isValid: total === 100, total, gap: round2(100 - total) }
+  /*
+   * سماحية أغورة (0.01): كانت هنا مساواةً تامة وفي partners/api سماحيةً —
+   * فقسمةُ 33.33/33.33/33.34 تمرّ من بابٍ وتُرفض من آخر لنفس البند.
+   * القاعدة واحدة الآن، والسماحية تُبقي «ثلاثة أثلاث» ممكنة. (س14)
+   */
+  return { isValid: Math.abs(total - 100) <= 0.01, total, gap: round2(100 - total) }
 }

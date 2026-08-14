@@ -5,6 +5,8 @@ import {
   validateShares,
   viewCommitment,
   type CommitmentInput,
+  shareAmount,
+  suggestedBill,
 } from './calc'
 
 const TODAY = new Date(2026, 7, 3) // 3 آب 2026
@@ -233,5 +235,35 @@ describe('قصّ الحصة', () => {
     const v = viewCommitment(bill({ mySharePercent: -10 }), TODAY)
     expect(v.myAmount).toBe(0)
     expect(v.partnersAmount).toBe(300)
+  })
+})
+
+// القاعدة الواحدة للحصة والاقتراح — مستخلصة من تدقيق آب 2026 (س5، س15).
+describe('shareAmount', () => {
+  it('يقصّ ويقرّب', () => {
+    expect(shareAmount(400, 50)).toBe(200)
+    expect(shareAmount(300, 120)).toBe(300)
+    expect(shareAmount(300, -5)).toBe(0)
+    expect(shareAmount(100, 33.33)).toBe(33.33)
+  })
+})
+
+describe('suggestedBill', () => {
+  it('التدرّج: المسجَّل فالمتوسّط فالمقدَّر — وحصّتي منه', () => {
+    // فاتورة منصَّفة 200 متوسّطها 260: كانت تظهر 260 و130 و100 في ثلاث سطوح.
+    const s = suggestedBill({ averageAmount: 260, budgetedAmount: 200, mySharePercent: 50 })
+    expect(s.full).toBe(260)
+    expect(s.mine).toBe(130)
+    expect(
+      suggestedBill({ recordedAmount: 240, averageAmount: 260, budgetedAmount: 200 }).full,
+    ).toBe(240)
+    expect(suggestedBill({ budgetedAmount: 200 }).mine).toBe(200)
+  })
+})
+
+describe('سماحية الحصص', () => {
+  it('ثلاثة أثلاث تمرّ من كل الأبواب', () => {
+    expect(validateShares(33.33, [33.33, 33.34]).isValid).toBe(true)
+    expect(validateShares(50, [49]).isValid).toBe(false)
   })
 })

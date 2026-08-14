@@ -2,6 +2,7 @@ import { supabase } from '@/lib/supabase'
 import type { Expense, ExpenseCategory } from '@/lib/db/types'
 import type { ExpenseRow } from '@/lib/expenses/calc'
 import { toDateKey, toMonthKey } from '@/lib/date'
+import { expenseMatchesCategory } from '@/lib/budget/groupCost'
 
 /** أول يوم في الشهر بصيغة ISO — مفتاح الشهر نفسه المستعمل في الفواتير. */
 export function monthKey(date: Date = new Date()): string {
@@ -105,6 +106,8 @@ export async function updateExpense(
   patch: {
     amount?: number
     categoryId?: string | null
+    /** اسم التصنيف المقروء — يُكتب مع المعرّف كما في `addExpense`. */
+    categoryName?: string | null
     spentAt?: string
     isUnexpected?: boolean
     note?: string | null
@@ -112,7 +115,15 @@ export async function updateExpense(
 ): Promise<void> {
   const row: Partial<Expense> = {}
   if (patch.amount !== undefined) row.amount = patch.amount
-  if (patch.categoryId !== undefined) row.category_id = patch.categoryId
+  /*
+   * العمودان معاً هنا أيضاً — نفس عقد `addExpense` (تدقيق آب 2026: س3):
+   * تحديثُ `category_id` وحده كان يترك نصّ `category` القديم، فمصروفٌ
+   * صُحّح تصنيفه من الشاشة يبقى محسوباً عند كلود على تصنيفه القديم.
+   */
+  if (patch.categoryId !== undefined) {
+    row.category_id = patch.categoryId
+    row.category = patch.categoryName ?? null
+  }
   if (patch.spentAt !== undefined) row.spent_at = patch.spentAt
   if (patch.isUnexpected !== undefined) row.is_unexpected = patch.isUnexpected
   if (patch.note !== undefined) row.note = patch.note
@@ -120,6 +131,27 @@ export async function updateExpense(
   if (Object.keys(row).length === 0) return
   const { error } = await supabase.from('expenses').update(row).eq('id', id)
   if (error) throw error
+}
+
+
+/**
+ * مصاريف تصنيفٍ خلال آخر 13 شهراً — لمدخل «التكلفة الحقيقية». (س4)
+ *
+ * نفس نافذة خادم MCP ونفس قاعدة المطابقة (`expenseMatchesCategory`):
+ * `computeGroupCost` يقصّها إلى 12 شهراً، والشهر الزائد يغطّي فروق التقويم.
+ * الترشيح في العميل لا في القاعدة — `.eq()` حسّاسة لحالة الأحرف.
+ */
+export async function listCategoryExpenses(category: string): Promise<Expense[]> {
+  const since = new Date()
+  since.setMonth(since.getMonth() - 13)
+
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .gte('spent_at', toDateKey(since))
+    .order('spent_at', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as Expense[]).filter((row) => expenseMatchesCategory(row.category, category))
 }
 
 export async function deleteExpense(id: string): Promise<void> {

@@ -60,6 +60,19 @@ export function yearlyCostOf(obligation: GroupObligationInput): number {
   return round2((mine * 12) / obligation.recurrenceMonths)
 }
 
+/**
+ * مطابقة تصنيف المصروف بتصنيف المجموعة — بلا حساسية أحرف ولا فراغات. (س4)
+ *
+ * `.eq()` في القاعدة حسّاسة للأحرف بينما مطابقة الالتزامات تتجاهلها،
+ * فمصروفٌ صُنّف `Car` كان يسقط من تكلفة `car` عند سطحٍ ويظهر عند آخر.
+ */
+export function expenseMatchesCategory(
+  rowCategory: string | null | undefined,
+  category: string,
+): boolean {
+  return (rowCategory ?? '').trim().toLowerCase() === category.trim().toLowerCase()
+}
+
 export function computeGroupCost(
   obligations: GroupObligationInput[],
   expenses: GroupExpenseInput[],

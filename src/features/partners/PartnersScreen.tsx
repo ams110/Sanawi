@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { formatMoney } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
-import { viewCommitment } from '@/lib/commitments/calc'
+import { viewCommitment, shareAmount } from '@/lib/commitments/calc'
 import {
   summarizePartners,
   totalOutstanding,
@@ -69,7 +69,8 @@ export function PartnersScreen() {
               partnerId: share.partner_id,
               commitmentId: share.commitment_id,
               commitmentName: commitment.name,
-              monthlyAmount: (Number(commitment.amount) * Number(share.share_percent)) / 100,
+              // من القاعدة الواحدة — لا صيغة قسمة مضمّنة. (س15)
+              monthlyAmount: shareAmount(Number(commitment.amount), Number(share.share_percent)),
             },
           ]
         }),

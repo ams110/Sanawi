@@ -7,8 +7,8 @@ import { updateProfile } from '@/features/profile/api'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { useAmount } from '@/features/record/amount'
-import { FREQUENCY_TO_MONTHLY, monthlyIncomeFrom } from '@/lib/budget/calc'
-import { hasStarted } from '@/lib/commitments/calc'
+import { monthlyEquivalent, monthlyIncomeFrom } from '@/lib/budget/calc'
+import { hasStarted, summarizeMonthlyLoad } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
 import { IncomeEntries } from './IncomeEntries'
 import { IncomeHistory } from './IncomeHistory'
@@ -122,7 +122,20 @@ export function MoneyScreen() {
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-bold text-text">{t('money.fixedSection')}</h2>
           <span className="num text-lg font-bold text-text">
-            {formatMoney(fixed.reduce((s, f) => s + Number(f.amount), 0))}
+            {/*
+              * من المحرّك لا جمعاً خاماً: الخام يعدّ المبالغ الكاملة لكل بندٍ
+              * نشط حتى المنتهي وغير المُبتدئ، فيناقض اللوحة وكلود. (س7)
+              */}
+            {formatMoney(
+              summarizeMonthlyLoad(
+                fixed.map((f) => ({
+                  amount: Number(f.amount),
+                  startsOn: f.starts_on,
+                  endsOn: f.ends_on,
+                  mySharePercent: Number(f.my_share_percent ?? 100),
+                })),
+              ).total,
+            )}
           </span>
         </div>
 
@@ -199,9 +212,7 @@ function IncomeRow({
             {income.is_variable
               ? t('money.variableHint')
               : t('money.monthlyEquivalent', {
-                  amount: formatMoney(
-                    Number(income.amount) * FREQUENCY_TO_MONTHLY[income.frequency],
-                  ),
+                  amount: formatMoney(monthlyEquivalent(Number(income.amount), income.frequency)),
                 })}
           </p>
         </div>

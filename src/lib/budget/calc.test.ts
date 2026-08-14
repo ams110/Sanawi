@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { monthlyIncomeFrom, projectSavings, type SavingsProjection } from './calc'
+import { monthlyIncomeFrom, projectSavings, sumReceived, type SavingsProjection } from './calc'
 
 describe('تحويل الدخل إلى شهري', () => {
   it('يحوّل الأسبوعي بـ 4.333 لا بـ 4', () => {
@@ -224,5 +224,13 @@ describe('محاكي الادخار — المدخلات الفاسدة', () => 
     const r = projectSavings(1000, 0.5, 7)
     expect(r.totalDeposited).toBe(6000)
     expect(r.futureValue).toBeCloseTo(6088.18, 1)
+  })
+})
+
+// القاعدة الواحدة لمجموع الواصل — كانت ثلاث نسخ. (س13)
+describe('sumReceived', () => {
+  it('يجمع ويقرّب ويقبل نصوص PostgREST', () => {
+    expect(sumReceived([{ amount: '1000.005' }, { amount: 500 }])).toBe(1500.01)
+    expect(sumReceived([])).toBe(0)
   })
 })

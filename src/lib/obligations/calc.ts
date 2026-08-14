@@ -76,6 +76,22 @@ export function monthsUntil(due: Date | string, today: Date = new Date()): numbe
   return differenceInCalendarMonths(toDate(due), today)
 }
 
+/**
+ * القسط المرجعي عند إنشاء الالتزام — على أساس الدورة الكاملة.
+ *
+ * يُثبَّت مرةً واحدة ليُقاس عليه التأخير، ولا يُحسب على الدورة المضغوطة
+ * الأولى وإلا بقي صاحبه «متأخراً» إلى الأبد بمقياسٍ مستحيل. كان منسوخاً
+ * حرفياً في الشاشة وخادم MCP (تدقيق آب 2026: س10) — يعيش هنا وحده الآن.
+ */
+export function baselineInstallment(
+  totalAmount: number,
+  mySharePercent: number,
+  recurrenceMonths: number,
+): number {
+  const myTotal = (totalAmount * clamp(mySharePercent, 0, 100)) / 100
+  return recurrenceMonths > 0 ? ceilShekel(myTotal / recurrenceMonths) : ceilShekel(myTotal)
+}
+
 export function calculateObligation(input: ObligationCalcInput): ObligationCalcResult {
   const today = input.today ?? new Date()
   const sharePercent = clamp(input.mySharePercent ?? 100, 0, 100)
