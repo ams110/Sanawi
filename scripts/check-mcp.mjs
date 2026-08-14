@@ -392,15 +392,15 @@ expect('باقٍ على الشريك', detail?.settlements[0]?.outstanding, 1900
 
 // ٥. رقم الشهر — اللوحة الموحّدة، نفس محرّك الشاشة
 const month = await call('sanawi_month_overview')
-// لا دخل فعليّ مسجَّل بعد، فالرقم المعتمد هو المقدَّر: 12000 + 300×52÷12.
+// الأساس الخطة دائماً: 12000 + 300×52÷12.
 expect('الدخل المعتمد', month?.income, 13300)
-expect('الدخل تقدير لا واقع', month?.income_is_actual, false)
+expect('والأساس الخطة', month?.income_basis, 'expected')
 expect('هدف الادخار', month?.savings_target, 500)
 expect('مجموع الأقساط', month?.obligation_installments, 975) // ‏375 + 600
 expect('فواتير متكرّرة', month?.recurring_bills, 300)
 expect('أقساط تنتهي', month?.installments, 0)
-expect('التقدير الثابت', month?.available_to_spend, 11525)
 // ‏13300 − (975 + 300 + 0 + 500) = 11525، ولا مصاريف يومية بعد.
+expect('ميزانية الصرف', month?.spending_budget, 11525)
 expect('الباقي فعلاً', month?.remaining, 11525)
 expect('لا تجاوز', month?.is_overspent, false)
 
@@ -427,11 +427,16 @@ expect(
   4300,
 )
 
+/*
+ * القبضة لا تقلب الأساس (تصليح ش3): الحسبة تبقى على الخطة، والواصل
+ * يظهر تقدّماً — فلا يُقارن دخلُ نصف شهرٍ بالتزامات شهرٍ كامل.
+ */
 const actual = await call('sanawi_month_overview')
-expect('الدخل صار واقعاً', actual?.income_is_actual, true)
-expect('الدخل الواصل', actual?.income, 9000)
+expect('الأساس ما زال الخطة', actual?.income_basis, 'expected')
+expect('الدخل المعتمد لم يتغيّر', actual?.income, 13300)
+expect('والواصل يُعرض تقدّماً', actual?.received_income, 9000)
 expect('الفجوة عن المعتاد', actual?.income_gap, -4300)
-expect('الباقي بعد الواقع', actual?.remaining, 7225)
+expect('والباقي ثابت على الخطة', actual?.remaining, 11525)
 
 /*
  * القبضة على مصدرٍ مؤرشف تبقى مسمّاةً في التفصيل.

@@ -35,19 +35,27 @@ function NoteLine({ note }: { note: PendingNote }) {
       ? t('pending.noteOverdue')
       : note.type === 'installment'
         ? t('pending.noteInstallment')
-        : note.type === 'variable'
-          ? t('pending.noteVariable')
-          : note.type === 'expected'
-            ? t('pending.noteExpected')
-            : note.type === 'partial'
-              ? t('pending.notePartial', { done: note.done, total: note.total })
-              : note.type === 'average'
-                ? t('pending.noteAverage', { amount: formatMoney(note.amount) })
-                : note.days < 0
-                  ? t('pending.noteDuePassed', { days: Math.abs(note.days) })
-                  : note.days === 0
-                    ? t('pending.noteDueToday')
-                    : t('pending.noteDueIn', { days: note.days })
+        : note.type === 'partialDeposit'
+          ? t('pending.notePartialDeposit', {
+              done: formatMoney(note.deposited),
+              total: formatMoney(note.total),
+            })
+          : note.type === 'variable'
+            ? t('pending.noteVariable')
+            : note.type === 'expected'
+              ? t('pending.noteExpected')
+              : note.type === 'partial'
+                ? t('pending.notePartial', {
+                    received: formatMoney(note.received),
+                    expected: formatMoney(note.expected),
+                  })
+                : note.type === 'average'
+                  ? t('pending.noteAverage', { amount: formatMoney(note.amount) })
+                  : note.days < 0
+                    ? t('pending.noteDuePassed', { days: Math.abs(note.days) })
+                    : note.days === 0
+                      ? t('pending.noteDueToday')
+                      : t('pending.noteDueIn', { days: note.days })
 
   return <span className="text-[12px] text-text-muted">{text}</span>
 }
@@ -82,22 +90,17 @@ export function PendingPanel({ result, obligations, onDone, onGo }: Props) {
     )
   }
 
-  return (
-    <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
-      <h2 className="text-sm font-bold text-text">
-        {t('pending.title', { count: result.items.length })}
-      </h2>
+  /*
+   * سطرٌ واحد للقائمتين: «عليك» و«بتستنّى دخل» يتشاركان الشكل والفعل،
+   * ويفترقان في العنوان — لأن دخلاً جايك ليس شيئاً «عليك». (ش6)
+   */
+  const renderItem = (item: PendingResult['items'][number]) => {
+    const obligation =
+      item.kind === 'deposit' ? obligations.find((o) => o.obligation.id === item.id) : undefined
+    const open = openId === item.id
 
-      <ul className="space-y-2">
-        {result.items.map((item) => {
-          const obligation =
-            item.kind === 'deposit'
-              ? obligations.find((o) => o.obligation.id === item.id)
-              : undefined
-          const open = openId === item.id
-
-          return (
-            <li key={`${item.kind}-${item.id}`} className="rounded-2xl bg-surface-muted p-3">
+    return (
+      <li key={`${item.kind}-${item.id}`} className="rounded-2xl bg-surface-muted p-3">
               <div className="flex items-center gap-3">
                 <span className="text-lg leading-none" aria-hidden="true">
                   {KIND_ICON[item.kind]}
@@ -133,28 +136,55 @@ export function PendingPanel({ result, obligations, onDone, onGo }: Props) {
                 </button>
               </div>
 
-              {open && obligation && (
-                <div className="mt-3 border-t border-border pt-3">
-                  <DepositField
-                    item={obligation}
-                    autoFocus
-                    onDone={async () => {
-                      setOpenId(null)
-                      await onDone()
-                    }}
-                  />
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
+        {open && obligation && (
+          <div className="mt-3 border-t border-border pt-3">
+            <DepositField
+              item={obligation}
+              autoFocus
+              onDone={async () => {
+                setOpenId(null)
+                await onDone()
+              }}
+            />
+          </div>
+        )}
+      </li>
+    )
+  }
 
-      {/* ما زاد على الحدّ يُقال عدده ولا يُخفى بصمت. */}
-      {result.hiddenCount > 0 && (
-        <p className="text-center text-[12px] text-text-muted">
-          {t('pending.more', { count: result.hiddenCount })}
-        </p>
+  return (
+    <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
+      {result.totalCount > 0 && (
+        <>
+          {/* العدد الحقيقي لا المعروض: «6» والحقيقة سبعة كانت غلطةً صريحة. (ش7) */}
+          <h2 className="text-sm font-bold text-text">
+            {t('pending.title', { count: result.totalCount })}
+          </h2>
+
+          <ul className="space-y-2">{result.items.map(renderItem)}</ul>
+
+          {/* ما زاد على الحدّ يُقال عدده ولا يُخفى بصمت. */}
+          {result.hiddenCount > 0 && (
+            <p className="text-center text-[12px] text-text-muted">
+              {t('pending.more', { count: result.hiddenCount })}
+            </p>
+          )}
+        </>
+      )}
+
+      {/*
+       * الدخل المنتظر قائمةٌ ثانية بعنوانها — لا سطرٌ محسوبٌ على «عليك».
+       *
+       * كان «ادم 2,500 متوقَّع من مصدر دخلك» معدوداً ضمن «ضلّ عليك 6 إشي»،
+       * فيقرأ صاحبه مالاً جايه على أنه التزامٌ طالع منه. (ش6)
+       */}
+      {result.incomeItems.length > 0 && (
+        <>
+          <h2 className={`text-sm font-bold text-text ${result.totalCount > 0 ? 'border-t border-border pt-3' : ''}`}>
+            {t('pending.incomeTitle', { count: result.incomeItems.length })}
+          </h2>
+          <ul className="space-y-2">{result.incomeItems.map(renderItem)}</ul>
+        </>
       )}
     </section>
   )

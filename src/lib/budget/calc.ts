@@ -31,27 +31,6 @@ export interface IncomeInput {
   isVariable?: boolean
 }
 
-export interface MonthlySummaryInput {
-  incomes: IncomeInput[]
-  /** الالتزامات الشهرية الثابتة: الأهل، بنزين، تلفون. */
-  fixedCommitments: number[]
-  /** أقساط الالتزامات السنوية لهذا الشهر. */
-  obligationInstallments: number[]
-  monthlySavingsTarget?: number
-}
-
-export interface MonthlySummary {
-  monthlyIncome: number
-  fixedTotal: number
-  obligationsTotal: number
-  savingsTarget: number
-  /** كل ما يجب أن يخرج من الحساب هذا الشهر. */
-  mustLeaveAccount: number
-  /** الباقي فعلاً للصرف. سالب = عجز. */
-  availableToSpend: number
-  isOverBudget: boolean
-}
-
 const round2 = (v: number): number => Math.round(v * 100) / 100
 const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0)
 
@@ -63,7 +42,7 @@ const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0)
  * يظهر على الشاشة خطأً بل يظهر فراغاً أو «—»، فيظنّ المستخدم أن التطبيق لا
  * يعرف بدل أن يعرف أن مُدخَله هو الخطأ. ‏Infinity كذلك يمرّ من هنا إلى بديله.
  */
-const finite = (n: number | undefined, fallback: number): number =>
+export const finite = (n: number | undefined, fallback: number): number =>
   typeof n === 'number' && Number.isFinite(n) ? n : fallback
 
 /** الدخل الشهري المتوقَّع: المصادر النشطة التي لها تقدير موثوق. */
@@ -82,25 +61,13 @@ export function monthlyEquivalent(amount: number, frequency: IncomeFrequency): n
   return round2(amount * FREQUENCY_TO_MONTHLY[frequency])
 }
 
-export function summarizeMonth(input: MonthlySummaryInput): MonthlySummary {
-  const monthlyIncome = monthlyIncomeFrom(input.incomes)
-  const fixedTotal = round2(sum(input.fixedCommitments))
-  const obligationsTotal = round2(sum(input.obligationInstallments))
-  const savingsTarget = round2(input.monthlySavingsTarget ?? 0)
-
-  const mustLeaveAccount = round2(fixedTotal + obligationsTotal + savingsTarget)
-  const availableToSpend = round2(monthlyIncome - mustLeaveAccount)
-
-  return {
-    monthlyIncome,
-    fixedTotal,
-    obligationsTotal,
-    savingsTarget,
-    mustLeaveAccount,
-    availableToSpend,
-    isOverBudget: availableToSpend < 0,
-  }
-}
+/*
+ * `summarizeMonth` عاشت هنا حتى تدقيق آب 2026 (ش1، ش5): كانت تجيب نفس
+ * سؤال `buildMonthPanel` — «كم يبقى؟» — بفرضيات مختلفة (دخل متوقَّع دائماً،
+ * وفواتير بمبلغها الكامل لا بحصّتي)، فتعرض الشاشةُ رقمين متناقضين من
+ * محرّكين. حُذفت وفق قاعدة «سؤال واحد = محرّك واحد»، والجواب الوحيد الآن
+ * في `budget/month.ts`.
+ */
 
 /**
  * محاكي الادخار: القيمة المستقبلية لدفعة شهرية ثابتة فوق رصيدٍ قائم.

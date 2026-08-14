@@ -46,7 +46,13 @@ export interface DepositView {
 export interface DepositsSummary {
   /** الأحدث أولاً — العين تقرأ آخر ما فعلت لا أوّله. */
   entries: DepositView[]
-  /** مجموع ما أُودع هذا الشهر، بلا السحوبات. */
+  /**
+   * مجموع ما أودعتُه **أنا** هذا الشهر، بلا السحوبات وبلا إيداعات الشركاء.
+   *
+   * إيداع الشريك حصّتُه هو لا قسطي أنا (تدقيق آب 2026: ل1) — عدُّه هنا
+   * كان يُسقط قسطي من «ضلّ عليك» ويقول لي «أودعتَ هذا الشهر» عمّا أودعه
+   * غيري. وهي نفس قاعدة `monthInstallments.ts` نصّاً لا ادّعاءً.
+   */
   thisMonthTotal: number
   thisMonthCount: number
   lastDeposit: DepositView | null
@@ -126,7 +132,9 @@ export function summarizeDeposits(
   const lastWithdrawal = entries.findIndex((e) => e.kind === 'withdrawal')
   const currentCycle = lastWithdrawal === -1 ? entries : entries.slice(0, lastWithdrawal)
 
-  const thisMonthDeposits = currentCycle.filter((e) => e.kind === 'deposit' && e.isThisMonth)
+  const thisMonthDeposits = currentCycle.filter(
+    (e) => e.kind === 'deposit' && e.isThisMonth && e.partnerId === null,
+  )
   const deposits = entries.filter((e) => e.kind === 'deposit')
 
   return {

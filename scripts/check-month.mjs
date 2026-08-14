@@ -102,7 +102,10 @@ if (!fetched) finish()
 const received = fetched.reduce((s, r) => s + Number(r.amount), 0)
 step('مجموع الدخل الواصل', received === 2200, `${received} ₪`)
 
-// 5) اللوحة الموحّدة: الواصل يغلب المقدَّر.
+// 5) اللوحة الموحّدة: الأساس الخطة، والواصل تقدّمٌ لا انقلاب.
+//
+// (تصليح تدقيق آب 2026 ش3: قبضةٌ واصلة كانت تقلب الأساس إلى «الواصل»
+// فتُقارن بدخل نصف شهرٍ التزاماتُ شهرٍ كامل.)
 const expected = 1000 * (52 / 12) // 4333.33
 const panel = buildMonthPanel({
   expectedIncome: Math.round(expected * 100) / 100,
@@ -115,29 +118,33 @@ const panel = buildMonthPanel({
   daysElapsed: 10,
   daysInMonth: 30,
 })
-step('اللوحة تعتمد الواصل لا المقدَّر', panel.incomeIsActual && panel.income === 2200)
-step('الفجوة تكشف شهراً أضعف', panel.incomeGap < 0, `${panel.incomeGap} ₪`)
+step(
+  'الأساس الخطة رغم وصول قبضات',
+  panel.incomeBasis === 'expected' && panel.income === 4333.33,
+  `${panel.income} ₪`,
+)
+step('والواصل يُعرض تقدّماً', panel.receivedIncome === 2200, `${panel.receivedIncome} ₪`)
+step('الفجوة تكشف ما لم يصل بعد', panel.incomeGap === -2133.33, `${panel.incomeGap} ₪`)
 step('مجموع الملتزَم به', panel.committed === 1400, `${panel.committed} ₪`)
-// ‏2,200 واصل − (1,400 ملتزَم + 600 مصروف) = 200 فائضاً حتى الآن.
-step('المتبقي = دخل − كل شي', panel.remaining === 200, `${panel.remaining} ₪`)
+// ميزانية الخطة: 4,333.33 − 1,400 = 2,933.33، والباقي بعد المصروف 600.
+step('ميزانية الصرف من الخطة', panel.spendingBudget === 2933.33, `${panel.spendingBudget} ₪`)
+step('المتبقي = الميزانية − المصروف', panel.remaining === 2333.33, `${panel.remaining} ₪`)
 step('ولا تجاوز ما دام فائضاً', panel.isOverspent === false)
 
 /*
- * 6) الإسقاط: هنا تكمن قيمة اللوحة.
- *
- * الرصيد اليوم موجب (200) والوتيرة تقول إن الشهر سينتهي بعجز: 600 في عشرة
- * أيام تعني 1,800 في ثلاثين، فيصير 2,200 − 1,400 − 1,800 = −1,000. وهذا
- * بالضبط ما لا يراه من ينظر إلى رصيده وحده.
+ * 6) الإسقاط يمدّ الصرف وحده: 600 في عشرة أيام تعني 1,800 في ثلاثين،
+ * فيصير 2,933.33 − 1,800 = 1,133.33 — ولا يدخل فيه دخلٌ لم يصل، فتحذير
+ * «بوتيرة صرفك» يتّهم الصرفَ وحده. (ش4)
  */
-step('الإسقاط يمدّ الوتيرة', panel.projectedRemaining === -1000, `${panel.projectedRemaining} ₪`)
-step('والتحذير مُعلَن قبل وقوعه', panel.projectedIsOverspent === true)
+step('الإسقاط يمدّ الوتيرة', panel.projectedRemaining === 1133.33, `${panel.projectedRemaining} ₪`)
+step('ولا إنذار كاذب من فجوة الدخل', panel.projectedIsOverspent === false)
 // خاصيّة في الدالّة نفسها لا في أرقام هذه التجربة: المتجاوز لا يُمنَح مصروفاً.
 step('مصروف اليوم صفر لمن تجاوز', dailyAllowance(-500, 10, 30) === 0)
 
-// 7) اللوحة بلا دخل مسجّل تقع على المقدَّر.
-const noLog = buildMonthPanel({
-  expectedIncome: 9000,
-  receivedIncome: 0,
+// 7) من لا مصادر ثابتة له يُحسب بالواصل — بتصريح، لا خلسة.
+const looseOnly = buildMonthPanel({
+  expectedIncome: 0,
+  receivedIncome: 2500,
   obligationInstallments: 0,
   recurringBills: 0,
   installments: 0,
@@ -146,7 +153,10 @@ const noLog = buildMonthPanel({
   daysElapsed: 1,
   daysInMonth: 31,
 })
-step('بلا تسجيل: المقدَّر هو المرجع', !noLog.incomeIsActual && noLog.income === 9000)
+step(
+  'بلا مصادر ثابتة: الواصل هو الأساس',
+  looseOnly.incomeBasis === 'received' && looseOnly.income === 2500,
+)
 
 // 8) عزل RLS.
 await supabase.auth.signOut()

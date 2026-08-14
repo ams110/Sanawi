@@ -12,8 +12,6 @@ import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligati
 import {
   monthlyEquivalent,
   monthlyIncomeFrom,
-  summarizeMonth,
-  type MonthlySummary,
 } from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad } from '../src/lib/commitments/calc.js'
@@ -280,8 +278,9 @@ export async function loadMoneyItems({ db }: Connection): Promise<MoneyItems> {
 }
 
 export interface MonthPicture {
-  summary: MonthlySummary
   panel: MonthPanel
+  /** مجموع أقساط الالتزامات — مُدخَل اللوحة نفسه، مكشوفاً للتقارير. */
+  obligationsTotal: number
   obligations: ObligationView[]
   money: MoneyItems
   savingsTarget: number
@@ -316,9 +315,10 @@ export interface MonthPicture {
  * بالشيكل ويعرف أيَّ بندٍ انتهى قسطه، والثاني يعطي المبلغ الكامل لكل بندٍ
  * حيّاً كان أو ميتاً. أيُّ اختصارٍ هنا يجعل كلود يقول رقماً غير الذي على الشاشة.
  *
- * ويبقى `summarizeMonth` محسوباً بجانبها: هو التقدير الثابت (دخلٌ متوقَّع ناقص
- * ما يجب أن يخرج)، واللوحة هي الواقع (دخلٌ وصل ناقص ما خرج فعلاً). الرقمان
- * مختلفان عن قصد، والفرق بينهما هو أهمّ ما يراه من دخلُه متغيّر.
+ * ولوحةٌ واحدة لا لوحتان: كان `summarizeMonth` يُحسب بجانبها بفرضيات أخرى
+ * (دخل متوقَّع دائماً وفواتير كاملة لا حصّتي) فيقول كلود والشاشة رقمين
+ * لسؤالٍ واحد. حُذف في تصليح تدقيق آب 2026 (ش1، ش5) — الخطة والواقع
+ * صارا حقلين مصرَّحين في اللوحة نفسها.
  */
 export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   const month = monthKey()
@@ -422,24 +422,6 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     })),
   ]
 
-  /*
-   * التقدير يرى ما تراه اللوحة من بنود.
-   *
-   * كان يجمع مبالغ `fixed_commitments` الخام، فيحمّل الشهرَ قسطاً انتهى
-   * وقسطاً لم يبدأ — وهما بالضبط ما تستثنيه `summarizeMonthlyLoad` من اللوحة.
-   * فيخرج الرقمان مختلفين لا لأنهما يقيسان شيئين مختلفين (وهو الفرق المقصود
-   * بين التقدير والواقع) بل لأن أحدهما يعدّ بنوداً لا دفعة لها هذا الشهر.
-   *
-   * والمبلغ هنا كامل لا حصّتي: هذا عقد `summarizeMonth` منذ البداية.
-   */
-  const activeThisMonth = details.filter((d) => {
-    const view = viewCommitment(
-      { amount: Number(d.amount), startsOn: d.starts_on, endsOn: d.ends_on, mySharePercent: 100 },
-      today,
-    )
-    return view.hasStarted && !view.isFinished
-  })
-
   const depositsByObligation = new Map<string, FundDeposit[]>()
   for (const d of deposits) {
     const list = depositsByObligation.get(d.obligation_id) ?? []
@@ -447,10 +429,15 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     depositsByObligation.set(d.obligation_id, list)
   }
 
-  const receivedBySource = new Map<string, number>()
+  // بالمبلغ وبالعدد معاً — نفس مُدخَلات الشاشة حرفياً: الاكتمال يُقاس
+  // بالمبلغ، والمتغيّر الذي لا مبلغ له يبقى على العدّ. (تدقيق آب 2026: ش12)
+  const receivedCountBySource = new Map<string, number>()
   for (const entry of entries) {
     if (!entry.source_id) continue
-    receivedBySource.set(entry.source_id, (receivedBySource.get(entry.source_id) ?? 0) + 1)
+    receivedCountBySource.set(
+      entry.source_id,
+      (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
+    )
   }
   const recordedBills = new Set(bills.map((b) => b.commitment_id))
 
@@ -476,7 +463,8 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
       amount: Number(i.amount),
       frequency: i.frequency as IncomeFrequency,
       isVariable: Boolean(i.is_variable),
-      receivedCount: receivedBySource.get(i.id) ?? 0,
+      receivedAmount: receivedBySourceId.get(i.id) ?? 0,
+      receivedCount: receivedCountBySource.get(i.id) ?? 0,
     })),
     bills: details.map((d) => {
       const view = viewCommitment(
@@ -502,12 +490,7 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
 
   return {
     pending,
-    summary: summarizeMonth({
-      incomes,
-      fixedCommitments: activeThisMonth.map((c) => Number(c.amount)),
-      obligationInstallments: obligations.map((o) => o.calc.monthlyInstallment),
-      monthlySavingsTarget: savingsTarget,
-    }),
+    obligationsTotal: Math.round(obligationsTotal * 100) / 100,
     panel: buildMonthPanel({
       expectedIncome,
       receivedIncome,

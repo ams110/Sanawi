@@ -245,6 +245,8 @@ export const ar = {
    */
   pending: {
     title: 'ضلّ عليك {{count}} إشي هالشهر',
+    /* الدخل قائمة ثانية: مصاري جايتك مش «عليك». */
+    incomeTitle: 'بتستنّى دخل ({{count}})',
     clear: 'كل اللي عليك هالشهر انسجّل ✓',
     do: 'حطّه',
     open: 'افتحها',
@@ -252,9 +254,10 @@ export const ar = {
     more: 'وفي {{count}} كمان',
     noteInstallment: 'قسطك الشهري',
     noteOverdue: '⚠️ فات موعده',
+    notePartialDeposit: 'حطّيت {{done}} من {{total}} — هاد الباقي',
     noteVariable: 'دخل متغيّر — سجّل اللي وصلك',
     noteExpected: 'متوقّع من مصدر دخلك',
-    notePartial: 'سجّلت {{done}} من {{total}}',
+    notePartial: 'وصل {{received}} من {{expected}}',
     noteDueToday: 'موعدها اليوم',
     noteDueIn: 'بعد {{days}} يوم',
     noteDuePassed: 'فات موعدها من {{days}} يوم',
@@ -317,7 +320,6 @@ export const ar = {
     screenTitle: 'لوحة الشهر',
     screenSubtitle: 'شو لازم يطلع، شو وصل، وقديش ضايل إلك',
     title: 'لازم يطلع من حسابك هالشهر',
-    availableLabel: 'بيضل معك للصرف',
     overBudget: 'دخلك ما بيكفّي التزاماتك هالشهر',
     overBudgetHint: 'نقّص الادخار أو أجّل التزام — الأرقام مش بتكذب.',
     noIncome: 'ضيف دخلك عشان نحسبلك المتاح',
@@ -737,11 +739,16 @@ export const ar = {
   },
 
   panel: {
-    title: 'اللي بيدك هالشهر',
-    incomeActual: 'دخلك اللي وصل',
+    /*
+     * العالمان مصرَّحان (قاعدة CLAUDE.md الثانية): الرقم الكبير من الخطة —
+     * المتوقّع ناقص الملتزَم ناقص المصروف — والواصل سطرُ تقدّمٍ تحته.
+     * كان الأساس ينقلب للواصل بأول قبضة فيتناقض مع بطاقة «بيضل معك». (ش1–ش3)
+     */
+    title: 'بيضل معك للصرف هالشهر',
     incomeExpected: 'دخلك المتوقّع',
-    incomeNotLogged: 'ما سجّلت دخل هالشهر — بنحسب بالمتوقّع',
-    incomeBelow: 'أقل من المعتاد بـ {{amount}}',
+    incomeReceived: 'دخلك اللي وصل',
+    incomeProgress: 'وصل منه {{amount}} لحد اليوم',
+    incomeBasisReceived: 'ما في مصادر دخل ثابتة — بنحسب باللي وصل فعلاً',
     incomeAbove: 'أعلى من المعتاد بـ {{amount}}',
     committed: 'ملتزم فيه',
     spent: 'صرفته',
