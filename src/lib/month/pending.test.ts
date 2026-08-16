@@ -20,10 +20,6 @@ const obligation = (over: Partial<PendingObligationInput>): PendingObligationInp
 const income = (over: Partial<PendingIncomeInput>): PendingIncomeInput => ({
   id: 'i1',
   name: 'راتب',
-  amount: 9000,
-  frequency: 'monthly',
-  isVariable: false,
-  receivedAmount: 0,
   receivedCount: 0,
   ...over,
 })
@@ -134,76 +130,53 @@ describe('ما زال عليك هذا الشهر', () => {
   })
 })
 
-describe('الدخل — قائمةٌ ثانية لا سطرٌ في «عليك»', () => {
+describe('الدخل — تذكيرٌ بالتسجيل لا مطالبةٌ برقم', () => {
   // «ضلّ عليك» تعني ما يخرج منك، والدخل يدخل إليك. (ش6)
   it('الدخل في incomeItems لا في items', () => {
     const r = run({ incomes: [income({})] })
     expect(r.items).toHaveLength(0)
     expect(r.incomeItems).toHaveLength(1)
-    expect(r.incomeItems[0]).toMatchObject({ kind: 'income', amount: 9000 })
+    expect(r.incomeItems[0]).toMatchObject({ kind: 'income', amount: null, isCertain: false })
     expect(r.isClear).toBe(false)
   })
 
-  // «قسطك الشهري» تخصّ الصندوق: الدخل يأتي إليك ولا تدفعه لنفسك.
-  it('سطر الدخل لا يقول «قسطك»', () => {
-    expect(run({ incomes: [income({})] }).incomeItems[0]!.note).toEqual({ type: 'expected' })
-  })
-
-  it('والذي وصل مبلغُه كاملاً يسقط', () => {
-    expect(
-      run({ incomes: [income({ receivedAmount: 9000, receivedCount: 1 })] }).incomeItems,
-    ).toHaveLength(0)
-  })
-
   /*
-   * الاكتمال بالمبلغ لا بعدد القيود (ش12): قيدٌ واحد بنصف الراتب كان
-   * يُسقط السطر «اكتمل» واللوحة تعرض فجوة النصف — تناقضٌ على شاشة واحدة.
-   */
-  it('قيدٌ واحد بنصف الراتب نصفُ اكتمال لا اكتمال', () => {
-    const r = run({ incomes: [income({ receivedAmount: 4500, receivedCount: 1 })] })
-    expect(r.incomeItems).toHaveLength(1)
-    expect(r.incomeItems[0]!.amount).toBe(4500)
-    expect(r.incomeItems[0]!.note).toEqual({ type: 'partial', received: 4500, expected: 9000 })
-  })
-
-  /*
-   * الأسبوعي بمكافئه الحقيقي 52/12 لا بأربعة (ش8): أربع دفعات من 1,000
-   * كانت «تُكمل» المصدر هنا بينما اللوحة تعرض «أقل من المعتاد بـ333» —
-   * تناقضٌ دائمٌ كلَّ شهر.
-   */
-  it('الأسبوعي يُقاس على 4.333 فلا يناقض اللوحة', () => {
-    const r = run({
-      incomes: [income({ frequency: 'weekly', amount: 1000, receivedAmount: 4000, receivedCount: 4 })],
-    })
-    expect(r.incomeItems).toHaveLength(1)
-    expect(r.incomeItems[0]!.amount).toBe(333.33) // ‏4333.33 − 4000
-  })
-
-  it('ويسقط حين يصل مكافئه الشهري', () => {
-    expect(
-      run({
-        incomes: [
-          income({ frequency: 'weekly', amount: 1000, receivedAmount: 4333.33, receivedCount: 5 }),
-        ],
-      }).incomeItems,
-    ).toHaveLength(0)
-  })
-
-  /*
-   * الدخل المتغيّر يُذكَّر به بلا رقم.
+   * بلا مبلغ — وهذا هو التغيير.
    *
-   * اختراع رقمٍ له هو بالضبط ما جعل «الدخل المتوقَّع» يكذب قبل أن يُضاف
-   * `is_variable` — فلا يُعاد هنا من باب القائمة. ويبقى على العدّ إذ لا
-   * مبلغ يُقاس عليه.
+   * كان السطر يقول «بتستنّى من ادم 2,500» ورقمُه من الدخل المتوقَّع الذي
+   * أُلغي (خطة docs/income-actual-plan.md). لا نقول كم ننتظر لأننا لا نعلمه؛
+   * نقول ما نعلمه: هذا المصدر لم يُسجَّل منه شيءٌ بعد.
    */
-  it('المتغيّر بلا رقم ويسقط بالعدّ', () => {
-    const r = run({ incomes: [income({ isVariable: true, amount: 0 })] })
+  it('لا يخترع رقماً لما لم يصل', () => {
+    const r = run({ incomes: [income({})] })
     expect(r.incomeItems[0]!.amount).toBe(null)
-    expect(r.incomeItems[0]!.isCertain).toBe(false)
-    expect(r.incomeItems[0]!.note).toEqual({ type: 'variable' })
-    expect(
-      run({ incomes: [income({ isVariable: true, amount: 0, receivedCount: 1 })] }).incomeItems,
-    ).toHaveLength(0)
+    expect(r.incomeItems[0]!.note).toEqual({ type: 'unrecorded' })
+  })
+
+  it('مصدرٌ سُجّل منه قيدٌ واحد يسقط من التذكير', () => {
+    expect(run({ incomes: [income({ receivedCount: 1 })] }).incomeItems).toHaveLength(0)
+  })
+
+  /*
+   * ولا يعود «الاكتمال بالمبلغ»: قيدٌ بنصف الراتب يُسقط السطر الآن عن قصد.
+   * السؤال صار «هل سجّلت؟» لا «هل اكتمل المتوقَّع؟» — ومن قبض على دفعتين
+   * يعرف أنه قبض، ولا يحتاج التطبيق ليقيس له نقصاً عن رقمٍ مخترَع.
+   */
+  it('نصف الراتب تسجيلٌ كامل للسؤال الجديد', () => {
+    expect(run({ incomes: [income({ receivedCount: 1 })] }).incomeItems).toHaveLength(0)
+  })
+
+  it('كل المصادر غير المسجَّلة تُذكَّر، مرتّبةً بالاسم', () => {
+    const r = run({
+      incomes: [income({ id: 'b', name: 'شغل جانبي' }), income({ id: 'a', name: 'راتب' })],
+    })
+    expect(r.incomeItems.map((i) => i.name)).toEqual(['راتب', 'شغل جانبي'])
+  })
+
+  // الدخل خارج `pendingTotal`: قائمةٌ تدخل إليك لا تخرج منك.
+  it('التذكير لا يدخل مجموع ما عليك', () => {
+    const r = run({ incomes: [income({})], obligations: [obligation({ monthlyInstallment: 500 })] })
+    expect(r.pendingTotal).toBe(500)
   })
 })
 

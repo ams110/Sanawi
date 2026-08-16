@@ -13,7 +13,11 @@
  * ٢. **ثم أقساط الشهر.** الصناديق التي لم تستلم قسطها هي سبب وجود التطبيق —
  *    والقبضة الواصلة هي مصدر تمويلها الطبيعي.
  * ٣. **ثم صحّة الأرقام نفسها**: رصيدٌ قديم يجعل كل ما فوقه تخميناً.
- * ٤. **ثم التحذير المبكر**: إسقاط آخر الشهر، وما لم يصل من الدخل المتوقَّع.
+ * ٤. **ثم التحذير المبكر**: إسقاط آخر الشهر بوتيرة الصرف الحالية.
+ *
+ * وسطر «فجوة الدخل» حُذف مع الدخل المتوقَّع (خطة `docs/income-actual-plan.md`):
+ * لا فجوةَ بلا رقمٍ تُقاس عليه، وقولُ «ما زال من دخلك 2,500 لم يصل» يفترض
+ * علماً بما سيصل — وهو العلم المخترَع الذي أُلغيت الميزة كلها لأجله.
  *
  * والبنية بلا نصّ عمداً — كالقاعدة في `pending.ts`: المحرّك يُخرج أنواعاً
  * وأرقاماً، وكلُّ واجهةٍ (خادم كلود اليوم، شاشةٌ غداً) تصوغ جملتها بلغتها.
@@ -35,10 +39,6 @@ export interface IncomeAdviceInput {
   /** أقساط صناديق لم تُودَع هذا الشهر — من `pendingThisMonth`. */
   pendingInstallments: readonly { name: string; amount: number }[]
   accounts: readonly AdviceAccountInput[]
-  /** المتوقَّع شهرياً من المصادر الثابتة. */
-  expectedIncome: number
-  /** ما وصل هذا الشهر شاملاً هذه القبضة. */
-  receivedIncome: number
   /** إسقاط آخر الشهر من اللوحة الموحّدة. */
   projectedRemaining: number
   projectedIsOverspent: boolean
@@ -58,8 +58,6 @@ export type IncomeAdviceItem =
   | { kind: 'stale_balance'; accountName: string; days: number | null }
   /** بوتيرة الصرف الحالية ينتهي الشهر بعجزٍ بهذا المقدار. */
   | { kind: 'projection_negative'; amount: number }
-  /** المتبقّي من الدخل المتوقَّع الذي لم يصل بعد. */
-  | { kind: 'income_gap'; amount: number }
   /** لا عجز ولا أقساط معلّقة — حالةٌ تستحقّ أن تُقال لا أن تُترك فراغاً. */
   | { kind: 'all_clear' }
 
@@ -116,14 +114,6 @@ export function adviseOnIncome(input: IncomeAdviceInput): IncomeAdviceItem[] {
   if (input.projectedIsOverspent) {
     items.push({ kind: 'projection_negative', amount: round2(Math.abs(input.projectedRemaining)) })
   }
-
-  /*
-   * الفجوة إخبارٌ لا عتاب: تُذكر فقط ما دام المتوقَّع لم يكتمل، لأن قارئها
-   * الطبيعي هو من يقبض على دفعات — «وصل الراتب وبقي الشغل الجانبي» — ولا
-   * تُذكر حين وصل أكثر من المتوقَّع: الزيادة بشرى لا نقصاً يُنبَّه عليه.
-   */
-  const gap = round2(input.expectedIncome - input.receivedIncome)
-  if (gap > 0) items.push({ kind: 'income_gap', amount: gap })
 
   if (items.length === 0) items.push({ kind: 'all_clear' })
 

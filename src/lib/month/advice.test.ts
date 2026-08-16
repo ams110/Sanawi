@@ -5,8 +5,6 @@ const base = (over: Partial<IncomeAdviceInput> = {}): IncomeAdviceInput => ({
   amount: 2500,
   pendingInstallments: [],
   accounts: [],
-  expectedIncome: 0,
-  receivedIncome: 2500,
   projectedRemaining: 1000,
   projectedIsOverspent: false,
   ...over,
@@ -82,17 +80,17 @@ describe('adviseOnIncome', () => {
     expect(items[0]).toEqual({ kind: 'projection_negative', amount: 3896.5 })
   })
 
-  it('فجوة الدخل تظهر ما دام المتوقَّع لم يكتمل', () => {
-    const items = adviseOnIncome(base({ expectedIncome: 10833.33, receivedIncome: 3200 }))
-    expect(items[0]).toEqual({ kind: 'income_gap', amount: 7633.33 })
-  })
-
-  it('من وصله أكثر من المتوقَّع لا يُنبَّه على فجوة', () => {
-    const items = adviseOnIncome(base({ expectedIncome: 9000, receivedIncome: 9400 }))
+  /*
+   * سطر «فجوة الدخل» حُذف مع الدخل المتوقَّع (خطة docs/income-actual-plan.md).
+   * لا فجوةَ بلا رقمٍ تُقاس عليه: «ما زال من دخلك 7,633 لم يصل» تفترض علماً
+   * بما سيصل — وهو العلم المخترَع الذي أُلغيت الميزة كلّها لأجله.
+   */
+  it('لا يُخترع نقصٌ لمن لم يُعِده أحد بشيء', () => {
+    const items = adviseOnIncome(base({ amount: 3200 }))
     expect(items).toEqual([{ kind: 'all_clear' }])
   })
 
-  it('الترتيب كاملاً: عجز، أقساط، رصيد قديم، إسقاط، فجوة', () => {
+  it('الترتيب كاملاً: عجز، أقساط، رصيد قديم، إسقاط', () => {
     const items = adviseOnIncome(
       base({
         amount: 700,
@@ -101,8 +99,6 @@ describe('adviseOnIncome', () => {
           account({ name: 'לאומי', balanceIsStale: true, daysSinceBalanceUpdate: 15 }),
         ],
         pendingInstallments: [{ name: 'إطارات', amount: 300 }],
-        expectedIncome: 10833.33,
-        receivedIncome: 700,
         projectedRemaining: -3896.5,
         projectedIsOverspent: true,
       }),
@@ -112,7 +108,6 @@ describe('adviseOnIncome', () => {
       'fund_installments',
       'stale_balance',
       'projection_negative',
-      'income_gap',
     ])
   })
 })

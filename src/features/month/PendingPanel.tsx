@@ -40,22 +40,15 @@ function NoteLine({ note }: { note: PendingNote }) {
               done: formatMoney(note.deposited),
               total: formatMoney(note.total),
             })
-          : note.type === 'variable'
-            ? t('pending.noteVariable')
-            : note.type === 'expected'
-              ? t('pending.noteExpected')
-              : note.type === 'partial'
-                ? t('pending.notePartial', {
-                    received: formatMoney(note.received),
-                    expected: formatMoney(note.expected),
-                  })
-                : note.type === 'average'
-                  ? t('pending.noteAverage', { amount: formatMoney(note.amount) })
-                  : note.days < 0
-                    ? t('pending.noteDuePassed', { days: Math.abs(note.days) })
-                    : note.days === 0
-                      ? t('pending.noteDueToday')
-                      : t('pending.noteDueIn', { days: note.days })
+          : note.type === 'unrecorded'
+            ? t('pending.noteUnrecorded')
+            : note.type === 'average'
+              ? t('pending.noteAverage', { amount: formatMoney(note.amount) })
+              : note.days < 0
+                ? t('pending.noteDuePassed', { days: Math.abs(note.days) })
+                : note.days === 0
+                  ? t('pending.noteDueToday')
+                  : t('pending.noteDueIn', { days: note.days })
 
   return <span className="text-[12px] text-text-muted">{text}</span>
 }

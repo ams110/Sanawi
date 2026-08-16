@@ -1,12 +1,12 @@
 /**
  * فحص المرحلة 4 على قاعدة حقيقية:
- * دخل فعلي → لوحة موحّدة تجمع كل المصادر → الإسقاط → RLS → تنظيف.
+ * دخل فعلي → لوحة موحّدة على الواصل → الإسقاط → RLS → تنظيف.
  *
  * التشغيل: npm run check:month
  */
 import { createClient } from '@supabase/supabase-js'
 import { buildMonthPanel, dailyAllowance } from '../src/lib/budget/month.ts'
-import { monthlyIncomeFrom } from '../src/lib/budget/calc.ts'
+import { monthActuals } from '../src/lib/month/actuals.ts'
 import { createReporter, readEnv, requireTables, rowsOf, signInTestAccount } from './lib/checks.mjs'
 
 const env = readEnv(import.meta.url)
@@ -24,7 +24,7 @@ const { creds, userId } = await signInTestAccount(supabase, import.meta.url, ste
 const today = new Date()
 const day = (n) => new Date(today.getFullYear(), today.getMonth(), n).toISOString().slice(0, 10)
 
-// 1) مصدر دخل مقدَّر أسبوعي — الاختبار الحاسم: × 4.333 لا × 4.
+// 1) مصدر دخل — اسمٌ للتصنيف لا رقمٌ يُحسب (خطة docs/income-actual-plan.md).
 const { data: source, error: srcErr } = await supabase
   .from('income_sources')
   .insert({ user_id: userId, name: 'شغل فحص', amount: 1000, frequency: 'weekly' })
@@ -32,34 +32,14 @@ const { data: source, error: srcErr } = await supabase
   .single()
 step('مصدر دخل أسبوعي', !srcErr && Boolean(source?.id), srcErr?.message ?? '')
 
-// 1ب) مصدر متغيّر — الشغل الجانبي الذي لا رقم ثابت له.
-//
-// هذا هو الفرق الذي يعيش من أجله العمود: مصدرٌ يظهر في القائمة ويستقبل
-// دفعات، ولا يدخل «المتوقَّع» بشيء. وبلا العمود كان صاحبه مضطراً لاختراع
-// رقم، فيتضخّم المتوقَّع ويصير «الباقي للصرف» وعداً لا يفي به الشهر.
+// 1ب) مصدر ثانٍ — كان «المتغيّر» يوماً، وصار كأي مصدر: اسمٌ تُنسَب إليه
+// القبضات. لم يعد ثمّة «متوقَّع» يُستثنى منه أحد.
 const { data: gig, error: gigErr } = await supabase
   .from('income_sources')
   .insert({ user_id: userId, name: 'شغل حرّ فحص', amount: 0, is_variable: true })
   .select()
   .single()
 step('مصدر متغيّر بلا مبلغ', !gigErr && gig?.is_variable === true, gigErr?.message ?? '')
-
-// المحرّك نفسه الذي تستعمله الشاشة والخادم — لا حساب موازٍ هنا.
-const sources = rowsOf(
-  await supabase.from('income_sources').select('*').eq('is_active', true),
-  'قراءة مصادر الدخل',
-  step,
-)
-if (!sources) finish()
-const expectedFromEngine = monthlyIncomeFrom(
-  sources.map((r) => ({
-    amount: Number(r.amount),
-    frequency: r.frequency,
-    isVariable: Boolean(r.is_variable),
-  })),
-)
-// ‏1000 × 52 ÷ 12 = 4333.33، والمتغيّر يضيف صفراً لا أكثر.
-step('المتغيّر خارج الدخل المتوقَّع', expectedFromEngine === 4333.33, `${expectedFromEngine} ₪`)
 
 // 2) دفعتا دخل وصلتا فعلاً.
 const { data: entries, error: entErr } = await supabase
@@ -102,60 +82,77 @@ if (!fetched) finish()
 const received = fetched.reduce((s, r) => s + Number(r.amount), 0)
 step('مجموع الدخل الواصل', received === 2200, `${received} ₪`)
 
-// 5) اللوحة الموحّدة: الأساس الخطة، والواصل تقدّمٌ لا انقلاب.
+// 5) اللوحة الموحّدة: الأساس هو الواصل، والطرفان من عالمٍ واحد.
 //
-// (تصليح تدقيق آب 2026 ش3: قبضةٌ واصلة كانت تقلب الأساس إلى «الواصل»
-// فتُقارن بدخل نصف شهرٍ التزاماتُ شهرٍ كامل.)
-const expected = 1000 * (52 / 12) // 4333.33
+// (خطة docs/income-actual-plan.md. وعطل ش3 لا يعود لأن الطرفين يُقلَبان
+// معاً: مالٌ وصل ناقصَ مالٍ خرج فعلاً — لا دخلُ نصف شهرٍ ناقصَ خطةِ شهر.)
+//
+// وما خرج فعلاً من محرّك التجهيز نفسه الذي تستعمله الشاشة وMCP: إيداعُ
+// الشريك ليس إيداعي، والفاتورة بحصّتي لا بمبلغها الكامل.
+const actuals = monthActuals({
+  obligations: [
+    {
+      deposits: [
+        { id: 'd1', amount: 500, depositDate: day(3), partnerId: null },
+        { id: 'd2', amount: 900, depositDate: day(4), partnerId: 'شريك' },
+      ],
+    },
+  ],
+  bills: [{ recordedAmount: 400, mySharePercent: 50 }],
+})
+step('إيداع الشريك خارج ما خرج مني', actuals.depositsPaid === 500, `${actuals.depositsPaid} ₪`)
+step('الفاتورة بحصّتي لا كاملةً', actuals.billsPaid === 200, `${actuals.billsPaid} ₪`)
+
 const panel = buildMonthPanel({
-  expectedIncome: Math.round(expected * 100) / 100,
   receivedIncome: received,
-  obligationInstallments: 500,
-  recurringBills: 400,
-  installments: 300,
+  depositsPaid: actuals.depositsPaid,
+  billsPaid: actuals.billsPaid,
   dailyExpenses: 600,
+  pendingCommitments: 300,
   savingsTarget: 200,
+  monthlyLoad: 1400,
   daysElapsed: 10,
   daysInMonth: 30,
 })
-step(
-  'الأساس الخطة رغم وصول قبضات',
-  panel.incomeBasis === 'expected' && panel.income === 4333.33,
-  `${panel.income} ₪`,
-)
-step('والواصل يُعرض تقدّماً', panel.receivedIncome === 2200, `${panel.receivedIncome} ₪`)
-step('الفجوة تكشف ما لم يصل بعد', panel.incomeGap === -2133.33, `${panel.incomeGap} ₪`)
-step('مجموع الملتزَم به', panel.committed === 1400, `${panel.committed} ₪`)
-// ميزانية الخطة: 4,333.33 − 1,400 = 2,933.33، والباقي بعد المصروف 600.
-step('ميزانية الصرف من الخطة', panel.spendingBudget === 2933.33, `${panel.spendingBudget} ₪`)
-step('المتبقي = الميزانية − المصروف', panel.remaining === 2333.33, `${panel.remaining} ₪`)
-step('ولا تجاوز ما دام فائضاً', panel.isOverspent === false)
+// وصل 2,200، وخرج 500 + 200 + 600 = 1,300 → بإيدك 900.
+step('ما خرج فعلاً', panel.paidOut === 1300, `${panel.paidOut} ₪`)
+step('بإيدك من دخل الشهر', panel.inHand === 900, `${panel.inHand} ₪`)
+// لسه عليه 300 قسطاً و200 ادخاراً → 500، والكفاية 900 − 500 = 400.
+step('لسه لازم يطلع', panel.stillDue === 500, `${panel.stillDue} ₪`)
+step('الكفاية بعد سداد ما عليه', panel.coverage === 400, `${panel.coverage} ₪`)
+step('ولا نقص ما دام فائضاً', panel.isShort === false && panel.shortfallCause === null)
 
 /*
  * 6) الإسقاط يمدّ الصرف وحده: 600 في عشرة أيام تعني 1,800 في ثلاثين،
- * فيصير 2,933.33 − 1,800 = 1,133.33 — ولا يدخل فيه دخلٌ لم يصل، فتحذير
- * «بوتيرة صرفك» يتّهم الصرفَ وحده. (ش4)
+ * فيصير 2,200 − 700 − 1,800 − 500 = −800. والدخل لا يُسقَط: مواعيد القبض
+ * ليست في البيانات، واختراع دخلٍ قادم يُسكت التحذير على ثقةٍ مخترَعة.
  */
-step('الإسقاط يمدّ الوتيرة', panel.projectedRemaining === 1133.33, `${panel.projectedRemaining} ₪`)
-step('ولا إنذار كاذب من فجوة الدخل', panel.projectedIsOverspent === false)
+step('الإسقاط يمدّ الوتيرة', panel.projectedCoverage === -800, `${panel.projectedCoverage} ₪`)
+step('وينذر بنقصٍ رغم أن الحالي موجب', panel.projectedIsShort === true)
 // خاصيّة في الدالّة نفسها لا في أرقام هذه التجربة: المتجاوز لا يُمنَح مصروفاً.
 step('مصروف اليوم صفر لمن تجاوز', dailyAllowance(-500, 10, 30) === 0)
 
-// 7) من لا مصادر ثابتة له يُحسب بالواصل — بتصريح، لا خلسة.
-const looseOnly = buildMonthPanel({
-  expectedIncome: 0,
-  receivedIncome: 2500,
-  obligationInstallments: 0,
-  recurringBills: 0,
-  installments: 0,
-  dailyExpenses: 0,
-  savingsTarget: 0,
-  daysElapsed: 1,
+/*
+ * 7) أول الشهر بلا دخل: الأحمر يسمّي سببه ولا يتّهم الصرف.
+ *
+ * هذا هو جوهر التصليح: من فتح التطبيق في الثالث وراتبه آخر الشهر كان
+ * يقرأ اتّهاماً لصرفه وهو لم يصرف شيئاً يُذكر.
+ */
+const startOfMonth = buildMonthPanel({
+  receivedIncome: 0,
+  depositsPaid: 0,
+  billsPaid: 0,
+  dailyExpenses: 155,
+  pendingCommitments: 1400,
+  savingsTarget: 200,
+  monthlyLoad: 1400,
+  daysElapsed: 3,
   daysInMonth: 31,
 })
 step(
-  'بلا مصادر ثابتة: الواصل هو الأساس',
-  looseOnly.incomeBasis === 'received' && looseOnly.income === 2500,
+  'أول الشهر: السبب أن الدخل لم يصل',
+  startOfMonth.isShort === true && startOfMonth.shortfallCause === 'no_income_yet',
+  `${startOfMonth.shortfallCause}`,
 )
 
 // 8) عزل RLS.

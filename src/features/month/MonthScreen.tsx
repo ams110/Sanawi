@@ -8,6 +8,7 @@ import { buildMonthPanel } from '@/lib/budget/month'
 import { listMonthDeposits, listObligations } from '@/features/obligations/api'
 import { listBills } from '@/features/bills/api'
 import { pendingThisMonth } from '@/lib/month/pending'
+import { monthActuals } from '@/lib/month/actuals'
 import { shareAmount, viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
 import { PendingPanel } from './PendingPanel'
 import { listIncomes } from '@/features/money/api'
@@ -18,7 +19,6 @@ import { listAccounts } from '@/features/accounts/api'
 import { envelopesByAccount, runwayDays, summarizeAccounts } from '@/lib/accounts/calc'
 import { summarizeExpenses } from '@/lib/expenses/calc'
 import { summarizeMonthlyLoad } from '@/lib/commitments/calc'
-import { monthlyIncomeFrom } from '@/lib/budget/calc'
 import type { MonthPanelInput } from '@/lib/budget/month'
 import { MonthPanel } from './MonthPanel'
 import { FundsPanel, type FundRowView, type FundsAccountView } from './FundsPanel'
@@ -90,44 +90,38 @@ export function MonthScreen() {
       depositsByObligation.set(d.obligation_id, list)
     }
 
-    // بالمبلغ وبالعدد معاً: الاكتمال يُقاس بالمبلغ (قيدٌ بنصف الراتب نصفُ
-    // اكتمال)، والمتغيّر الذي لا مبلغ له يبقى على العدّ.
-    const receivedAmountBySource = new Map<string, number>()
+    // الوجود وحده هو السؤال الآن: مصدرٌ سُجّل منه شيءٌ لا يُذكَّر به. وبلا
+    // دخلٍ متوقَّع لم يعد للمبالغ معنىً في هذه القائمة.
     const receivedCountBySource = new Map<string, number>()
     for (const entry of entries) {
       if (!entry.source_id) continue
-      receivedAmountBySource.set(
-        entry.source_id,
-        (receivedAmountBySource.get(entry.source_id) ?? 0) + Number(entry.amount),
-      )
       receivedCountBySource.set(
         entry.source_id,
         (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
       )
     }
 
-    const pending = pendingThisMonth({
-      obligations: obligations.map((o) => ({
-        id: o.obligation.id,
-        name: o.obligation.name,
-        monthlyInstallment: o.calc.monthlyInstallment,
-        isOverdue: o.calc.isOverdue,
-        deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
-          id: d.id,
-          amount: Number(d.amount),
-          depositDate: d.deposit_date,
-          createdAt: d.created_at,
-          partnerId: d.partner_id,
-          note: d.note,
-        })),
+    // مرّةً واحدة: قائمة «ضلّ عليك» و«ما خرج فعلاً» تقرآن نفس الصفوف.
+    const obligationDeposits = obligations.map((o) => ({
+      id: o.obligation.id,
+      name: o.obligation.name,
+      monthlyInstallment: o.calc.monthlyInstallment,
+      isOverdue: o.calc.isOverdue,
+      deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
+        id: d.id,
+        amount: Number(d.amount),
+        depositDate: d.deposit_date,
+        createdAt: d.created_at,
+        partnerId: d.partner_id,
+        note: d.note,
       })),
+    }))
+
+    const pending = pendingThisMonth({
+      obligations: obligationDeposits,
       incomes: incomes.map((i) => ({
         id: i.id,
         name: i.name,
-        amount: Number(i.amount),
-        frequency: i.frequency,
-        isVariable: Boolean(i.is_variable),
-        receivedAmount: receivedAmountBySource.get(i.id) ?? 0,
         receivedCount: receivedCountBySource.get(i.id) ?? 0,
       })),
       bills: bills.map((row) => {
@@ -171,20 +165,32 @@ export function MonthScreen() {
     )
     const spending = summarizeExpenses(toCalcRows(expenses), new Date(`${month}T00:00:00`))
 
+    /*
+     * ما خرج فعلاً — من محرّك التجهيز المشترك لا من حسبةٍ في المكوّن
+     * (قاعدتا 1 و3): إيداعُ الشريك ليس إيداعي، والفاتورة بحصّتي لا بمبلغها
+     * الكامل. نفس النداء يستعمله `mcp/data.ts`.
+     */
+    const actuals = monthActuals({
+      obligations: obligationDeposits,
+      bills: bills.map((row) => ({
+        recordedAmount: row.payment ? Number(row.payment.amount) : null,
+        mySharePercent: Number(row.commitment.my_share_percent ?? 100),
+      })),
+    })
+
     const panelInput: MonthPanelInput = {
-      expectedIncome: monthlyIncomeFrom(
-        incomes.map((i) => ({
-          amount: Number(i.amount),
-          frequency: i.frequency,
-          isVariable: Boolean(i.is_variable),
-        })),
-      ),
+      // ── واقع ──
       receivedIncome: sumIncomeEntries(entries),
-      obligationInstallments: Math.round(obligationsTotal * 100) / 100,
-      recurringBills: monthlyLoad.recurring,
-      installments: monthlyLoad.installments,
+      depositsPaid: actuals.depositsPaid,
+      billsPaid: actuals.billsPaid,
       dailyExpenses: spending.total,
+      // ── خطة، مصرَّحة ──
+      pendingCommitments: pending.pendingTotal,
       savingsTarget,
+      monthlyLoad: Math.round(
+        (obligationsTotal + monthlyLoad.recurring + monthlyLoad.installments + savingsTarget) * 100,
+      ) / 100,
+      // ── الزمن ──
       daysElapsed: spending.daysElapsed,
       daysInMonth: spending.daysInMonth,
     }
@@ -299,7 +305,7 @@ export function MonthScreen() {
       <section className="rounded-3xl border border-border bg-surface p-6 text-center">
         <p className="text-sm text-text-muted">{t('month.title')}</p>
         <p className="num mt-2 text-6xl font-bold leading-none text-brand">
-          {formatMoney(panel.committed)}
+          {formatMoney(panel.monthlyLoad)}
         </p>
       </section>
 

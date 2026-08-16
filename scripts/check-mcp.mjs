@@ -282,11 +282,12 @@ const sideGig = await call('sanawi_add_income', {
 expect('المتغيّر بلا تقدير شهري', sideGig?.monthly_equivalent, 0)
 expect('ومعلَّمٌ متغيّراً', sideGig?.is_variable, true)
 
-// ‏12,000 + 1,300 + صفرٌ من المتغيّر = 13,300. دخولُ المتغيّر كان سيضخّمه.
+// لا «متوقَّع» بعد اليوم (خطة docs/income-actual-plan.md): الأداة لا تُخرج
+// رقماً لدخلٍ لم يصل، لا للثابت ولا للمتغيّر.
 expect(
-  'المتغيّر خارج الدخل المتوقَّع',
-  (await call('sanawi_month_overview'))?.expected_income,
-  13300,
+  'لا حقل للدخل المتوقَّع في نظرة الشهر',
+  'expected_income' in ((await call('sanawi_month_overview')) ?? {}),
+  false,
 )
 
 // تعديل مصدر دخل وأرشفته — ما كان ممكناً إلا من الشاشة.
@@ -392,17 +393,17 @@ expect('باقٍ على الشريك', detail?.settlements[0]?.outstanding, 1900
 
 // ٥. رقم الشهر — اللوحة الموحّدة، نفس محرّك الشاشة
 const month = await call('sanawi_month_overview')
-// الأساس الخطة دائماً: 12000 + 300×52÷12.
-expect('الدخل المعتمد', month?.income, 13300)
-expect('والأساس الخطة', month?.income_basis, 'expected')
+// لا دخل مسجَّلاً بعد: الواصل صفر، والصفر حقيقةٌ لا فراغ.
+expect('الواصل صفر قبل أي قبضة', month?.received, 0)
 expect('هدف الادخار', month?.savings_target, 500)
 expect('مجموع الأقساط', month?.obligation_installments, 975) // ‏375 + 600
 expect('فواتير متكرّرة', month?.recurring_bills, 300)
 expect('أقساط تنتهي', month?.installments, 0)
-// ‏13300 − (975 + 300 + 0 + 500) = 11525، ولا مصاريف يومية بعد.
-expect('ميزانية الصرف', month?.spending_budget, 11525)
-expect('الباقي فعلاً', month?.remaining, 11525)
-expect('لا تجاوز', month?.is_overspent, false)
+// الحمل الشهري الكامل: 975 + 300 + 0 + 500 = 1,775 — خطةٌ مصرَّحة.
+expect('الحمل الشهري', month?.monthly_load, 1775)
+// ولم يصل شيء: النقص حقيقي، وسببه يُسمّى ولا يُتَّهم به الصرف.
+expect('نقصٌ بلا دخل', month?.is_short, true)
+expect('والسبب أن الدخل لم يصل', month?.shortfall_cause, 'no_income_yet')
 
 // دخلٌ فعليّ يقلب الرقم من تقدير إلى واقع — بالأداة لا بصفٍّ مدسوس.
 const received = await call('sanawi_record_income', {
@@ -414,29 +415,32 @@ expect('المبلغ كما سُجّل', received?.amount, 9000)
 expect('ورُبط بالمصدر المعرَّف', received?.source_name, 'راتب')
 expect('ومجموع الشهر', received?.month_total, 9000)
 // النصائح تصاحب كل قبضة، وتُحسب من الحالة لا تُخترع: لا حسابات بعدُ فلا
-// عجز ولا رصيد قديم، والفجوة هي المتوقَّع 13300 ناقص الواصل 9000.
+// عجز ولا رصيد قديم.
 expect('النصائح مرفقة', Array.isArray(received?.advice) && received.advice.length > 0, true)
 expect(
   'لا نصيحة عجز بلا حسابات',
   received?.advice.some((a) => a.kind === 'cover_shortfall'),
   false,
 )
+// «ما زال من دخلك المتوقَّع كذا لم يصل» حُذفت مع المتوقَّع نفسه: لا فجوةَ
+// بلا رقمٍ تُقاس عليه، وقولُها يفترض علماً بما سيصل.
 expect(
-  'فجوة الدخل محسوبة',
-  received?.advice.find((a) => a.kind === 'income_gap')?.amount,
-  4300,
+  'لا فجوة دخلٍ تُخترع',
+  received?.advice.some((a) => a.kind === 'income_gap'),
+  false,
 )
 
 /*
- * القبضة لا تقلب الأساس (تصليح ش3): الحسبة تبقى على الخطة، والواصل
- * يظهر تقدّماً — فلا يُقارن دخلُ نصف شهرٍ بالتزامات شهرٍ كامل.
+ * الأساس هو الواصل، والطرفان من عالمٍ واحد (خطة docs/income-actual-plan.md).
+ *
+ * وعطل ش3 لا يعود: القبضة ترفع `received` و`coverage` معاً لأن ما يُطرح
+ * منها هو ما خرج **فعلاً**، لا خطةُ شهرٍ كامل.
  */
 const actual = await call('sanawi_month_overview')
-expect('الأساس ما زال الخطة', actual?.income_basis, 'expected')
-expect('الدخل المعتمد لم يتغيّر', actual?.income, 13300)
-expect('والواصل يُعرض تقدّماً', actual?.received_income, 9000)
-expect('الفجوة عن المعتاد', actual?.income_gap, -4300)
-expect('والباقي ثابت على الخطة', actual?.remaining, 11525)
+expect('الواصل هو ما وصل', actual?.received, 9000)
+expect('ولا أساس ثانٍ يُعلَن', 'income_basis' in (actual ?? {}), false)
+expect('بإيدك = الواصل ناقص ما خرج فعلاً', actual?.in_hand, actual?.received - actual?.paid_out)
+expect('والكفاية = بإيدك ناقص ما زال عليك', actual?.coverage, actual?.in_hand - actual?.still_due)
 
 /*
  * القبضة على مصدرٍ مؤرشف تبقى مسمّاةً في التفصيل.
@@ -469,7 +473,7 @@ const withArchived = await call('sanawi_month_overview')
 const archivedRow = withArchived?.income_by_source?.find((r) => r.name === 'شغل قديم')
 expect('قبضة المصدر المؤرشف تبقى مسمّاةً في التفصيل', archivedRow?.amount, 700)
 expect('بلا توقُّعٍ مخترَع لها', archivedRow?.expected ?? null, null)
-expect('والمجموع الواصل يشملها', withArchived?.received_income, 9700)
+expect('والمجموع الواصل يشملها', withArchived?.received, 9700)
 fake.db.income_entries.splice(
   fake.db.income_entries.findIndex((e) => e.id === 'ent-archived'),
   1,
@@ -704,11 +708,11 @@ await expectError('sanawi_month_overview', {}, 'انتهت صلاحية الجل
 const oneOff = await call('sanawi_record_income', { amount: 400, source: 'عيدية' })
 expect('التسمية الحرّة تُحفظ', oneOff?.source_name, 'عيدية')
 expect('والمجموع يضمّها', oneOff?.month_total, 9400)
-// والنصيحة تلاحق الحالة: الفجوة نقصت بمقدار القبضة — 13300 ناقص 9400.
+// ولا فجوةَ تُخترع: لا رقم متوقَّع تُقاس عليه بعد إلغائه.
 expect(
-  'فجوة الدخل تتحدّث مع القبضة',
-  oneOff?.advice.find((a) => a.kind === 'income_gap')?.amount,
-  3900,
+  'لا فجوة دخلٍ مع القبضة',
+  oneOff?.advice.some((a) => a.kind === 'income_gap'),
+  false,
 )
 expect('ولم يُنشأ مصدر دائم', (await call('sanawi_list_reference', { kind: 'money' }))?.incomes.length, 2)
 
@@ -1010,16 +1014,16 @@ expect('بحدّها الأدنى', commitmentTemplates?.items?.[0]?.suggested_m
 
 /* ─── الإعدادات ─── */
 
-// هدف الادخار يدخل حساب الباقي، فالفرق هو ما يجب أن يظهر — لا رقمٌ مطلق
-// يتغيّر مع كل تعديل سابق في الفحص.
-const remainingBefore = (await call('sanawi_month_overview'))?.remaining
+// هدف الادخار يدخل «لسه لازم يطلع»، فالفرق هو ما يجب أن يظهر — لا رقمٌ
+// مطلق يتغيّر مع كل تعديل سابق في الفحص.
+const coverageBefore = (await call('sanawi_month_overview'))?.coverage
 
 const profile = await call('sanawi_update_profile', { monthly_savings_target: 800 })
 expect('هدف الادخار تبدّل', profile?.monthly_savings_target, 800)
 expect(
-  'والباقي نقص بالفرق تماماً',
-  (await call('sanawi_month_overview'))?.remaining,
-  Math.round((remainingBefore - 300) * 100) / 100,
+  'والكفاية نقصت بالفرق تماماً',
+  (await call('sanawi_month_overview'))?.coverage,
+  Math.round((coverageBefore - 300) * 100) / 100,
 )
 
 const renamed = await call('sanawi_update_profile', { display_name: 'أحمد' })
@@ -1428,7 +1432,8 @@ console.log('\n── النقل البعيد (HTTP) ──\n')
   await remote.callTool({ name: 'sanawi_add_income', arguments: { name: 'راتب', amount: 9000 } })
   const overview = await remote.callTool({ name: 'sanawi_month_overview', arguments: {} })
   if (overview.isError) fail(`HTTP: ${overview.content?.[0]?.text}`)
-  expect('الدخل عبر HTTP', overview.structuredContent?.income, 9000)
+  // مصدرٌ أُضيف بلا قبضة: الواصل صفر — الأداة لا تَعِد بمالٍ لم يصل.
+  expect('الواصل عبر HTTP', overview.structuredContent?.received, 0)
 
   // القراءة والكتابة تتعاقبان على نفس الحساب رغم أن كل رسالة خادمٌ جديد.
   await remote.callTool({
