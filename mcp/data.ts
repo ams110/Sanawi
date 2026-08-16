@@ -9,7 +9,7 @@
 
 import { calculateObligation, type ObligationCalcResult } from '../src/lib/obligations/calc.js'
 import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligations/calendar.js'
-import { monthlyEquivalent, sumReceived } from '../src/lib/budget/calc.js'
+import { sumReceived } from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { expenseMatchesCategory } from '../src/lib/budget/groupCost.js'
 import { essentialSpending } from '../src/lib/wealth/essentials.js'
@@ -41,7 +41,6 @@ import type {
   FixedCommitment,
   FundDeposit,
   IncomeEntry,
-  IncomeFrequency,
   IncomeSource,
   Obligation,
   ObligationBalance,
@@ -300,7 +299,7 @@ export interface MonthPicture {
    * 4,000» لا تقول إن الراتب وصل والشغل الجانبي لم يصل بعد، وهما حالتان
    * مختلفتان تماماً في آخر الشهر.
    */
-  incomeBySource: { name: string; amount: number; expected: number | null }[]
+  incomeBySource: { name: string; amount: number }[]
   /** الحمل الشهري مفصولاً: متكرّر بلا نهاية، وأقساط تنتهي. */
   load: MonthlyLoad
   /**
@@ -411,20 +410,14 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     ...money.incomes.map((source) => ({
       name: source.name,
       amount: Math.round((receivedBySourceId.get(source.id) ?? 0) * 100) / 100,
-      // المتغيّر بلا توقُّع — و`null` تقول ذلك، بينما صفرٌ يقول «توقّعنا لا شيء».
-      expected: source.is_variable
-        ? null
-        : monthlyEquivalent(Number(source.amount), source.frequency as IncomeFrequency),
     })),
     ...archivedReceivedIds.map((id) => ({
       name: archivedNames.get(id) ?? 'مصدر مؤرشف',
       amount: Math.round(receivedBySourceId.get(id)! * 100) / 100,
-      expected: null,
     })),
     ...[...receivedLoose].map(([name, amount]) => ({
       name,
       amount: Math.round(amount * 100) / 100,
-      expected: null,
     })),
   ]
 

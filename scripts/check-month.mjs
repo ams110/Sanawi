@@ -27,19 +27,21 @@ const day = (n) => new Date(today.getFullYear(), today.getMonth(), n).toISOStrin
 // 1) مصدر دخل — اسمٌ للتصنيف لا رقمٌ يُحسب (خطة docs/income-actual-plan.md).
 const { data: source, error: srcErr } = await supabase
   .from('income_sources')
-  .insert({ user_id: userId, name: 'شغل فحص', amount: 1000, frequency: 'weekly' })
+  .insert({ user_id: userId, name: 'شغل فحص' })
   .select()
   .single()
-step('مصدر دخل أسبوعي', !srcErr && Boolean(source?.id), srcErr?.message ?? '')
+// بلا `amount`: هجرة 0022 أرخت `not null` عنه، وهذا الفحص يمرّ على القاعدة
+// الحقيقية — فنجاحُه هنا هو الدليل أن الهجرة طُبّقت فعلاً.
+step('مصدر دخل باسمه وحده', !srcErr && Boolean(source?.id), srcErr?.message ?? '')
 
 // 1ب) مصدر ثانٍ — كان «المتغيّر» يوماً، وصار كأي مصدر: اسمٌ تُنسَب إليه
 // القبضات. لم يعد ثمّة «متوقَّع» يُستثنى منه أحد.
 const { data: gig, error: gigErr } = await supabase
   .from('income_sources')
-  .insert({ user_id: userId, name: 'شغل حرّ فحص', amount: 0, is_variable: true })
+  .insert({ user_id: userId, name: 'شغل حرّ فحص' })
   .select()
   .single()
-step('مصدر متغيّر بلا مبلغ', !gigErr && gig?.is_variable === true, gigErr?.message ?? '')
+step('ومصدر ثانٍ مثله', !gigErr && Boolean(gig?.id), gigErr?.message ?? '')
 
 // 2) دفعتا دخل وصلتا فعلاً.
 const { data: entries, error: entErr } = await supabase
@@ -52,7 +54,7 @@ const { data: entries, error: entErr } = await supabase
 step('تسجيل دفعتَي دخل', !entErr && entries?.length === 2, entErr?.message ?? '')
 step('دخل بلا مصدر مقبول', entries?.some((e) => e.source_id === null) === true)
 
-// والمتغيّر يدخل «ما وصل» رغم أنه خارج «المتوقَّع» — وهذا كل المقصود منه.
+// والمصدر الثاني يدخل «ما وصل» كأي مصدر — لا استثناء بعد اليوم.
 const { data: gigEntry, error: gigEntErr } = await supabase
   .from('income_entries')
   .insert({ user_id: userId, source_id: gig.id, amount: 700, received_at: day(7) })

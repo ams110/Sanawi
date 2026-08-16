@@ -85,13 +85,6 @@ export const STATUS_LABEL: Record<string, string> = {
   behind: 'متأخر',
 }
 
-/** دورية الدخل بالعربية — الإنجليزية في القوائم تُقرأ رمزاً لا معنًى. */
-export const CADENCE: Record<'monthly' | 'weekly' | 'biweekly', string> = {
-  monthly: 'شهرياً',
-  weekly: 'أسبوعياً',
-  biweekly: 'كل أسبوعين',
-}
-
 /** «سنوي» / «كل 3 شهور» / «مرة واحدة» — أوضح من رقم مجرّد. */
 export function recurrenceLabel(months: number): string {
   if (months <= 0) return 'مرة واحدة'

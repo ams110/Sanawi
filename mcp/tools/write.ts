@@ -14,7 +14,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { planPayment } from '../../src/lib/obligations/payment.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
-import { monthlyEquivalent, sumReceived } from '../../src/lib/budget/calc.js'
+import { sumReceived } from '../../src/lib/budget/calc.js'
 import { viewAccount } from '../../src/lib/accounts/calc.js'
 import { baselineInstallment } from '../../src/lib/obligations/calc.js'
 import { summarizeDeposits } from '../../src/lib/obligations/deposits.js'
@@ -29,7 +29,6 @@ import type {
   BillPayment,
   FixedCommitment,
   FundDeposit,
-  IncomeSource,
   Obligation,
   PartnerSettlement,
   Profile,
@@ -52,7 +51,6 @@ import {
   reservedByAccount,
 } from '../data.js'
 import {
-  CADENCE,
   guard,
   isoDate,
   longDate,
@@ -1123,38 +1121,26 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
     'sanawi_add_income',
     {
       title: 'إضافة مصدر دخل',
-      description: `يضيف مصدر دخل متكرّر متوقَّع. المصادر متعدّدة بطبيعتها: راتبٌ ثابت، وشغلٌ جانبي، وكلٌّ بدوريّته.
+      description: `يضيف **اسم** مصدر دخل — تصنيفاً تُنسَب إليه القبضات، لا تقديراً يُحسب.
 
-الدورية تُحوَّل إلى شهري بمعامل دقيق: أسبوعي × 4.333 ونصف شهري × 2.167 — لا × 4، وإلا ضاع راتب أسبوعين في السنة.
+المصادر متعدّدة بطبيعتها: راتبٌ ثابت، وشغلٌ جانبي، وهدايا. والاسم كلّ ما يلزم.
 
-**والدخل المتغيّر يُعلَّم متغيّراً** (is_variable): شغلٌ جانبي أو ساعاتٌ متغيّرة
-أو إكراميات لا تقدير ثابت لها، فلا تدخل «المتوقَّع» ولا يُخترع لها رقم — وتدخل
-«الواصل» عبر sanawi_record_income حين تصل فعلاً.
+**لا تسأل المستخدم عن مبلغ المصدر ولا عن دوريّته.** الدخل المتوقَّع أُلغي من
+التطبيق: كان يُحسب من مبلغٍ ووتيرة مكتوبين باليد (أسبوعي × 4.333) فيصف سنةً لا
+شهراً، ويُخرج الدخل المتغيّر من الحسبة. المبالغ تُسجَّل بـ sanawi_record_income
+حين تصل فعلاً — وهي وحدها ما يبني أرقام الشهر.
 
 المدخلات:
   - name (string): «راتب» مثلاً. سمِّ المصادر بأسماء لا يحوي أحدها الآخر
-  - amount (number): المبلغ في الدورة الواحدة، 0 أو أكثر. صفرٌ مقبول مع is_variable
-  - frequency ('monthly' | 'biweekly' | 'weekly'): افتراضياً 'monthly'
-  - is_variable (boolean): دخلٌ لا تقدير ثابت له، افتراضياً false
 
-المخرجات: id و name و amount و frequency و is_variable و monthly_equivalent.`,
+المخرجات: id و name.`,
       inputSchema: {
         name: z.string().min(1).max(80),
-        amount: z.number().min(0).describe('المبلغ في الدورة الواحدة'),
-        frequency: z.enum(['monthly', 'biweekly', 'weekly']).default('monthly'),
-        is_variable: z
-          .boolean()
-          .default(false)
-          .describe('دخلٌ لا تقدير ثابت له — يُحتسب حين يصل فقط'),
       },
       outputSchema: {
         currency: z.string(),
         id: z.string(),
         name: z.string(),
-        amount: z.number(),
-        frequency: z.string(),
-        is_variable: z.boolean(),
-        monthly_equivalent: z.number(),
       },
       annotations: WRITES,
     },
@@ -1165,37 +1151,23 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
         .insert({
           user_id: connection.userId,
           name: input.name.trim(),
-          amount: input.amount,
-          frequency: input.frequency,
-          is_variable: input.is_variable,
+          /*
+           * صفرٌ إرضاءً لعمودٍ موروث لا تقديراً: قيد `not null` قائمٌ في
+           * قواعد لم تُطبَّق عليها هجرة 0022 بعد، والصفر يمرّ من
+           * `check (amount >= 0)` قبلها وبعدها. ولا يقرؤه محرّك.
+           */
+          amount: 0,
           is_active: true,
         })
         .select()
         .single()
       if (error) throw error
 
-      // المعامل من محرّك الميزانية لا نسخةً منه هنا: نسختان تنحرفان بعد أول
-      // تعديل، ويصير الرقم الذي يقوله كلود غير الذي على الشاشة.
-      const monthly = monthlyEquivalent(input.amount, input.frequency)
-      const currency = connection.currency
-
-      return ok(
-        `أُضيف مصدر دخل **${input.name}**: ${money(input.amount, currency)} ${CADENCE[input.frequency]}` +
-          (input.is_variable
-            ? '.\nمتغيّر — لا يدخل الدخل المتوقَّع، ويُحتسب حين تسجّله بـ sanawi_record_income.'
-            : input.frequency === 'monthly'
-              ? '.'
-              : ` = ${money(monthly, currency)} شهرياً.`),
-        {
-          currency,
-          id: data.id,
-          name: data.name,
-          amount: Number(data.amount),
-          frequency: data.frequency,
-          is_variable: Boolean(data.is_variable),
-          monthly_equivalent: input.is_variable ? 0 : monthly,
-        },
-      )
+      return ok(`أُضيف مصدر دخل **${input.name}**. سجّل ما يصل منه بـ sanawi_record_income.`, {
+        currency: connection.currency,
+        id: data.id,
+        name: data.name,
+      })
     }),
   )
 
@@ -1600,31 +1572,25 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
   server.registerTool(
     'sanawi_update_income',
     {
-      title: 'تعديل مصدر دخل',
-      description: `يعدّل مصدر دخل قائم: المبلغ أو الدورية أو الاسم أو كونه متغيّراً.
+      title: 'إعادة تسمية مصدر دخل',
+      description: `يغيّر **اسم** مصدر دخل قائم — وهو كلّ ما يحمله المصدر.
 
-ما لا يُرسَل لا يُمسّ. ولتسجيل مبلغٍ **وصل** استعمل sanawi_record_income — هذه الأداة تعدّل التقدير لا الواقع.
+المصادر أسماءٌ للتصنيف بعد إلغاء الدخل المتوقَّع، فلا مبلغ فيها ولا دورية.
+ولتسجيل مبلغٍ **وصل** استعمل sanawi_record_income.
 
 المدخلات:
-  - source (string): المعرّف أو الاسم — مطلوب
-  - name · amount · frequency · is_variable: كلها اختيارية
+  - source (string): المعرّف أو الاسم الحالي — مطلوب
+  - name (string): الاسم الجديد — مطلوب
 
-المخرجات: id و name و amount و frequency و is_variable و monthly_equivalent.`,
+المخرجات: id و name.`,
       inputSchema: {
-        source: z.string().min(1).describe('معرّف المصدر أو اسمه'),
-        name: z.string().min(1).max(80).optional(),
-        amount: z.number().min(0).optional().describe('المبلغ في الدورة الواحدة'),
-        frequency: z.enum(['monthly', 'biweekly', 'weekly']).optional(),
-        is_variable: z.boolean().optional().describe('دخلٌ لا تقدير ثابت له'),
+        source: z.string().min(1).describe('معرّف المصدر أو اسمه الحالي'),
+        name: z.string().min(1).max(80).describe('الاسم الجديد'),
       },
       outputSchema: {
         currency: z.string(),
         id: z.string(),
         name: z.string(),
-        amount: z.number(),
-        frequency: z.string(),
-        is_variable: z.boolean(),
-        monthly_equivalent: z.number(),
       },
       annotations: WRITES,
     },
@@ -1632,45 +1598,18 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       const connection = await connect()
       const current = await findIncomeSource(connection, input.source)
 
-      const patch: Partial<IncomeSource> = {}
-      if (input.name !== undefined) patch.name = input.name.trim()
-      if (input.amount !== undefined) patch.amount = input.amount
-      if (input.frequency !== undefined) patch.frequency = input.frequency
-      if (input.is_variable !== undefined) patch.is_variable = input.is_variable
-
-      if (Object.keys(patch).length === 0) {
-        throw new Error('لا حقل للتعديل — مرّر حقلاً واحداً على الأقل غير source.')
-      }
-
       const { error } = await connection.db
         .from('income_sources')
-        .update(patch)
+        .update({ name: input.name.trim() })
         .eq('id', current.id)
       if (error) throw error
 
       const updated = await findIncomeSource(connection, current.id)
-      const currency = connection.currency
-      const monthly = monthlyEquivalent(Number(updated.amount), updated.frequency)
-      const variable = Boolean(updated.is_variable)
-
-      return ok(
-        `عُدِّل مصدر الدخل **${updated.name}**: ${money(Number(updated.amount), currency)} ` +
-          CADENCE[updated.frequency] +
-          (variable
-            ? '.\nمتغيّر — لا يدخل الدخل المتوقَّع، ويُحتسب حين تسجّله بـ sanawi_record_income.'
-            : updated.frequency === 'monthly'
-              ? '.'
-              : ` = ${money(monthly, currency)} شهرياً.`),
-        {
-          currency,
-          id: updated.id,
-          name: updated.name,
-          amount: Number(updated.amount),
-          frequency: updated.frequency,
-          is_variable: variable,
-          monthly_equivalent: variable ? 0 : monthly,
-        },
-      )
+      return ok(`صار اسم المصدر **${updated.name}**.`, {
+        currency: connection.currency,
+        id: updated.id,
+        name: updated.name,
+      })
     }),
   )
 
@@ -1816,10 +1755,9 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
       title: 'تسجيل دخل وصل',
       description: `يسجّل دخلاً **وصل فعلاً**: «استلمت راتبي»، «إجا 500 شغل إضافي».
 
-الفرق عن sanawi_add_income جوهري: ذاك يعرّف مصدراً متكرّراً متوقَّعاً، وهذا
-يقيّد مبلغاً وصل في يوم بعينه. ولوحة الشهر تفضّل الفعلي على المتوقَّع متى وُجد،
-فالتسجيل هنا يحوّل «تقدير» إلى «واقع» — وهو ما يجعل الباقي للصرف رقماً يُعتمد
-عليه لا تخميناً.
+الفرق عن sanawi_add_income جوهري: ذاك يضيف **اسم** مصدر، وهذا يقيّد مبلغاً وصل
+في يوم بعينه. **وهذه الأداة وحدها هي التي تبني أرقام الشهر**: لوحة الشهر تُحسب
+على ما وصل فعلاً، فما لم يُسجَّل هنا لا يعرفه التطبيق ولا يدخل أيّ رقم.
 
 المدخلات:
   - amount (number): المبلغ الذي وصل، أكبر من صفر
@@ -1829,7 +1767,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
 
 المخرجات: id و amount و received_at و source_name، مع مجموع ما وصل هذا الشهر،
 و advice: نصائح مرتّبةً على حالة اللحظة — عجزٌ يُسدّ أولاً، ثم أقساط الشهر التي
-بلا إيداع، ثم رصيدٌ قديم، ثم تحذير الإسقاط وفجوة الدخل. اعرضها للمستخدم كما هي.`,
+بلا إيداع، ثم رصيدٌ قديم، ثم تحذير الإسقاط. اعرضها للمستخدم كما هي.`,
       inputSchema: {
         amount: z.number().positive().describe('المبلغ الذي وصل'),
         source: z.string().max(80).optional().describe('اسم المصدر كما ينطقه المستخدم'),

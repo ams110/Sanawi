@@ -260,40 +260,35 @@ const inMonths = (n) => {
 }
 
 // ١. الدخل والبنود الثابتة
-const income = await call('sanawi_add_income', { name: 'راتب', amount: 12000 })
-expect('الدخل الشهري', income?.monthly_equivalent, 12000)
+//
+// المصادر أسماءٌ للتصنيف: لا مبلغ ولا دورية ولا «متغيّر» (خطة
+// docs/income-actual-plan.md). والأرقام كلها من القبضات المسجَّلة.
+const income = await call('sanawi_add_income', { name: 'راتب' })
+expect('المصدر اسمٌ وحده', income?.name, 'راتب')
+expect('ولا مكافئ شهري معه', 'monthly_equivalent' in (income ?? {}), false)
 
-const weekly = await call('sanawi_add_income', { name: 'عمل إضافي', amount: 300, frequency: 'weekly' })
-// ‏300 × 52 ÷ 12 = 1300 — لا 1200. المعامل الخطأ يضيع أربعة رواتب في السنة.
-expect('تحويل الأسبوعي إلى شهري', weekly?.monthly_equivalent, 1300)
+// الاسم لا يحوي «عمل إضافي» ولا يُحوى فيه: المطابقة الضبابية في
+// record_income تُخطئ عند التداخل.
+await call('sanawi_add_income', { name: 'عمل إضافي' })
+await call('sanawi_add_income', { name: 'شغل حرّ' })
 
-/*
- * الدخل المتغيّر: مصدرٌ ظاهرٌ بلا تقدير.
- *
- * صاحب المصادر المتعددة — راتبٌ ثابت وشغلٌ جانبي — كان مضطراً لإعطاء
- * الجانبي رقماً ثابتاً فيتضخّم المتوقَّع. والاسم هنا لا يحوي «عمل إضافي»
- * ولا يُحوى فيه: المطابقة الضبابية في record_income تُخطئ عند التداخل.
- */
-const sideGig = await call('sanawi_add_income', {
-  name: 'شغل حرّ',
-  amount: 0,
-  is_variable: true,
-})
-expect('المتغيّر بلا تقدير شهري', sideGig?.monthly_equivalent, 0)
-expect('ومعلَّمٌ متغيّراً', sideGig?.is_variable, true)
+// المبلغ لم يعد في المخطَط، فمن يمرّره يُهمَل ولا يُكتب: لا رقم يتسلّل
+// إلى صفٍّ لا يقرؤه محرّك.
+const ignored = await call('sanawi_add_income', { name: 'وهم', amount: 500 })
+expect('المبلغ المُمرَّر يُهمَل', 'amount' in (ignored ?? {}), false)
+await call('sanawi_archive_income', { source: 'وهم' })
 
-// لا «متوقَّع» بعد اليوم (خطة docs/income-actual-plan.md): الأداة لا تُخرج
-// رقماً لدخلٍ لم يصل، لا للثابت ولا للمتغيّر.
+// لا «متوقَّع» بعد اليوم: الأداة لا تُخرج رقماً لدخلٍ لم يصل.
 expect(
   'لا حقل للدخل المتوقَّع في نظرة الشهر',
   'expected_income' in ((await call('sanawi_month_overview')) ?? {}),
   false,
 )
 
-// تعديل مصدر دخل وأرشفته — ما كان ممكناً إلا من الشاشة.
-const raised = await call('sanawi_update_income', { source: 'راتب', amount: 13000 })
-expect('التعديل يعيد الحساب', raised?.monthly_equivalent, 13000)
-await expectError('sanawi_update_income', { source: 'راتب' }, 'لا حقل للتعديل')
+// إعادة التسمية وحدها — وما عادت الأرقام تُمسّ من هنا.
+const renamedSource = await call('sanawi_update_income', { source: 'راتب', name: 'راتب الشركة' })
+expect('إعادة التسمية تمرّ', renamedSource?.name, 'راتب الشركة')
+await call('sanawi_update_income', { source: 'راتب الشركة', name: 'راتب' })
 
 const droppedGig = await call('sanawi_archive_income', { source: 'شغل حرّ' })
 expect('أُرشف المصدر', droppedGig?.archived, true)
@@ -302,9 +297,6 @@ expect(
   (await call('sanawi_archive_income', { source: 'شغل حرّ' }))?.archived,
   true,
 )
-
-// نعيد الراتب إلى 12,000 حتى تبقى الأرقام التالية كما بُنيت عليه.
-await call('sanawi_update_income', { source: 'راتب', amount: 12000 })
 
 await call('sanawi_add_fixed_commitment', { name: 'كهرباء', amount: 300, day_of_month: 10 })
 
@@ -472,7 +464,6 @@ fake.db.income_entries.push({
 const withArchived = await call('sanawi_month_overview')
 const archivedRow = withArchived?.income_by_source?.find((r) => r.name === 'شغل قديم')
 expect('قبضة المصدر المؤرشف تبقى مسمّاةً في التفصيل', archivedRow?.amount, 700)
-expect('بلا توقُّعٍ مخترَع لها', archivedRow?.expected ?? null, null)
 expect('والمجموع الواصل يشملها', withArchived?.received, 9700)
 fake.db.income_entries.splice(
   fake.db.income_entries.findIndex((e) => e.id === 'ent-archived'),
@@ -715,6 +706,14 @@ expect(
   false,
 )
 expect('ولم يُنشأ مصدر دائم', (await call('sanawi_list_reference', { kind: 'money' }))?.incomes.length, 2)
+// والمصادر أسماءٌ في القائمة: لا مبلغ ولا دورية تُغري بالبناء عليها.
+expect(
+  'قائمة المصادر أسماءٌ وحدها',
+  Object.keys(
+    (await call('sanawi_list_reference', { kind: 'money' }))?.incomes?.[0] ?? {},
+  ).sort().join(','),
+  'id,name',
+)
 
 /* ─── الشركاء ─── */
 
@@ -1429,7 +1428,7 @@ console.log('\n── النقل البعيد (HTTP) ──\n')
   const remoteTools = (await remote.listTools()).tools
   expect('عدد الأدوات عبر HTTP', remoteTools.length, tools.length)
 
-  await remote.callTool({ name: 'sanawi_add_income', arguments: { name: 'راتب', amount: 9000 } })
+  await remote.callTool({ name: 'sanawi_add_income', arguments: { name: 'راتب' } })
   const overview = await remote.callTool({ name: 'sanawi_month_overview', arguments: {} })
   if (overview.isError) fail(`HTTP: ${overview.content?.[0]?.text}`)
   // مصدرٌ أُضيف بلا قبضة: الواصل صفر — الأداة لا تَعِد بمالٍ لم يصل.

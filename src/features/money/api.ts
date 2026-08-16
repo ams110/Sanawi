@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase'
-import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
+import type { FixedCommitment, IncomeSource } from '@/lib/db/types'
 
 export async function listIncomes(): Promise<IncomeSource[]> {
   const { data, error } = await supabase
@@ -34,13 +34,21 @@ export async function listFixedCommitments(): Promise<FixedCommitment[]> {
   return (data ?? []) as FixedCommitment[]
 }
 
+/**
+ * مصدر دخل جديد — اسمٌ وحده.
+ *
+ * `amount: 0` ليس تقديراً بل إرضاءٌ لعمودٍ موروث: القيد `not null` قائمٌ في
+ * قواعد لم تُطبَّق عليها هجرة 0022 بعد، والصفر يمرّ من `check (amount >= 0)`
+ * قبل الهجرة وبعدها معاً. والعمود لا يقرؤه محرّك.
+ * ‏`frequency` له `default 'monthly'` في القاعدة فلا يُرسَل أصلاً.
+ */
 export async function addIncome(
   userId: string,
-  input: Pick<IncomeSource, 'name' | 'amount' | 'frequency'> & { is_variable?: boolean },
+  input: Pick<IncomeSource, 'name'>,
 ): Promise<IncomeSource> {
   const { data, error } = await supabase
     .from('income_sources')
-    .insert({ ...input, user_id: userId, is_active: true })
+    .insert({ ...input, amount: 0, user_id: userId, is_active: true })
     .select()
     .single()
   if (error) throw error
@@ -60,24 +68,18 @@ export async function addFixedCommitment(
   return data as FixedCommitment
 }
 
-/** الأرشفة بدل الحذف هنا أيضاً: تاريخ الدخل يفيد لاحقاً في المقارنة. */
-export async function updateIncomeSource(
-  id: string,
-  patch: {
-    name?: string
-    amount?: number
-    frequency?: IncomeFrequency
-    isVariable?: boolean
-  },
-): Promise<void> {
-  const row: Partial<IncomeSource> = {}
-  if (patch.name !== undefined) row.name = patch.name
-  if (patch.amount !== undefined) row.amount = patch.amount
-  if (patch.frequency !== undefined) row.frequency = patch.frequency
-  if (patch.isVariable !== undefined) row.is_variable = patch.isVariable
-
-  if (Object.keys(row).length === 0) return
-  const { error } = await supabase.from('income_sources').update(row).eq('id', id)
+/**
+ * الاسم وحده يُعدَّل — و`amount`/`frequency`/`is_variable` لم تعد تُكتب.
+ *
+ * الأرشفة بدل الحذف هنا أيضاً: القبضات القديمة مربوطةٌ بمصدرها، وحذفُه
+ * يجعلها بلا اسم.
+ */
+export async function updateIncomeSource(id: string, patch: { name?: string }): Promise<void> {
+  if (patch.name === undefined) return
+  const { error } = await supabase
+    .from('income_sources')
+    .update({ name: patch.name })
+    .eq('id', id)
   if (error) throw error
 }
 
