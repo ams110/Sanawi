@@ -12,7 +12,11 @@ import { monthActuals } from '@/lib/month/actuals'
 import { shareAmount, viewCommitment as viewBillCommitment } from '@/lib/commitments/calc'
 import { PendingPanel } from './PendingPanel'
 import { listIncomes } from '@/features/money/api'
-import { listIncomeEntries, sumIncomeEntries } from '@/features/money/income'
+import {
+  listIncomeEntries,
+  listRecentIncomeEntries,
+  sumIncomeEntries,
+} from '@/features/money/income'
 import { listCommitmentDetails } from '@/features/bills/commitments'
 import { listExpenses, monthKey, toCalcRows } from '@/features/expenses/api'
 import { listAccounts } from '@/features/accounts/api'
@@ -47,13 +51,25 @@ export function MonthScreen() {
     queryKey: ['month', monthKey()],
     queryFn: async () => {
       const month = monthKey()
-      const [obligations, incomes, details, expenses, entries, deposits, bills, accounts] =
-        await Promise.all([
+      const [
+        obligations,
+        incomes,
+        details,
+        expenses,
+        entries,
+        history,
+        deposits,
+        bills,
+        accounts,
+      ] = await Promise.all([
           listObligations(),
           listIncomes(),
           listCommitmentDetails(),
           listExpenses(month),
           listIncomeEntries(month),
+          // سجلّ اثني عشر شهراً — منه تُقرأ عادةُ كل مصدر في `cadence.ts`،
+          // فلا يُنبَّه على الربعيّ شهرين من كل ثلاثة.
+          listRecentIncomeEntries(12),
           listMonthDeposits(month),
           listBills(month),
           // المؤرشفة أيضاً: صندوقٌ مربوط بحسابٍ أُرشف يبقى اسمُ حسابه
@@ -61,7 +77,18 @@ export function MonthScreen() {
           // الموثَّقة في mcp/data.ts.
           listAccounts(true),
         ])
-      return { month, obligations, incomes, details, expenses, entries, deposits, bills, accounts }
+      return {
+        month,
+        obligations,
+        incomes,
+        details,
+        expenses,
+        entries,
+        history,
+        deposits,
+        bills,
+        accounts,
+      }
     },
   })
   const error = loadError ? failureText(loadError, t, t('money.loadFailed')) : null
@@ -74,7 +101,8 @@ export function MonthScreen() {
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
   const derived = useMemo(() => {
     if (!raw) return null
-    const { month, obligations, incomes, details, expenses, entries, deposits, bills, accounts } = raw
+    const { month, obligations, incomes, details, expenses, entries, history, deposits, bills, accounts } =
+      raw
 
     /*
      * «ضلّ عليك» — الشاشة تبدأ الكلام.
@@ -90,15 +118,14 @@ export function MonthScreen() {
       depositsByObligation.set(d.obligation_id, list)
     }
 
-    // الوجود وحده هو السؤال الآن: مصدرٌ سُجّل منه شيءٌ لا يُذكَّر به. وبلا
-    // دخلٍ متوقَّع لم يعد للمبالغ معنىً في هذه القائمة.
-    const receivedCountBySource = new Map<string, number>()
-    for (const entry of entries) {
+    // شهورُ كل مصدر من سجلّ سنة — لا عدد قيود الشهر الجاري: العادة تُقرأ
+    // من التاريخ، والمبالغ لم يعد لها معنىً في هذه القائمة.
+    const monthsBySource = new Map<string, string[]>()
+    for (const entry of history) {
       if (!entry.source_id) continue
-      receivedCountBySource.set(
-        entry.source_id,
-        (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
-      )
+      const list = monthsBySource.get(entry.source_id) ?? []
+      list.push(entry.received_at.slice(0, 7))
+      monthsBySource.set(entry.source_id, list)
     }
 
     // مرّةً واحدة: قائمة «ضلّ عليك» و«ما خرج فعلاً» تقرآن نفس الصفوف.
@@ -122,7 +149,7 @@ export function MonthScreen() {
       incomes: incomes.map((i) => ({
         id: i.id,
         name: i.name,
-        receivedCount: receivedCountBySource.get(i.id) ?? 0,
+        entryMonths: monthsBySource.get(i.id) ?? [],
       })),
       bills: bills.map((row) => {
         const view = viewBillCommitment({

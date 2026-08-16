@@ -331,14 +331,25 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   // آخر الشهر يقعان في شهرين مختلفين، فتختلف أرقام اللوحة عن بعضها.
   const today = new Date()
 
-  const [obligations, money, profile, details, expenseRows, entries, deposits, bills, averagesRes] =
-    await Promise.all([
+  const [
+    obligations,
+    money,
+    profile,
+    details,
+    expenseRows,
+    entries,
+    history,
+    deposits,
+    bills,
+    averagesRes,
+  ] = await Promise.all([
       loadObligations(connection),
       loadMoneyItems(connection),
       loadProfile(connection),
       loadCommitmentDetails(connection),
       loadMonthExpenses(connection, month),
       loadIncomeEntries(connection, month),
+      loadRecentIncomeEntries(connection, 12),
       loadMonthDeposits(connection, month),
       loadBillPayments(connection, month),
       // متوسّطات الفواتير لقائمة «ضلّ عليك» — الشاشة تمرّرها فيتطابق الاقتراح.
@@ -428,15 +439,14 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     depositsByObligation.set(d.obligation_id, list)
   }
 
-  // الوجود وحده هو السؤال — نفس مُدخَلات الشاشة حرفياً: مصدرٌ سُجّل منه
-  // شيءٌ لا يُذكَّر به، وبلا دخلٍ متوقَّع لم يعد للمبالغ معنىً هنا.
-  const receivedCountBySource = new Map<string, number>()
-  for (const entry of entries) {
+  // شهورُ كل مصدر من سجلّ سنة — نفس مُدخَلات الشاشة حرفياً: العادة تُقرأ
+  // من التاريخ في `cadence.ts`، لا من عدد قيود الشهر الجاري.
+  const monthsBySource = new Map<string, string[]>()
+  for (const entry of history) {
     if (!entry.source_id) continue
-    receivedCountBySource.set(
-      entry.source_id,
-      (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
-    )
+    const list = monthsBySource.get(entry.source_id) ?? []
+    list.push(entry.received_at.slice(0, 7))
+    monthsBySource.set(entry.source_id, list)
   }
   const recordedBills = new Map(bills.map((b) => [b.commitment_id, Number(b.amount)]))
 
@@ -462,7 +472,7 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     incomes: money.incomes.map((i) => ({
       id: i.id,
       name: i.name,
-      receivedCount: receivedCountBySource.get(i.id) ?? 0,
+      entryMonths: monthsBySource.get(i.id) ?? [],
     })),
     bills: details.map((d) => {
       const view = viewCommitment(
@@ -603,6 +613,27 @@ export async function loadMonthExpenses({ db }: Connection, month: string): Prom
     .order('spent_at', { ascending: false })
   if (error) throw error
   return (data ?? []) as Expense[]
+}
+
+/**
+ * قبضات آخر اثني عشر شهراً — منها تُقرأ عادةُ كل مصدر في `cadence.ts`.
+ *
+ * نفس نافذة `listRecentIncomeEntries` في الشاشة حرفياً: نافذتان مختلفتان
+ * تجعلان القائمة تُنبّه عند كلود ولا تُنبّه على الشاشة عن المصدر نفسه.
+ */
+export async function loadRecentIncomeEntries(
+  { db }: Connection,
+  monthsBack = 12,
+): Promise<IncomeEntry[]> {
+  const now = new Date()
+  const start = isoDate(new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1))
+  const { data, error } = await db
+    .from('income_entries')
+    .select('*')
+    .gte('received_at', start)
+    .order('received_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as IncomeEntry[]
 }
 
 export async function loadIncomeEntries({ db }: Connection, month: string): Promise<IncomeEntry[]> {
