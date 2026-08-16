@@ -70,15 +70,29 @@ function seed(db, userId) {
     note: null, created_at: new Date().toISOString(),
   })
   /*
-   * مصدرٌ بلا قبضة — يُشغّل قائمة «مصادر ما سجّلت منها» فعلاً.
+   * مصدرٌ عادتُه شهرية وتأخّر — يُشغّل قائمة «مصادر ما سجّلت منها» فعلاً.
    *
-   * بدونه كانت القائمة فارغةً في الطرفين فيمرّ فحصُها وهو لا يفحص شيئاً،
-   * وهو بالضبط نوع «الأخضر الكاذب» الذي وُلد هذا الملف ليمنعه.
+   * قبضتاه في الشهرين الماضيين ولا شيء هذا الشهر: هذا ما يُذكَّر به.
+   * ومصدرٌ بلا سجلٍّ أصلاً لا يُذكَّر به بعد `cadence.ts` — فلو بُذر فارغاً
+   * لبقيت القائمة خاويةً في الطرفين ومرّ فحصُها وهو لا يفحص شيئاً، وهو
+   * بالضبط نوع «الأخضر الكاذب» الذي وُلد هذا الملف ليمنعه.
    */
   db.income_sources.push({
     id: 'i2', user_id: userId, name: 'شغل جانبي', amount: 0, frequency: 'monthly',
     is_variable: true, is_active: true, created_at: new Date().toISOString(),
   })
+  const backThen = (monthsAgo, day) =>
+    iso(new Date(today.getFullYear(), today.getMonth() - monthsAgo, day))
+  db.income_entries.push(
+    {
+      id: 'in-gig-1', user_id: userId, source_id: 'i2', name: null, amount: 900,
+      received_at: backThen(1, 12), note: null, created_at: new Date().toISOString(),
+    },
+    {
+      id: 'in-gig-2', user_id: userId, source_id: 'i2', name: null, amount: 850,
+      received_at: backThen(2, 14), note: null, created_at: new Date().toISOString(),
+    },
+  )
 
   // فاتورة منصَّفة 400 بمتوسّطٍ 360 من فاتورة الشهر الماضي.
   db.fixed_commitments.push({

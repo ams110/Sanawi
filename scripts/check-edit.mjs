@@ -139,7 +139,7 @@ step('التاريخ لم يتغيّر بتعديل لم يشمله', expAfter.r
 // ── دفعة الدخل ──────────────────────────────────────────────────────────
 const { data: src } = await supabase
   .from('income_sources')
-  .insert({ user_id: userId, name: 'مصدر قبل', amount: 1000, frequency: 'weekly' })
+  .insert({ user_id: userId, name: 'مصدر قبل' })
   .select()
   .single()
 const { data: entry } = await supabase
@@ -156,26 +156,12 @@ const zeroed = await patchAndRead('income_entries', entry.id, { amount: 0 })
 step('التعديل لصفر مرفوض', Boolean(zeroed.error), zeroed.error ? 'مرفوض' : 'قُبل!')
 
 // ── مصدر الدخل ──────────────────────────────────────────────────────────
-const srcAfter = await patchAndRead('income_sources', src.id, {
-  name: 'مصدر بعد',
-  amount: 1200,
-  frequency: 'monthly',
-})
-step(
-  'تعديل مصدر الدخل وتكراره',
-  srcAfter.row?.name === 'مصدر بعد' && Number(srcAfter.row?.amount) === 1200 && srcAfter.row?.frequency === 'monthly',
-)
-
-const badFreq = await patchAndRead('income_sources', src.id, { frequency: 'daily' })
-step('تكرار غير مدعوم مرفوض', Boolean(badFreq.error), badFreq.error ? 'مرفوض' : 'قُبل!')
-
-// صفة التغيّر: تُرفع وتُنزَل، ولا يمسّها تعديلٌ جزئي لا يذكرها.
-const toVariable = await patchAndRead('income_sources', src.id, { is_variable: true })
-step('المصدر يصير متغيّراً', toVariable.row?.is_variable === true)
-const renamed = await patchAndRead('income_sources', src.id, { name: 'مصدر متغيّر' })
-step('والتعديل الجزئي لا يمسّ الصفة', renamed.row?.is_variable === true, `${renamed.row?.is_variable}`)
-const backToFixed = await patchAndRead('income_sources', src.id, { is_variable: false })
-step('وتُنزَل عنه', backToFixed.row?.is_variable === false)
+//
+// الاسم وحده يُعدَّل. كانت هنا فحوصٌ لـ`amount` و`frequency` و`is_variable`،
+// وقد صارت أعمدةً موروثة لا يكتبها التطبيق ولا يقرؤها محرّك (هجرة 0022) —
+// وفحصُ عمودٍ ميت يوحي بأنه حيّ.
+const srcAfter = await patchAndRead('income_sources', src.id, { name: 'مصدر بعد' })
+step('إعادة تسمية المصدر', srcAfter.row?.name === 'مصدر بعد', `${srcAfter.row?.name}`)
 
 // ── تنظيف ───────────────────────────────────────────────────────────────
 await supabase.from('income_entries').delete().eq('id', entry.id)

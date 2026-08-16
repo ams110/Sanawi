@@ -7,12 +7,11 @@ import { updateProfile } from '@/features/profile/api'
 import { formatMoney, formatMonthYear } from '@/lib/format'
 import { failureText } from '@/lib/i18n/failure'
 import { useAmount } from '@/features/record/amount'
-import { monthlyEquivalent, monthlyIncomeFrom } from '@/lib/budget/calc'
 import { hasStarted, summarizeMonthlyLoad } from '@/lib/commitments/calc'
 import { Button } from '@/components/ui/Button'
 import { IncomeEntries } from './IncomeEntries'
 import { IncomeHistory } from './IncomeHistory'
-import type { FixedCommitment, IncomeFrequency, IncomeSource } from '@/lib/db/types'
+import type { FixedCommitment, IncomeSource } from '@/lib/db/types'
 import { EditButton, InlineEdit, editInputClass } from '@/components/ui/InlineEdit'
 import {
   addFixedCommitment,
@@ -24,12 +23,6 @@ import {
   updateFixedCommitment,
   updateIncomeSource,
 } from './api'
-
-const FREQUENCIES = [
-  { value: 'weekly', key: 'money.weekly' },
-  { value: 'biweekly', key: 'money.biweekly' },
-  { value: 'monthly', key: 'money.monthly' },
-] as const satisfies readonly { value: IncomeFrequency; key: string }[]
 
 export function MoneyScreen() {
   const { t } = useTranslation()
@@ -56,16 +49,6 @@ export function MoneyScreen() {
     await client.invalidateQueries()
   }
 
-  // المتوقَّع من المصادر الثابتة وحدها — المتغيّر لا تقدير له، واختراعُ رقمٍ
-  // له يضخّم الدخل ويجعل كل حسبةٍ بعده مبنيّةً على ما لم يصل.
-  const monthlyIncome = monthlyIncomeFrom(
-    incomes.map((i) => ({
-      amount: Number(i.amount),
-      frequency: i.frequency,
-      isVariable: Boolean(i.is_variable),
-    })),
-  )
-
   if (loading) {
     return (
       <div className="space-y-4 px-5 py-6">
@@ -89,10 +72,19 @@ export function MoneyScreen() {
         </p>
       )}
 
+      {/*
+       * مصادر الدخل: أسماءٌ للتصنيف، بلا رقمٍ في ترويستها.
+       *
+       * كان هنا «الدخل المتوقَّع» — مبلغٌ ووتيرةٌ مكتوبان باليد يُضربان في
+       * 4.333 (خطة docs/income-actual-plan.md). وبعد إلغائه لا يصحّ أن تحمل
+       * هذه البطاقة رقماً: المال يُعدّ حيث يُسجَّل، في «سجل دخلك» تحتها
+       * مباشرةً — ورقمان لمجموعٍ واحد على شاشةٍ واحدة هو العطل الذي وُلد
+       * منه تدقيق آب كلّه.
+       */}
       <section className="space-y-3 rounded-3xl border border-border bg-surface p-5">
-        <div className="flex items-baseline justify-between">
+        <div>
           <h2 className="text-sm font-bold text-text">{t('money.incomeSection')}</h2>
-          <span className="num text-lg font-bold text-brand">{formatMoney(monthlyIncome)}</span>
+          <p className="text-xs text-text-muted">{t('money.incomeSectionHint')}</p>
         </div>
 
         {incomes.length === 0 ? (
@@ -106,9 +98,9 @@ export function MoneyScreen() {
         )}
 
         <AddIncomeForm
-          onAdd={async (name, amount, frequency, isVariable) => {
+          onAdd={async (name) => {
             if (!user) return
-            await addIncome(user.id, { name, amount, frequency, is_variable: isVariable })
+            await addIncome(user.id, { name })
             await load()
           }}
         />
@@ -180,11 +172,6 @@ function IncomeRow({
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(income.name)
-  // الخطّاف هنا لا في الحلقة: القائمة تبني `IncomeRow` لكل صفّ، فلكل سطرٍ
-  // حالته وحده وقواعد الخطّافات قائمة.
-  const amount = useAmount(0, String(income.amount))
-  const [frequency, setFrequency] = useState<IncomeFrequency>(income.frequency)
-  const [isVariable, setIsVariable] = useState(Boolean(income.is_variable))
   const [error, setError] = useState<string | null>(null)
   // فشل الحذف حالةٌ مستقلّة: `error` يُعرض داخل نموذج التعديل وحده، والحذف
   // يقع والنموذج مغلق فلا يراه أحد.
@@ -192,9 +179,6 @@ function IncomeRow({
 
   const cancel = () => {
     setName(income.name)
-    amount.reset(String(income.amount))
-    setFrequency(income.frequency)
-    setIsVariable(Boolean(income.is_variable))
     setError(null)
     setEditing(false)
   }
@@ -202,23 +186,17 @@ function IncomeRow({
   return (
     <li className="space-y-2 rounded-xl bg-surface-muted px-3 py-2.5">
       <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-text">{income.name}</p>
-          {/*
-           * المكافئ الشهري صريح: الأسبوعي × 4.333 مفاجأة سارّة تستحق الإظهار.
-           * والمتغيّر لا مكافئ له — قولُ رقمٍ له يوهم بتقديرٍ لا وجود له.
-           */}
-          <p className="text-xs text-text-muted">
-            {income.is_variable
-              ? t('money.variableHint')
-              : t('money.monthlyEquivalent', {
-                  amount: formatMoney(monthlyEquivalent(Number(income.amount), income.frequency)),
-                })}
-          </p>
-        </div>
-        <span className="num text-sm font-bold text-text">
-          {formatMoney(Number(income.amount))}
-        </span>
+        {/*
+         * الاسم وحده.
+         *
+         * كان هنا المبلغ ومكافئه الشهري وخانةُ «متغيّر» — وكلّها من الدخل
+         * المتوقَّع الذي أُلغي. ورقمٌ يبقى معروضاً بعد أن كفّ عن دخول أيّ
+         * حسبة أسوأ من رقمٍ خاطئ: صاحبه يصدّقه ويبني عليه، ولا شيء يقول له
+         * إنه لم يعد يعني شيئاً.
+         */}
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-text" dir="auto">
+          {income.name}
+        </p>
         {!editing && (
           <>
             <EditButton onClick={() => setEditing(true)} />
@@ -244,26 +222,13 @@ function IncomeRow({
       <InlineEdit
         open={editing}
         onCancel={cancel}
-        /*
-         * المتغيّر يُحفَظ بلا مبلغ — وإلا حُبس عن التعديل كلّه.
-         *
-         * الشرط كان `amount > 0` وحده، ونموذج الإضافة يقبل صفراً للمتغيّر
-         * عمداً. فمصدرٌ متغيّر بلا مبلغ كان يُفتح للتعديل ويبقى زرّ الحفظ
-         * مطفأً إلى الأبد: لا إعادة تسمية ولا تغيير دورية ولا حتى إلغاء
-         * صفة التغيّر عنه.
-         */
-        canSave={name.trim().length > 0 && (amount.isValid || isVariable)}
+        canSave={name.trim().length > 0}
         error={error}
         title={t('money.editSource')}
         onSave={async () => {
           setError(null)
           try {
-            await updateIncomeSource(income.id, {
-              name: name.trim(),
-              amount: amount.value,
-              frequency,
-              isVariable,
-            })
+            await updateIncomeSource(income.id, { name: name.trim() })
             setEditing(false)
             await onChanged()
           } catch (err) {
@@ -271,35 +236,7 @@ function IncomeRow({
           }
         }}
       >
-        <div className="flex gap-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
-          <input {...amount.props} className={`num ${editInputClass}`} />
-        </div>
-        <div className="flex gap-2">
-          {FREQUENCIES.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              onClick={() => setFrequency(f.value)}
-              className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${
-                frequency === f.value
-                  ? 'border-brand bg-brand-soft text-brand'
-                  : 'border-border bg-bg text-text-muted'
-              }`}
-            >
-              {t(f.key)}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 rounded-lg bg-bg px-2 py-1.5">
-          <input
-            type="checkbox"
-            checked={isVariable}
-            onChange={(e) => setIsVariable(e.target.checked)}
-            className="size-4 accent-brand"
-          />
-          <span className="text-[11px] font-semibold text-text">{t('money.isVariable')}</span>
-        </label>
+        <input value={name} onChange={(e) => setName(e.target.value)} className={editInputClass} />
       </InlineEdit>
     </li>
   )
@@ -448,37 +385,22 @@ function RemoveButton({
 const inputClass =
   'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-[15px] text-text outline-none focus:border-brand'
 
-function AddIncomeForm({
-  onAdd,
-}: {
-  onAdd: (
-    name: string,
-    amount: number,
-    frequency: IncomeFrequency,
-    isVariable: boolean,
-  ) => Promise<void>
-}) {
+function AddIncomeForm({ onAdd }: { onAdd: (name: string) => Promise<void> }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
-  const amount = useAmount()
-  const [isVariable, setIsVariable] = useState(false)
-  const [frequency, setFrequency] = useState<IncomeFrequency>('weekly')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    // المتغيّر يُقبل بلا مبلغ: هو تحديداً ما لا رقم ثابت له.
-    if (!name.trim() || (!amount.isValid && !isVariable)) return
+    if (!name.trim()) return
     setBusy(true)
     setError(null)
     try {
-      await onAdd(name.trim(), amount.value, frequency, isVariable)
-      // الحقول لا تُفرَغ إلا بعد نجاح الكتابة، فمن فشلت شبكته يعيد المحاولة
+      await onAdd(name.trim())
+      // الحقل لا يُفرَغ إلا بعد نجاح الكتابة، فمن فشلت شبكته يعيد المحاولة
       // بما كتبه لا بنموذجٍ فارغ.
       setName('')
-      amount.reset()
-      setIsVariable(false)
     } catch (err) {
       setError(failureText(err, t, t('money.addIncomeFailed')))
     } finally {
@@ -494,51 +416,19 @@ function AddIncomeForm({
         </p>
       )}
 
-      <div className="flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t('money.namePlaceholder')}
-          className={inputClass}
-        />
-        <input
-          {...amount.props}
-          placeholder={t('money.amountPlaceholder')}
-          className={`num ${inputClass}`}
-        />
-      </div>
-      <div className="flex gap-2">
-        {FREQUENCIES.map((f) => (
-          <button
-            key={f.value}
-            type="button"
-            onClick={() => setFrequency(f.value)}
-            className={`flex-1 rounded-xl border px-2 py-2 text-xs font-semibold transition ${
-              frequency === f.value
-                ? 'border-brand bg-brand-soft text-brand'
-                : 'border-border bg-bg text-text-muted'
-            }`}
-          >
-            {t(f.key)}
-          </button>
-        ))}
-      </div>
-
       {/*
-       * الدخل المتغيّر: الشغل الجانبي والساعات المتغيّرة والإكراميات.
+       * اسمٌ وحده: لا مبلغ ولا وتيرة ولا خانة «متغيّر».
        *
-       * بلا هذه الخانة كان صاحبه مضطراً لاختراع رقمٍ ثابت، فيتضخّم الدخل
-       * المتوقَّع ويصير «الباقي للصرف» وعداً لا يفي به الشهر.
+       * سؤالُ المبلغ كان يجبر صاحب الشغل الحرّ على اختراع رقم، ثم يُبنى عليه
+       * «الباقي للصرف». وبعد أن صار الواصل هو الأساس، حقلٌ لا يدخل حسبةً
+       * ولا يملأ نموذجاً هو سؤالٌ بلا جواب يُنتفع به.
        */}
-      <label className="flex items-center gap-3 rounded-xl bg-surface-muted px-3 py-2.5">
-        <input
-          type="checkbox"
-          checked={isVariable}
-          onChange={(e) => setIsVariable(e.target.checked)}
-          className="size-5 accent-brand"
-        />
-        <span className="text-sm font-semibold text-text">{t('money.isVariable')}</span>
-      </label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={t('money.namePlaceholder')}
+        className={inputClass}
+      />
 
       <Button type="submit" variant="secondary" loading={busy} className="w-full">
         {t('money.addIncome')}

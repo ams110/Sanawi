@@ -1,4 +1,5 @@
 import { summarizeDeposits, type DepositRow } from '../obligations/deposits.js'
+import { shouldRemind } from './cadence.js'
 
 /**
  * ما زال عليك هذا الشهر.
@@ -24,7 +25,9 @@ import { summarizeDeposits, type DepositRow } from '../obligations/deposits.js'
  * ٤. **الدخل تذكيرٌ بالتسجيل لا مطالبةٌ برقم.** كان السطر يقول «بتستنّى من
  *    ادم 2,500» — والرقم من الدخل المتوقَّع الذي أُلغي (خطة
  *    `docs/income-actual-plan.md`). بلا توقُّعٍ لا يصحّ أن نقول كم ننتظر،
- *    ويبقى النافع: مصدرٌ لم يُسجَّل منه شيءٌ هذا الشهر يُذكَّر به بلا مبلغ.
+ *    ويبقى النافع: مصدرٌ **عادتُه أن يجيء بهذا الوقت** ولم يُسجَّل. والعادة
+ *    مُتعلَّمة من سجلّه في `cadence.ts` لا مكتوبةً بيد، فلا يظهر الربعيّ
+ *    شهرين من كل ثلاثة ولا يظهر مصدرٌ لم يصل منه شيءٌ قطّ.
  *
  * ٥. **لا زرّ إخفاء.** الفعل وحده يُنقص السطر.
  *
@@ -80,8 +83,13 @@ export interface PendingObligationInput {
 export interface PendingIncomeInput {
   id: string
   name: string
-  /** كم قيداً سُجّل من هذا المصدر هذا الشهر — الوجود وحده هو السؤال. */
-  receivedCount: number
+  /**
+   * مفاتيح الشهور `YYYY-MM` التي وصلت فيها قبضةٌ من هذا المصدر.
+   *
+   * السجلّ كلّه لا الشهر الجاري وحده: منه تُقرأ عادةُ المصدر، وبها يُعرف
+   * أمتأخّرٌ هو أم في وقته. (`cadence.ts`)
+   */
+  entryMonths: readonly string[]
 }
 
 export interface PendingBillInput {
@@ -206,10 +214,12 @@ export function pendingThisMonth(input: PendingInput): PendingResult {
    * لا مجرّد تحسينٍ لدقّته.
    *
    * ولا مبلغ هنا: «بتستنّى من ادم 2,500» كان يقرأ رقمَه من الدخل المتوقَّع،
-   * وقد أُلغي. الذي يُقال ما يُعرف: هذا المصدر لم يُسجَّل منه شيءٌ بعد.
+   * وقد أُلغي. الذي يُقال ما يُعرف: هذا المصدر عادتُه أن يجيء بهذا الوقت
+   * ولم يُسجَّل — والعادة من سجلّه هو، لا من رقمٍ كتبه أحد.
    */
+  const thisMonthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
   for (const source of input.incomes) {
-    if (source.receivedCount > 0) continue
+    if (!shouldRemind({ entryMonths: source.entryMonths, thisMonth: thisMonthKey })) continue
     incomeItems.push({
       kind: 'income',
       id: source.id,

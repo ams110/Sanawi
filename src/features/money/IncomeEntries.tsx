@@ -22,19 +22,13 @@ const inputClass =
 const monthKey = (d = new Date()) =>
   toDateKey(new Date(d.getFullYear(), d.getMonth(), 1))
 
-/**
- * المصادر المتغيّرة أولاً.
- *
- * هذه الشاشة موجودة لأجلها تحديداً: المصدر الثابت لا يحتاج تسجيلاً — تقديره
- * يكفي — والمتغيّر لا يدخل أيّ حسبة حتى يُسجَّل هنا. فتقديمُه ووسمُه ليسا
- * زينة: ترتيبٌ يضع ما لا يحتاج التسجيل أولاً يخفي ما يحتاجه.
- *
- * والترتيب مستقرّ: `sort` في V8 مستقرّ، فالمصادر داخل كل مجموعة تبقى بترتيب
- * إنشائها كما تُرجعه `listIncomes`.
+/*
+ * كان هنا `orderedSources`: يقدّم المصادر المتغيّرة ويسمها بـ«〜» لأن
+ * الثابت «لا يحتاج تسجيلاً — تقديره يكفي». وقد سقط التقدير كلّه (خطة
+ * docs/income-actual-plan.md): كلّ مصدرٍ صار يحتاج التسجيل بالتساوي، فلا
+ * مجموعةَ تتقدّم ولا وسمَ يفرّق. والترتيب ترتيب الإنشاء كما تُرجعه
+ * `listIncomes`.
  */
-const orderedSources = (sources: IncomeSource[]): IncomeSource[] =>
-  [...sources].sort((a, b) => Number(Boolean(b.is_variable)) - Number(Boolean(a.is_variable)))
-
 function EntryRow({
   entry,
   sources,
@@ -81,7 +75,6 @@ function EntryRow({
             {/* الوسم فقط حين يضيف خبراً: عنوانٌ هو اسم المصدر لا يحتاج تكراره. */}
             {source && entry.name && (
               <span className="ms-1.5 rounded-full bg-surface px-2 py-0.5 text-[10px] font-bold text-text-muted">
-                {source.is_variable && <span aria-hidden="true">〜 </span>}
                 {source.name}
               </span>
             )}
@@ -152,7 +145,7 @@ function EntryRow({
         </div>
         {sources.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {orderedSources(sources).map((s) => (
+            {sources.map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -164,7 +157,6 @@ function EntryRow({
                     : 'border-border bg-bg text-text-muted'
                 }`}
               >
-                {s.is_variable && <span aria-hidden="true">〜 </span>}
                 {s.name}
               </button>
             ))}
@@ -314,7 +306,7 @@ export function IncomeEntries({
 
         {sources.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {orderedSources(sources).map((s) => (
+            {sources.map((s) => (
               <button
                 key={s.id}
                 type="button"
@@ -326,7 +318,6 @@ export function IncomeEntries({
                     : 'border-border bg-bg text-text-muted'
                 }`}
               >
-                {s.is_variable && <span aria-hidden="true">〜 </span>}
                 {s.name}
               </button>
             ))}

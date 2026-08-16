@@ -8,7 +8,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { computeGroupCost } from '../../src/lib/budget/groupCost.js'
-import { monthlyEquivalent, monthlyIncomeFrom, projectSavings } from '../../src/lib/budget/calc.js'
+import { projectSavings } from '../../src/lib/budget/calc.js'
 import { summarizeBillRows } from '../../src/lib/commitments/bills.js'
 import { viewCommitment } from '../../src/lib/commitments/calc.js'
 import { freedomSensitivity } from '../../src/lib/wealth/freedom.js'
@@ -40,7 +40,6 @@ import {
   type ObligationView,
 } from '../data.js'
 import {
-  CADENCE,
   CATEGORY_LABEL,
   guard,
   isoDate,
@@ -128,7 +127,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   - projected_coverage: ما سيتبقّى آخر الشهر إن استمرّت وتيرة الصرف — إسقاطُ الصرف وحده،
     والدخل لا يُسقَط لأن مواعيد القبض ليست في البيانات.
   - daily_allowance: كم يمكن صرفه يومياً حتى آخر الشهر.
-  - income_by_source: ما وصل من كل مصدر هذا الشهر.
+  - income_by_source: ما وصل من كل مصدر هذا الشهر — أسماءٌ ومبالغُ وصلت، بلا توقُّع.
   - monthly_load: الحمل الشهري الكامل — ما يجب أن يخرج هذا الشهر كلّه، مدفوعُه وباقيه.
   - التفصيل: obligation_installments و recurring_bills و installments و daily_expenses و savings_target.
   - next_relief: متى ينخفض الحمل الشهري وبكم — بشرى المديون: العبء مؤقّت وله تاريخ.
@@ -147,13 +146,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         coverage: z.number(),
         is_short: z.boolean(),
         shortfall_cause: z.enum(['no_income_yet', 'commitments', 'spending']).nullable(),
-        income_by_source: z.array(
-          z.object({
-            name: z.string(),
-            amount: z.number(),
-            expected: z.number().nullable(),
-          }),
-        ),
+        income_by_source: z.array(z.object({ name: z.string(), amount: z.number() })),
         monthly_load: z.number(),
         projected_coverage: z.number(),
         projected_is_short: z.boolean(),
@@ -858,7 +851,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
   groups → items[] من { id, name, icon, color }
   partners → items[] من { id, name }
   templates → items[] من { id, name, name_he, category, recurrence_months, suggested_min, suggested_max, hint }
-  money → لا items، بل حقلان: incomes[] من { id, name, amount, frequency, is_variable, monthly_equivalent } و fixed_commitments[] من { id, name, amount, day_of_month, starts_on, has_started, ends_on, payments_left }
+  money → لا items، بل حقلان: incomes[] من { id, name } — أسماءٌ للتصنيف بلا مبالغ، فالدخل المتوقَّع أُلغي والمبالغ تُقرأ من sanawi_month_overview — و fixed_commitments[] من { id, name, amount, day_of_month, starts_on, has_started, ends_on, payments_left }
   categories → items[] من { id, name, icon } — تصنيفات المصاريف اليومية
   payment_methods → items[] من { id, name, icon, is_automatic }
   commitment_templates → items[] من { id, name, name_he, category, icon, suggested_min, suggested_max, is_installment, hint }`,
@@ -884,10 +877,6 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
             z.object({
               id: z.string(),
               name: z.string(),
-              amount: z.number(),
-              frequency: z.string(),
-              is_variable: z.boolean(),
-              monthly_equivalent: z.number(),
             }),
           )
           .optional(),
@@ -1025,24 +1014,18 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       const today = new Date()
 
       /*
-       * المعادل الشهري يخرج مع المبلغ الخام.
+       * المصادر أسماءٌ وحدها.
        *
-       * كانت القائمة تطبع مبلغ الدورة والدورية بالإنجليزية فحسب، فمصدرٌ
-       * أسبوعي بـ1,200 يُقرأ رقماً صغيراً بجانب راتبٍ شهري بـ4,000 — وهو
-       * أكبر منه فعلاً. ومن دخلُه مصادرُ بدوريّاتٍ مختلفة لا يستطيع مقارنتها
-       * بعينه، وهذه القائمة هي المكان الذي يُفترض أن تُقارَن فيه.
+       * كانت تخرج بمبلغ الدورة ومعادله الشهري (أسبوعي × 4.333) ومجموعٍ
+       * أسفلها اسمه «المتوقَّع شهرياً». وقد أُلغي ذلك كلّه (خطة
+       * docs/income-actual-plan.md): المبالغ في `income_entries` وحدها،
+       * ومجموعُها في sanawi_month_overview. ورقمٌ يبقى معروضاً بعد أن كفّ
+       * عن دخول أيّ حسبة يُصدَّق ويُبنى عليه — وذلك أسوأ من رقمٍ خاطئ.
        */
       const structured = {
         kind,
         currency,
-        incomes: incomes.map((i) => ({
-          id: i.id,
-          name: i.name,
-          amount: Number(i.amount),
-          frequency: i.frequency,
-          is_variable: Boolean(i.is_variable),
-          monthly_equivalent: i.is_variable ? 0 : monthlyEquivalent(Number(i.amount), i.frequency),
-        })),
+        incomes: incomes.map((i) => ({ id: i.id, name: i.name })),
         fixed_commitments: fixedCommitments.map((c) => {
           const view = viewCommitment(
             {
@@ -1066,28 +1049,12 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
         }),
       }
 
-      const expectedTotal = monthlyIncomeFrom(
-        structured.incomes.map((i) => ({
-          amount: i.amount,
-          frequency: i.frequency,
-          isVariable: i.is_variable,
-        })),
-      )
-
       const text = [
-        '## الدخل',
+        '## مصادر الدخل',
         ...(structured.incomes.length > 0
           ? [
-              ...structured.incomes.map(
-                (i) =>
-                  `- ${i.name}: ${money(i.amount, currency)} ${CADENCE[i.frequency]}` +
-                  (i.is_variable
-                    ? ' — **متغيّر**، لا يدخل المتوقَّع'
-                    : i.frequency === 'monthly'
-                      ? ''
-                      : ` = ${money(i.monthly_equivalent, currency)} بالشهر`),
-              ),
-              `**المتوقَّع شهرياً: ${money(expectedTotal, currency)}**`,
+              ...structured.incomes.map((i) => `- ${i.name}`),
+              '_أسماءٌ للتصنيف. ما وصل فعلاً في sanawi_month_overview._',
             ]
           : ['- لا مصادر دخل بعد.']),
         '',

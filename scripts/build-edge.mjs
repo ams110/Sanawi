@@ -68,6 +68,7 @@ const LIB_FILES = [
   'src/lib/month/pending.ts',
   'src/lib/month/advice.ts',
   'src/lib/month/actuals.ts',
+  'src/lib/month/cadence.ts',
   'src/lib/obligations/calendar.ts',
   'src/lib/budget/calc.ts',
   'src/lib/budget/month.ts',

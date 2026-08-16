@@ -17,10 +17,14 @@ const obligation = (over: Partial<PendingObligationInput>): PendingObligationInp
   ...over,
 })
 
+/*
+ * الافتراض «وصل الشهر الماضي»: أي مصدرٍ عادتُه شهرية وتأخّر — وهو الحالة
+ * التي تستحقّ التذكير. والحالات الأخرى تُمرَّر صراحةً في اختباراتها.
+ */
 const income = (over: Partial<PendingIncomeInput>): PendingIncomeInput => ({
   id: 'i1',
   name: 'راتب',
-  receivedCount: 0,
+  entryMonths: ['2026-07', '2026-06'],
   ...over,
 })
 
@@ -153,8 +157,10 @@ describe('الدخل — تذكيرٌ بالتسجيل لا مطالبةٌ بر�
     expect(r.incomeItems[0]!.note).toEqual({ type: 'unrecorded' })
   })
 
-  it('مصدرٌ سُجّل منه قيدٌ واحد يسقط من التذكير', () => {
-    expect(run({ incomes: [income({ receivedCount: 1 })] }).incomeItems).toHaveLength(0)
+  it('مصدرٌ سُجّل منه هذا الشهر يسقط من التذكير', () => {
+    expect(
+      run({ incomes: [income({ entryMonths: ['2026-08', '2026-07'] })] }).incomeItems,
+    ).toHaveLength(0)
   })
 
   /*
@@ -163,10 +169,26 @@ describe('الدخل — تذكيرٌ بالتسجيل لا مطالبةٌ بر�
    * يعرف أنه قبض، ولا يحتاج التطبيق ليقيس له نقصاً عن رقمٍ مخترَع.
    */
   it('نصف الراتب تسجيلٌ كامل للسؤال الجديد', () => {
-    expect(run({ incomes: [income({ receivedCount: 1 })] }).incomeItems).toHaveLength(0)
+    expect(run({ incomes: [income({ entryMonths: ['2026-08'] })] }).incomeItems).toHaveLength(0)
   })
 
-  it('كل المصادر غير المسجَّلة تُذكَّر، مرتّبةً بالاسم', () => {
+  /*
+   * العادة تُقرأ من السجلّ لا من رقمٍ مكتوب (`cadence.ts`).
+   *
+   * كانت القائمة تنبّه على كل مصدرٍ بلا قبضة هذا الشهر، فيظهر الربعيّ
+   * شهرين من كل ثلاثة ويظهر مصدرٌ لم يصل منه شيءٌ قطّ إلى الأبد — وقائمةٌ
+   * تنبّه بلا سبب تدرّب صاحبها على تجاهلها.
+   */
+  it('الربعيّ لا يُنبَّه عليه في شهور انتظاره', () => {
+    const quarterly = income({ entryMonths: ['2026-07', '2026-04', '2026-01'] })
+    expect(run({ incomes: [quarterly] }).incomeItems).toHaveLength(0)
+  })
+
+  it('ومصدرٌ لم يصل منه شيءٌ قطّ لا يُدَّعى عليه', () => {
+    expect(run({ incomes: [income({ entryMonths: [] })] }).incomeItems).toHaveLength(0)
+  })
+
+  it('المصادر المتأخّرة تُذكَّر، مرتّبةً بالاسم', () => {
     const r = run({
       incomes: [income({ id: 'b', name: 'شغل جانبي' }), income({ id: 'a', name: 'راتب' })],
     })

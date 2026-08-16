@@ -3,36 +3,23 @@
  * ملف نقي — لا React ولا Supabase.
  */
 
-export type IncomeFrequency = 'weekly' | 'biweekly' | 'monthly'
-
-/**
- * معاملات التحويل إلى شهري.
+/*
+ * `IncomeFrequency` و`FREQUENCY_TO_MONTHLY` و`IncomeInput` و`monthlyIncomeFrom`
+ * و`monthlyEquivalent` عاشت هنا حتى قرار 16/08/2026: **الدخل المتوقَّع غلطٌ في
+ * التصميم** (خطة `docs/income-actual-plan.md`).
  *
- * أسبوعي × 4.333 لا × 4: السنة 52 أسبوعاً لا 48، والفرق أربعة رواتب أسبوعية
- * في السنة. استعمال 4 يجعل التطبيق يظنّ دخلك أقل مما هو فيخنق ميزانيتك بلا سبب.
+ * ‏52/12 يصف سنةً لا شهراً: الأسبوعي × 4.333 يعطي رقماً لا يصل في أيّ شهرٍ
+ * بعينه — الشهر إمّا أربع قبضات أو خمس — فتنتفخ الميزانية في كل شهرٍ رباعيّ
+ * بانتظامٍ لا صدفة. والمتغيّر كان خارج الحسبة ولا شيء يعيده مهما وصل.
+ *
+ * والقاعدة الخامسة في CLAUDE.md («التحويلات الدورية من مصدر واحد») وُلدت
+ * لتمنع ثابتاً محلّياً `{weekly: 4}` يناقض هذا الملف؛ ولمّا سقط المصدرُ
+ * الواحد سقط ما يناقضه. **فلا تُعِد أيّاً من هذه الدوالّ ولا نسخةً منها في
+ * شاشةٍ أو أداة**: ما وصل فعلاً في `income_entries`، ومجموعُه من `sumReceived`
+ * وحدها، وأرقامُ الشهر من `budget/month.ts`.
  */
-export const FREQUENCY_TO_MONTHLY: Record<IncomeFrequency, number> = {
-  weekly: 52 / 12, // ‏4.3333…
-  biweekly: 26 / 12, // ‏2.1666…
-  monthly: 1,
-}
-
-export interface IncomeInput {
-  amount: number
-  frequency: IncomeFrequency
-  isActive?: boolean
-  /**
-   * دخلٌ لا تقدير ثابت له — شغلٌ جانبي أو ساعاتٌ متغيّرة أو إكراميات.
-   *
-   * يُستثنى من **المتوقَّع** ولا يُحذف: مصدرٌ بلا رقمٍ موثوق خيرٌ من رقمٍ
-   * مخترَع يضخّم الدخل، ويبقى داخلاً في **الواصل** عبر income_entries حين
-   * يصل فعلاً. وهي نفس قسمة «التقدير في جدول والواقع في آخر».
-   */
-  isVariable?: boolean
-}
 
 const round2 = (v: number): number => Math.round(v * 100) / 100
-const sum = (values: number[]): number => values.reduce((a, b) => a + b, 0)
 
 /**
  * بوّابة الأرقام.
@@ -53,22 +40,6 @@ export const finite = (n: number | undefined, fallback: number): number =>
  */
 export function sumReceived(rows: readonly { amount: number | string }[]): number {
   return round2(rows.reduce((sum, row) => sum + Number(row.amount), 0))
-}
-
-/** الدخل الشهري المتوقَّع: المصادر النشطة التي لها تقدير موثوق. */
-export function monthlyIncomeFrom(incomes: IncomeInput[]): number {
-  return round2(
-    sum(
-      incomes
-        .filter((i) => i.isActive !== false && i.isVariable !== true)
-        .map((i) => i.amount * FREQUENCY_TO_MONTHLY[i.frequency]),
-    ),
-  )
-}
-
-/** تحويل مبلغ الدورة الواحدة إلى ما يعادله شهرياً. */
-export function monthlyEquivalent(amount: number, frequency: IncomeFrequency): number {
-  return round2(amount * FREQUENCY_TO_MONTHLY[frequency])
 }
 
 /*
