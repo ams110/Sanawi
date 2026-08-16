@@ -99,11 +99,11 @@ try {
   step('الأسبوعي يتحوّل بـ 4.333', /8,66[67]/.test(equivalent), equivalent)
   await page.screenshot({ path: `${OUT}/flow-5-money.png`, fullPage: true })
 
-  // 8) لوحة الشهر تحسب المتاح للصرف
+  // 8) لوحة الشهر تحسب الكفاية بعد سداد ما عليه
   await page.getByRole('link', { name: /^الشهر$/ }).click()
-  await page.getByText('بيضل معك للصرف').waitFor({ timeout: 10000 })
+  await page.getByText('بعد ما تسدّ اللي عليك').waitFor({ timeout: 10000 })
   const available = await page.locator('section p.num').nth(1).innerText()
-  step('لوحة الشهر تحسب المتاح', /₪/.test(available), available)
+  step('لوحة الشهر تحسب الكفاية', /₪/.test(available), available)
   await page.screenshot({ path: `${OUT}/flow-6-month.png`, fullPage: true })
 
   // 9) التقويم يعرض الاستحقاق في شهره

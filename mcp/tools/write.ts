@@ -1950,10 +1950,8 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
           balanceIsStale: account.balanceIsStale,
           daysSinceBalanceUpdate: account.daysSinceBalanceUpdate,
         })),
-        expectedIncome: picture.expectedIncome,
-        receivedIncome: picture.receivedIncome,
-        projectedRemaining: picture.panel.projectedRemaining,
-        projectedIsOverspent: picture.panel.projectedIsOverspent,
+        projectedRemaining: picture.panel.projectedCoverage,
+        projectedIsOverspent: picture.panel.projectedIsShort,
       })
 
       const adviceLine = (item: IncomeAdviceItem): string => {
@@ -1975,8 +1973,6 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
               : `رصيد ${item.accountName} عمره ${item.days} يوماً — حدّثه ليصحّ كل ما يُبنى عليه.`
           case 'projection_negative':
             return `بوتيرة الصرف الحالية ينتهي الشهر بعجز ${money(item.amount, currency)}.`
-          case 'income_gap':
-            return `ما زال من دخلك المتوقَّع ${money(item.amount, currency)} لم يصل هذا الشهر.`
           case 'all_clear':
             return 'وضعك مضبوط: لا عجز في حساباتك ولا أقساط بلا إيداع هذا الشهر. ✅'
         }
@@ -1986,9 +1982,7 @@ from_account، فيُكتب **تحويلٌ وإيداع معاً** في نداء
         kind: item.kind,
         text: adviceLine(item),
         amount:
-          item.kind === 'cover_shortfall' ||
-          item.kind === 'projection_negative' ||
-          item.kind === 'income_gap'
+          item.kind === 'cover_shortfall' || item.kind === 'projection_negative'
             ? item.amount
             : item.kind === 'fund_installments'
               ? item.total

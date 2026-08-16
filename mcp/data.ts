@@ -9,17 +9,14 @@
 
 import { calculateObligation, type ObligationCalcResult } from '../src/lib/obligations/calc.js'
 import { buildCalendar, type CalendarObligationInput } from '../src/lib/obligations/calendar.js'
-import {
-  monthlyEquivalent,
-  monthlyIncomeFrom,
-  sumReceived,
-} from '../src/lib/budget/calc.js'
+import { monthlyEquivalent, sumReceived } from '../src/lib/budget/calc.js'
 import { buildMonthPanel, type MonthPanel } from '../src/lib/budget/month.js'
 import { expenseMatchesCategory } from '../src/lib/budget/groupCost.js'
 import { essentialSpending } from '../src/lib/wealth/essentials.js'
 import { summarizeMonthlyLoad, viewCommitment, type MonthlyLoad, shareAmount } from '../src/lib/commitments/calc.js'
 import { summarizeExpenses, type ExpenseSummary } from '../src/lib/expenses/calc.js'
 import { pendingThisMonth, type PendingResult } from '../src/lib/month/pending.js'
+import { monthActuals } from '../src/lib/month/actuals.js'
 import { computeNetWorth, type NetWorthResult } from '../src/lib/wealth/networth.js'
 import {
   summarizeAccounts,
@@ -296,8 +293,6 @@ export interface MonthPicture {
   savingsTarget: number
   expenses: ExpenseSummary
   receivedIncome: number
-  /** الدخل المتوقَّع من المصادر الثابتة — بلا المتغيّرة. */
-  expectedIncome: number
   /**
    * ما وصل هذا الشهر موزَّعاً على مصادره.
    *
@@ -358,11 +353,6 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   const commitmentById = new Map(money.fixedCommitments.map((c) => [c.id, c]))
 
   const savingsTarget = Number(profile?.monthly_savings_target ?? 0)
-  const incomes = money.incomes.map((i) => ({
-    amount: Number(i.amount),
-    frequency: i.frequency as IncomeFrequency,
-    isVariable: Boolean(i.is_variable),
-  }))
   const obligationsTotal = obligations.reduce((sum, o) => sum + o.calc.monthlyInstallment, 0)
 
   const load = summarizeMonthlyLoad(
@@ -386,7 +376,6 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
   )
 
   const receivedIncome = sumReceived(entries)
-  const expectedIncome = monthlyIncomeFrom(incomes)
 
   // ما وصل لكل مصدر: المعرَّف بـ`source_id`، والحرّ باسمه كما كُتب.
   const receivedBySourceId = new Map<string, number>()
@@ -446,8 +435,8 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     depositsByObligation.set(d.obligation_id, list)
   }
 
-  // بالمبلغ وبالعدد معاً — نفس مُدخَلات الشاشة حرفياً: الاكتمال يُقاس
-  // بالمبلغ، والمتغيّر الذي لا مبلغ له يبقى على العدّ. (تدقيق آب 2026: ش12)
+  // الوجود وحده هو السؤال — نفس مُدخَلات الشاشة حرفياً: مصدرٌ سُجّل منه
+  // شيءٌ لا يُذكَّر به، وبلا دخلٍ متوقَّع لم يعد للمبالغ معنىً هنا.
   const receivedCountBySource = new Map<string, number>()
   for (const entry of entries) {
     if (!entry.source_id) continue
@@ -456,31 +445,30 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
       (receivedCountBySource.get(entry.source_id) ?? 0) + 1,
     )
   }
-  const recordedBills = new Set(bills.map((b) => b.commitment_id))
+  const recordedBills = new Map(bills.map((b) => [b.commitment_id, Number(b.amount)]))
+
+  // مرّةً واحدة: قائمة «ضلّ عليك» و«ما خرج فعلاً» تقرآن نفس الصفوف.
+  const obligationDeposits = obligations.map((o) => ({
+    id: o.obligation.id,
+    name: o.obligation.name,
+    monthlyInstallment: o.calc.monthlyInstallment,
+    isOverdue: o.calc.isOverdue,
+    deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
+      id: d.id,
+      amount: Number(d.amount),
+      depositDate: d.deposit_date,
+      createdAt: d.created_at,
+      partnerId: d.partner_id,
+      note: d.note,
+    })),
+  }))
 
   const pending = pendingThisMonth({
     today,
-    obligations: obligations.map((o) => ({
-      id: o.obligation.id,
-      name: o.obligation.name,
-      monthlyInstallment: o.calc.monthlyInstallment,
-      isOverdue: o.calc.isOverdue,
-      deposits: (depositsByObligation.get(o.obligation.id) ?? []).map((d) => ({
-        id: d.id,
-        amount: Number(d.amount),
-        depositDate: d.deposit_date,
-        createdAt: d.created_at,
-        partnerId: d.partner_id,
-        note: d.note,
-      })),
-    })),
+    obligations: obligationDeposits,
     incomes: money.incomes.map((i) => ({
       id: i.id,
       name: i.name,
-      amount: Number(i.amount),
-      frequency: i.frequency as IncomeFrequency,
-      isVariable: Boolean(i.is_variable),
-      receivedAmount: receivedBySourceId.get(i.id) ?? 0,
       receivedCount: receivedCountBySource.get(i.id) ?? 0,
     })),
     bills: details.map((d) => {
@@ -513,17 +501,36 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     }),
   })
 
+  /*
+   * ما خرج فعلاً — نفس محرّك التجهيز الذي تستعمله `MonthScreen` حرفياً
+   * (قاعدتا 1 و3): إيداعُ الشريك ليس إيداعي، والفاتورة بحصّتي لا بمبلغها
+   * الكامل. أيُّ اختصارٍ هنا يجعل كلود يقول رقماً غير الذي على الشاشة.
+   */
+  const actuals = monthActuals({
+    today,
+    obligations: obligationDeposits,
+    bills: details.map((d) => ({
+      recordedAmount: recordedBills.get(d.commitment_id) ?? null,
+      mySharePercent: Number(d.my_share_percent),
+    })),
+  })
+
   return {
     pending,
     obligationsTotal: Math.round(obligationsTotal * 100) / 100,
     panel: buildMonthPanel({
-      expectedIncome,
+      // ── واقع ──
       receivedIncome,
-      obligationInstallments: Math.round(obligationsTotal * 100) / 100,
-      recurringBills: load.recurring,
-      installments: load.installments,
+      depositsPaid: actuals.depositsPaid,
+      billsPaid: actuals.billsPaid,
       dailyExpenses: expenses.total,
+      // ── خطة، مصرَّحة ──
+      pendingCommitments: pending.pendingTotal,
       savingsTarget,
+      monthlyLoad:
+        Math.round((obligationsTotal + load.recurring + load.installments + savingsTarget) * 100) /
+        100,
+      // ── الزمن ──
       daysElapsed: expenses.daysElapsed,
       daysInMonth: expenses.daysInMonth,
     }),
@@ -532,7 +539,6 @@ export async function loadMonth(connection: Connection): Promise<MonthPicture> {
     savingsTarget,
     expenses,
     receivedIncome,
-    expectedIncome,
     incomeBySource,
     load,
   }
@@ -581,7 +587,9 @@ export async function loadDeposits(
 export async function loadBillPayments({ db }: Connection, month: string) {
   const { data, error } = await db.from('bill_payments').select('*').eq('billing_month', month)
   if (error) throw error
-  return (data ?? []) as { commitment_id: string }[]
+  // المبلغ جزءٌ من الصفّ الآن: «ما خرج فعلاً» يحتاجه، وقراءةُ المعرّف وحده
+  // كانت تكفي حين كان السؤال «هل سُجّلت؟» لا «كم دُفع؟».
+  return (data ?? []) as { commitment_id: string; amount: number }[]
 }
 
 export async function loadCommitmentDetails({ db }: Connection): Promise<CommitmentDetail[]> {

@@ -102,41 +102,51 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
     'sanawi_month_overview',
     {
       title: 'رقم الشهر في سنوي',
-      description: `الرقم الواحد: ميزانية الخطة ناقص ما صُرف فعلاً = الباقي للصرف.
+      description: `الرقم الواحد: كم وصلك، كم خرج فعلاً، وكم يبقى بعد ما تسدّ اللي عليك.
 
 هذا هو نفس ما تعرضه لوحة الشهر في التطبيق، محسوباً بنفس المحرّك — لا تُعِد جمعه من أجزائه.
 
 ابدأ من هنا في أي سؤال عن الوضع المالي العام («كيف وضعي؟»، «كم بقدر أصرف؟»، «هل أنا ملحّق؟»).
 
-الحسبة من عالمين مصرَّحين: **الخطة** (income = المتوقَّع من المصادر الثابتة) ناقص الملتزَم به
-تعطي spending_budget، وناقص المصروف الفعلي تعطي remaining. و**الواقع** (received_income) تقدّمٌ
-نحو الخطة يُذكر بجانبها ولا يقلب الحسبة — فلا يقارَن دخلُ نصف شهرٍ بالتزامات شهرٍ كامل.
+**الأساس هو الواصل، لا رقمٌ متوقَّع.** الدخل المتوقَّع أُلغي من التطبيق: كان يُحسب من مبلغٍ
+ووتيرة مكتوبين باليد (أسبوعي × 4.333) فيصف سنةً لا شهراً، ويُخرج الدخل المتغيّر من الحسبة.
+لا تقدّر دخلاً لم يصل ولا تسأل عن «المتوقَّع» — التطبيق لم يعد يعرفه.
+
+والعالمان مصرَّحان في المخرجات: حقول الواقع (received, paid_out, in_hand) وحقل الخطة
+(still_due)، و coverage بينهما.
 
 المخرجات:
-  - spending_budget: ميزانية الصرف — الدخل ناقص الملتزَم به. رقم الخطة المستقر.
-  - remaining: الباقي فعلاً بعد المصروف. سالب = تجاوز.
-  - projected_remaining: ما سيتبقّى آخر الشهر إن استمرّت وتيرة الصرف اليومي — إسقاطُ الصرف وحده،
-    الدخل ثابت على الخطة فلا يتّهم التحذيرُ وتيرةَ الصرف بفجوة دخلٍ لم يصل.
+  - received: ما وصل فعلاً هذا الشهر (مجموع القبضات المسجَّلة).
+  - paid_out: ما خرج فعلاً = إيداعات الصناديق (حصّتي) + الفواتير المسجَّلة (حصّتي) + المصاريف.
+  - in_hand: received − paid_out. **ليس رصيده**: مالُ شهرٍ ماضٍ ليس فيه. لسؤال «كم معه فعلاً»
+    استعمل sanawi_list_accounts.
+  - still_due: ما زال يجب أن يخرج قبل آخر الشهر (أقساط وفواتير باقية + هدف الادخار) — خطة.
+  - coverage: in_hand − still_due. **هذا هو الرقم الكبير**: ما يبقى بعد سداد ما عليه.
+  - is_short و shortfall_cause: هل ينقصه، ولماذا — 'no_income_yet' (لم تصل قبضةٌ بعد)، أو
+    'commitments' (التزاماته أكبر من الواصل حتى بصرفٍ صفري)، أو 'spending' (الصرف هو الفاعل).
+    **اذكر السبب دائماً مع الرقم السالب**: أول الشهر يكون السبب أن الراتب لم يصل، لا تبذيراً.
+  - projected_coverage: ما سيتبقّى آخر الشهر إن استمرّت وتيرة الصرف — إسقاطُ الصرف وحده،
+    والدخل لا يُسقَط لأن مواعيد القبض ليست في البيانات.
   - daily_allowance: كم يمكن صرفه يومياً حتى آخر الشهر.
-  - income و income_basis: أساس الحسبة — 'expected' (الخطة، وهو الأصل) أو 'received' لمن
-    لا مصادر ثابتة له أصلاً.
-  - expected_income و received_income و income_gap: المتوقَّع، والواصل فعلاً، والفرق. **اذكر
-    الواصل بجانب المتوقَّع دائماً**: من يقبض أسبوعياً يكون سجّل بعض دخله فحسب أول الشهر.
-  - income_by_source: ما وصل من كل مصدر مقابل المتوقَّع منه — expected فارغة للمصادر المتغيّرة.
+  - income_by_source: ما وصل من كل مصدر هذا الشهر.
+  - monthly_load: الحمل الشهري الكامل — ما يجب أن يخرج هذا الشهر كلّه، مدفوعُه وباقيه.
   - التفصيل: obligation_installments و recurring_bills و installments و daily_expenses و savings_target.
   - next_relief: متى ينخفض الحمل الشهري وبكم — بشرى المديون: العبء مؤقّت وله تاريخ.
     فارغة حين لا قسط ينتهي. وفيها amount و ends_on و months_away.
   - عدّادات: obligations_count و overdue_count و behind_count.
-  - pending و pending_income: ما زال عليه (أقساط وفواتير) وما ينتظره من دخل — قائمتان
-    منفصلتان عمداً: الدخل يدخل إليه لا يخرج منه.`,
+  - pending و pending_income: ما زال عليه (أقساط وفواتير) والمصادر التي لم يسجّل منها شيئاً
+    هذا الشهر — قائمتان منفصلتان عمداً: الدخل يدخل إليه لا يخرج منه. وبنود pending_income
+    بلا مبالغ: التطبيق لا يعرف كم سيصل، يعرف فقط أنه لم يُسجَّل.`,
       outputSchema: {
         currency: z.string(),
         month: z.string(),
-        income: z.number(),
-        income_basis: z.enum(['expected', 'received']),
-        income_gap: z.number(),
-        expected_income: z.number(),
-        received_income: z.number(),
+        received: z.number(),
+        paid_out: z.number(),
+        in_hand: z.number(),
+        still_due: z.number(),
+        coverage: z.number(),
+        is_short: z.boolean(),
+        shortfall_cause: z.enum(['no_income_yet', 'commitments', 'spending']).nullable(),
         income_by_source: z.array(
           z.object({
             name: z.string(),
@@ -144,12 +154,9 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
             expected: z.number().nullable(),
           }),
         ),
-        spending_budget: z.number(),
-        remaining: z.number(),
-        is_over_budget: z.boolean(),
-        is_overspent: z.boolean(),
-        projected_remaining: z.number(),
-        projected_is_overspent: z.boolean(),
+        monthly_load: z.number(),
+        projected_coverage: z.number(),
+        projected_is_short: z.boolean(),
         daily_allowance: z.number(),
         days_elapsed: z.number(),
         days_in_month: z.number(),
@@ -165,9 +172,6 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           .nullable(),
         daily_expenses: z.number(),
         savings_target: z.number(),
-        committed: z.number(),
-        total_out: z.number(),
-        available_to_spend: z.number(),
         obligations_count: z.number(),
         overdue_count: z.number(),
         behind_count: z.number(),
@@ -210,23 +214,22 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
 
       const overdue = obligations.filter((o) => o.calc.isOverdue)
       const behind = obligations.filter((o) => o.calc.status === 'behind')
-      const allowance = dailyAllowance(panel.remaining, expenses.daysElapsed, expenses.daysInMonth)
+      const allowance = dailyAllowance(panel.coverage, expenses.daysElapsed, expenses.daysInMonth)
 
       const structured = {
         currency,
         month: monthKey(),
-        income: panel.income,
-        income_basis: panel.incomeBasis,
-        income_gap: panel.incomeGap,
-        expected_income: picture.expectedIncome,
-        received_income: picture.receivedIncome,
+        received: panel.received,
+        paid_out: panel.paidOut,
+        in_hand: panel.inHand,
+        still_due: panel.stillDue,
+        coverage: panel.coverage,
+        is_short: panel.isShort,
+        shortfall_cause: panel.shortfallCause,
         income_by_source: picture.incomeBySource,
-        spending_budget: panel.spendingBudget,
-        remaining: panel.remaining,
-        is_over_budget: panel.isOverBudget,
-        is_overspent: panel.isOverspent,
-        projected_remaining: panel.projectedRemaining,
-        projected_is_overspent: panel.projectedIsOverspent,
+        monthly_load: panel.monthlyLoad,
+        projected_coverage: panel.projectedCoverage,
+        projected_is_short: panel.projectedIsShort,
         daily_allowance: allowance,
         days_elapsed: expenses.daysElapsed,
         days_in_month: expenses.daysInMonth,
@@ -242,9 +245,6 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
           : null,
         daily_expenses: expenses.total,
         savings_target: picture.savingsTarget,
-        committed: panel.committed,
-        total_out: panel.totalOut,
-        available_to_spend: panel.spendingBudget,
         obligations_count: obligations.length,
         overdue_count: overdue.length,
         behind_count: behind.length,
@@ -270,32 +270,39 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
       const text = [
         `## ${monthYear(new Date())}`,
         '',
-        panel.isOverspent
-          ? `⚠️ **تجاوزت بـ ${money(Math.abs(panel.remaining), currency)}**`
-          : `**الباقي معك للصرف: ${money(panel.remaining, currency)}**`,
-        panel.isOverBudget
-          ? `⚠️ الخطة نفسها بالسالب: دخلك المتوقَّع لا يغطّي التزاماتك هذا الشهر.`
-          : '',
-        panel.projectedIsOverspent
-          ? `📉 بوتيرة صرفك الحالية ستنتهي بـ ${money(Math.abs(panel.projectedRemaining), currency)} عجزاً.`
-          : `بوتيرتك الحالية ستنتهي بـ ${money(panel.projectedRemaining, currency)} · ${money(allowance, currency)} يومياً.`,
+        panel.isShort
+          ? `⚠️ **ناقصك ${money(Math.abs(panel.coverage), currency)}** بعد ما تسدّ اللي عليك`
+          : `**بيضلّ معك ${money(panel.coverage, currency)}** بعد ما تسدّ اللي عليك`,
+        /*
+         * الأحمر يسمّي سببه (قاعدة 4): أول الشهر يكون السبب أن الراتب لم
+         * يصل، والتحذير الذي يتّهم الصرف يدرّب صاحبه على تجاهل التحذيرات.
+         */
+        panel.shortfallCause === 'no_income_yet'
+          ? '⚠️ السبب: لسه ما وصلك دخل هذا الشهر — لا تبذير.'
+          : panel.shortfallCause === 'commitments'
+            ? '⚠️ السبب: التزاماتك أكبر من اللي وصلك، حتى بصرفٍ صفري.'
+            : panel.shortfallCause === 'spending'
+              ? '⚠️ السبب: الصرف جاوز اللي وصلك.'
+              : '',
+        // لا يُعرض إسقاطُ آخر الشهر فوق نقصٍ قائم اليوم: الأهمّ يغرق في الأقلّ.
+        panel.isShort
+          ? ''
+          : panel.projectedIsShort
+            ? `📉 بوتيرة صرفك الحالية ستنتهي بـ ${money(Math.abs(panel.projectedCoverage), currency)} نقصاً.`
+            : `بوتيرتك الحالية ستنتهي بـ ${money(panel.projectedCoverage, currency)} · ${money(allowance, currency)} يومياً.`,
         '',
         /*
-         * العالمان مصرَّحان دائماً (تدقيق آب 2026: ش1–ش3): الحسبة على الخطة،
-         * والواصل تقدّمٌ نحوها يُذكر بجانبها — فلا يقرأ من يقبض آخرَ الشهر
-         * «انهياراً» أول الشهر، ولا يقلب قيدٌ صغير الحسبةَ كلّها.
+         * العالمان مصرَّحان دائماً: كتلة الواقع ثم كتلة الخطة. والأساس هو
+         * الواصل بعد إلغاء الدخل المتوقَّع (docs/income-actual-plan.md) —
+         * فلا رقمَ هنا يَعِد بمالٍ لا يعرف التطبيق أنه آتٍ.
          */
-        panel.incomeBasis === 'expected'
-          ? `- الدخل المتوقَّع: ${money(panel.income, currency)} · وصل منه ${money(panel.receivedIncome, currency)}` +
-            (panel.incomeGap > 0 ? ` (زائد ${money(panel.incomeGap, currency)})` : '')
-          : `- الدخل: ${money(panel.income, currency)} (بما وصل فعلاً — لا مصادر ثابتة مسجَّلة)`,
+        `- وصلك: ${money(panel.received, currency)}`,
         ...(picture.incomeBySource.length > 1
-          ? picture.incomeBySource.map(
-              (s) =>
-                `  · ${s.name}: وصل ${money(s.amount, currency)}` +
-                (s.expected === null ? ' (متغيّر)' : ` من ${money(s.expected, currency)}`),
-            )
+          ? picture.incomeBySource.map((s) => `  · ${s.name}: ${money(s.amount, currency)}`)
           : []),
+        `- طلع من إيدك فعلاً: ${money(panel.paidOut, currency)}`,
+        `- **بإيدك من دخل الشهر: ${money(panel.inHand, currency)}** (مش رصيدك الكامل — شوف الحسابات)`,
+        `- لسه لازم يطلع: ${money(panel.stillDue, currency)}`,
         `- أقساط الالتزامات: ${money(picture.obligationsTotal, currency)} (${obligations.length} التزام)`,
         `- فواتير متكرّرة: ${money(load.recurring, currency)}`,
         `- أقساط تنتهي: ${money(load.installments, currency)}` +
@@ -305,7 +312,7 @@ export function registerReadTools(server: McpServer, connect: () => Promise<Conn
             : ''),
         `- مصاريف يومية حتى الآن: ${money(expenses.total, currency)} (${expenses.daysElapsed} من ${expenses.daysInMonth} يوماً)`,
         `- هدف الادخار: ${money(picture.savingsTarget, currency)}`,
-        `- **مجموع ما خرج ويخرج: ${money(panel.totalOut, currency)}**`,
+        `- **الحمل الشهري الكامل: ${money(panel.monthlyLoad, currency)}**`,
         /*
          * «ما زال عليك» تحلّ محلّ سطرَي التحذير المحسوبين هنا.
          *
@@ -1695,12 +1702,8 @@ function pendingNote(note: PendingItem['note']): string {
       return 'فات موعده'
     case 'installment':
       return 'قسطك الشهري'
-    case 'expected':
-      return 'متوقَّع من مصدر دخلك'
-    case 'variable':
-      return 'دخل متغيّر — يُسجَّل حين يصل'
-    case 'partial':
-      return `وصل ${note.received} من ${note.expected}`
+    case 'unrecorded':
+      return 'لم تُسجَّل منه قبضةٌ هذا الشهر'
     case 'partialDeposit':
       return `أودعتَ ${note.deposited} من ${note.total} — والمبلغ هو الباقي`
     case 'average':

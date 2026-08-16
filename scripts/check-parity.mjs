@@ -9,10 +9,12 @@
  * القاعدة المزيّفة، ويقارن ما يقرؤه المستخدم بما يسمعه من كلود.
  *
  * المقارنات — كل واحدة كانت عطلاً حقيقياً وقع:
- *   1. «لازم يطلع من حسابك» = committed  (كانا من محرّكين: ش1، ش5)
- *   2. رقم «بيضل معك للصرف» = remaining
+ *   1. «لازم يطلع من حسابك» = monthly_load  (كانا من محرّكين: ش1، ش5)
+ *   2. رقم اللوحة الكبير = coverage
  *   3. قائمة «ضلّ عليك»: نفس الأسماء والمبالغ والترتيب  (س1، ل1، ش13)
- *   4. «بتستنّى دخل»: نفس الباقي  (ش6، ش12)
+ *   4. «مصادر ما سجّلت منها»: نفس المصادر عند الطرفين
+ *   5. «بإيدك من دخل الشهر» ≠ «غير المخصَّص»: رقمان بعالمين وتسميتين
+ *      (خطة docs/income-actual-plan.md — `in_hand` ليس رصيدك)
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -61,11 +63,21 @@ function seed(db, userId) {
     id: 'i1', user_id: userId, name: 'راتب', amount: 9000, frequency: 'monthly',
     is_variable: false, is_active: true, created_at: new Date().toISOString(),
   })
-  // قبضة جزئية: 700 من 9,000 — الأساس يجب أن يبقى الخطة في السطحين.
+  // قبضة جزئية: 700 وصلت من الراتب — والأساس هو ما وصل في السطحين.
   db.income_entries.push({
     id: 'in1', user_id: userId, source_id: 'i1', name: null, amount: 700,
     received_at: iso(new Date(today.getFullYear(), today.getMonth(), 1)),
     note: null, created_at: new Date().toISOString(),
+  })
+  /*
+   * مصدرٌ بلا قبضة — يُشغّل قائمة «مصادر ما سجّلت منها» فعلاً.
+   *
+   * بدونه كانت القائمة فارغةً في الطرفين فيمرّ فحصُها وهو لا يفحص شيئاً،
+   * وهو بالضبط نوع «الأخضر الكاذب» الذي وُلد هذا الملف ليمنعه.
+   */
+  db.income_sources.push({
+    id: 'i2', user_id: userId, name: 'شغل جانبي', amount: 0, frequency: 'monthly',
+    is_variable: true, is_active: true, created_at: new Date().toISOString(),
   })
 
   // فاتورة منصَّفة 400 بمتوسّطٍ 360 من فاتورة الشهر الماضي.
@@ -233,24 +245,32 @@ try {
     .first()
   const mustLeave = parseMoney(await mustLeaveCard.innerText())
   step(
-    'بطاقة «لازم يطلع» = committed عند كلود',
-    mustLeave !== null && mustLeave === overview.committed,
-    `الشاشة ${mustLeave} · كلود ${overview.committed}`,
+    'بطاقة «لازم يطلع» = monthly_load عند كلود',
+    mustLeave !== null && mustLeave === overview.monthly_load,
+    `الشاشة ${mustLeave} · كلود ${overview.monthly_load}`,
   )
 
-  /* 2. رقم اللوحة الكبير = remaining */
+  /* 2. رقم اللوحة الكبير = coverage */
   const panelCard = page
     .locator('section')
-    .filter({ hasText: 'بيضل معك للصرف هالشهر' })
+    .filter({ hasText: 'بعد ما تسدّ اللي عليك هالشهر' })
     .first()
-  const remaining = parseMoney(await panelCard.innerText())
+  const coverage = parseMoney(await panelCard.innerText())
   step(
-    'رقم «بيضل معك للصرف» = remaining عند كلود',
-    remaining !== null && remaining === overview.remaining,
-    `الشاشة ${remaining} · كلود ${overview.remaining}`,
+    'رقم اللوحة الكبير = coverage عند كلود',
+    coverage !== null && coverage === overview.coverage,
+    `الشاشة ${coverage} · كلود ${overview.coverage}`,
   )
 
-  /* 3. «ضلّ عليك»: الأسماء والمبالغ والترتيب */
+  /*
+   * 3. «ضلّ عليك»: الأسماء والمبالغ والترتيب.
+   *
+   * العنوان ثابتٌ في متغيّر لا مكرَّرٌ نصّاً: القسمة عليه هي التي تفصل
+   * القائمتين، وتغييرُ نصٍّ في `i18n` بلا تغييره هنا كان يجعل قسم الدخل
+   * فارغاً فيمرّ الفحص وهو لا يفحص شيئاً.
+   */
+  const INCOME_HEADING = 'مصادر ما سجّلت منها'
+
   const pendingCard = page.locator('section').filter({ hasText: 'ضلّ عليك' }).first()
   const cardText = await pendingCard.innerText()
   /*
@@ -267,7 +287,7 @@ try {
     }
     return out
   }
-  // القائمتان <ul> متتاليتان في البطاقة: «عليك» أولاً ثم «بتستنّى دخل».
+  // القائمتان <ul> متتاليتان في البطاقة: «عليك» أولاً ثم «ما سجّلت منها».
   const screenRows = await amountsOf(pendingCard.locator('ul').nth(0))
   const claudeRows = overview.pending.map((p) => p.amount).filter((a) => a !== null)
   step(
@@ -275,18 +295,25 @@ try {
     JSON.stringify(screenRows) === JSON.stringify(claudeRows),
     `الشاشة [${screenRows}] · كلود [${claudeRows}]`,
   )
-  const dueSection = cardText.split('بتستنّى دخل')[0]
+  const dueSection = cardText.split(INCOME_HEADING)[0]
   for (const item of overview.pending) {
     step(`و«${item.name}» ظاهر في الشاشة كما عند كلود`, dueSection.includes(item.name))
   }
 
-  /* 4. «بتستنّى دخل»: نفس الباقي */
-  const screenIncome = await amountsOf(pendingCard.locator('ul').nth(1))
-  const claudeIncome = overview.pending_income.map((p) => p.amount).filter((a) => a !== null)
+  /*
+   * 4. «مصادر ما سجّلت منها»: نفس المصادر عند الطرفين.
+   *
+   * بلا مبالغ بعد إلغاء الدخل المتوقَّع — التطبيق لا يعرف كم سيصل، يعرف
+   * فقط أنه لم يُسجَّل. فالمقارنة على الأسماء لا على الأرقام.
+   */
+  const incomeSection = cardText.split(INCOME_HEADING)[1] ?? ''
+  for (const item of overview.pending_income) {
+    step(`و«${item.name}» في قائمة الدخل عند الطرفين`, incomeSection.includes(item.name))
+  }
   step(
-    '«بتستنّى دخل»: نفس الباقي عند الطرفين',
-    JSON.stringify(screenIncome) === JSON.stringify(claudeIncome),
-    `الشاشة [${screenIncome}] · كلود [${claudeIncome}]`,
+    'ولا مبلغ مخترَع لدخلٍ لم يصل',
+    overview.pending_income.every((p) => p.amount === null),
+    `${JSON.stringify(overview.pending_income.map((p) => p.amount))}`,
   )
 
   /* والمواضع القديمة بعينها: إيداع الشريك والقسط الجزئي والمتوسّط المنصَّف */
@@ -296,8 +323,26 @@ try {
   step('قسط التأمين باقيه 480 (لا يسدّه الشريك ولا يسقط بالجزئي)', insurance?.amount === 480, `كلود ${insurance?.amount}`)
   const bill = overview.pending.find((p) => p.name === 'كهرباء')
   step('فاتورة الكهرباء بمتوسّطها المنصَّف 180', bill?.amount === 180, `كلود ${bill?.amount}`)
-  const salary = overview.pending_income.find((p) => p.name === 'راتب')
-  step('الراتب المنتظر 8,300 = ‏9,000 − 700', salary?.amount === 8300, `كلود ${salary?.amount}`)
+  /*
+   * 5. حدّ الصدق: «بإيدك من دخل الشهر» ليس الرصيد.
+   *
+   * الرقمان على شاشةٍ واحدة، ومن يخلطهما يظنّ أن ماله ضعف ما هو أو نصفه.
+   * فالفحص يؤكّد أنهما مختلفان **وأن كلّاً منهما مسمّىً بعالمه** — لا أن
+   * يتطابقا، بل ألّا يُعرضا كأنهما رقمٌ واحد اختلف.
+   */
+  const panelText = await panelCard.innerText()
+  step(
+    'اللوحة تصرّح أن «بإيدك» من دخل الشهر لا رصيدك',
+    panelText.includes('من دخل هالشهر'),
+    panelText.slice(0, 120),
+  )
+  const liquidity = await call('sanawi_list_accounts')
+  step(
+    'و«غير المخصَّص» رقمٌ آخر من عالمٍ آخر',
+    typeof liquidity.available_total === 'number' &&
+      liquidity.available_total !== overview.in_hand,
+    `بإيدك ${overview.in_hand} · غير المخصَّص ${liquidity.available_total}`,
+  )
 
   /*
    * 5. الرصيد المقترَح بعد حركات البنك — الشاشة وكلود على نفس النداء.
